@@ -63,5 +63,11 @@
   },
   "engines": {
     "node": ">=20"
+  },
+  "pnpm": {
+    "overrides": {
+      "esbuild": ">=0.25.0",
+      "langsmith": ">=0.4.6"
+    }
   }
 }
