@@ -23,7 +23,7 @@ TeamClaw calls OpenClaw at session start to provision the workspace. OpenClaw (a
 | Field         | Type   | Description |
 |---------------|--------|-------------|
 | `gateway_url` | string | OpenAI-compatible base URL (e.g. `http://localhost:4000/v1`). OpenClaw should call `POST {gateway_url}/chat/completions` with the given `model`. |
-| `model`       | string | Model name (must match a `model_name` in TeamClaw’s `llm-config.yaml`). |
+| `model`       | string | Model name (as configured in your OpenClaw gateway). |
 
 Example (without gateway):
 

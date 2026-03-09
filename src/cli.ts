@@ -5,10 +5,7 @@
  */
 
 import pc from "picocolors";
-import { runWork } from "./work-runner.js";
-import { runWorkWithWeb } from "./work-with-web.js";
-import { runWeb } from "./web/server.js";
-import { runCheck } from "./check.js";
+import { intro, note, outro } from "@clack/prompts";
 import { logger } from "./core/logger.js";
 
 function parseGoalArg(args: string[]): { goal?: string; rest: string[] } {
@@ -67,6 +64,7 @@ function printHelp(): void {
     "  " + exCmd("teamclaw config"),
     "  " + exCmd("teamclaw config get OPENCLAW_TOKEN"),
     "  " + exCmd("teamclaw web"),
+    "  " + exCmd("teamclaw web -p 9000"),
     "",
   ];
   console.log(lines.join("\n"));
@@ -81,17 +79,53 @@ async function main(): Promise<void> {
   const cmd = args[0];
 
   if (cmd === "work") {
-    if (args.includes("--web")) {
-      const withoutWeb = args.filter((a) => a !== "--web");
-      const parsed = parseGoalArg(withoutWeb);
-      await runWorkWithWeb(parsed.goal ? [...parsed.rest, "--goal", parsed.goal] : parsed.rest);
-    } else {
-      const parsed = parseGoalArg(args.slice(1));
-      await runWork({ args: parsed.rest, goal: parsed.goal });
+    const commandArgs = args.slice(1);
+    const hasWebFlag = commandArgs.includes("--web");
+    const workArgs = commandArgs.filter((a) => a !== "--web");
+    const parsed = parseGoalArg(workArgs);
+    const canRenderSpinner = Boolean(process.stdout.isTTY && process.stderr.isTTY);
+
+    if (hasWebFlag) {
+      const { start } = await import("./daemon/manager.js");
+      const result = start({ web: true, gateway: false });
+      const webPort = result.error ? (Number(process.env["WEB_PORT"]) || 8000) : (Number(process.env["WEB_PORT"]) || 8000);
+      if (canRenderSpinner) {
+        intro("TeamClaw Work Session (Web UI)");
+        note(
+          [
+            "Web dashboard is booting in the background.",
+            `It will be available at http://localhost:${webPort} shortly.`,
+            "",
+            "You can also manage it via:",
+            "  teamclaw status   # check web status",
+            "  teamclaw stop     # stop background web server",
+          ].join("\n"),
+          "Web dashboard starting",
+        );
+      } else if (result.error) {
+        logger.warn(result.error);
+      }
+    } else if (canRenderSpinner) {
+      intro("TeamClaw Work Session");
+    }
+
+    const { runWork } = await import("./work-runner.js");
+    await runWork({ args: parsed.rest, goal: parsed.goal });
+    if (canRenderSpinner) {
+      outro("Work session finished.");
     }
   } else if (cmd === "web") {
+    const canRenderSpinner = Boolean(process.stdout.isTTY && process.stderr.isTTY);
+    if (canRenderSpinner) {
+      intro("TeamClaw Web Server");
+    }
+    const { runWeb } = await import("./web/server.js");
     await runWeb(args.slice(1));
+    if (canRenderSpinner) {
+      outro("Web server ready.");
+    }
   } else if (cmd === "check") {
+    const { runCheck } = await import("./check.js");
     await runCheck(args.slice(1));
   } else if (cmd === "onboard") {
     const installDaemon = args.includes("--install-daemon");
@@ -100,7 +134,8 @@ async function main(): Promise<void> {
   } else if (cmd === "config") {
     const sub = args[1];
     if (!sub) {
-      logger.info("Usage: teamclaw config get <KEY> [--raw] | config set <KEY> <VALUE> | config unset <KEY>");
+      const { runConfigDashboard } = await import("./commands/config.js");
+      await runConfigDashboard();
       return;
     }
 
@@ -171,11 +206,8 @@ async function main(): Promise<void> {
     stop();
     logger.success("Stopped web.");
   } else if (cmd === "status") {
-    const { status } = await import("./daemon/manager.js");
-    const s = status();
-    const webPort = s.webPort ?? 8000;
-    logger.info("Web: " + (s.web === "running" ? `running (http://localhost:${webPort})` : "stopped"));
-    logger.info("Gateway: " + s.gateway);
+    const { runStatusCommand } = await import("./commands/status.js");
+    await runStatusCommand();
   } else if (cmd === "lessons") {
     const { runLessonsExport } = await import("./lessons-export.js");
     await runLessonsExport(args.slice(1));

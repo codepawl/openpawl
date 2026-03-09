@@ -19,19 +19,22 @@ export interface ProvisionResult {
 }
 
 export async function provisionOpenClaw(options: ProvisionOptions): Promise<ProvisionResult> {
-  const url = options.workerUrl.replace(/\/$/, "");
+  const base = options.workerUrl.replace(/\/$/, "");
+  if (/^wss?:\/\//i.test(base)) {
+    // WS gateways may not expose HTTP /v1/models; treat transport as provisioned.
+    return { ok: true };
+  }
   const timeoutMs = options.timeoutMs ?? CONFIG.openclawProvisionTimeout;
-  const body: Record<string, unknown> = {
-    project_context: options.projectContext,
-    role: options.role,
-    params: options.params,
-  };
+  const url = base.includes("/v1") ? `${base}/models` : `${base}/v1/models`;
+  const headers: Record<string, string> = {};
+  if (CONFIG.openclawToken) {
+    headers.Authorization = `Bearer ${CONFIG.openclawToken}`;
+  }
 
   try {
-    const res = await fetch(`${url}/provision`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+    const res = await fetch(url, {
+      method: "GET",
+      headers,
       signal: AbortSignal.timeout(timeoutMs),
     });
     if (res.ok) return { ok: true };

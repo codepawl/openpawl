@@ -14,5 +14,7 @@ export default defineConfig({
   dts: false,
   outDir: "dist",
   shims: true,
-  treeshake: true,
+  // Keep bundling deterministic and avoid noisy post-tree-shake "unused import"
+  // warnings emitted for shared externals across multi-entry CLI bundles.
+  treeshake: false,
 });

@@ -8,14 +8,19 @@ import { getWorkerUrlsForTeam, setSessionConfig, clearSessionConfig } from "./co
 import { loadTeamConfig } from "./core/team-config.js";
 import { VectorMemory } from "./core/knowledge-base.js";
 import { PostMortemAnalyst } from "./agents/analyst.js";
-import { CONFIG } from "./core/config.js";
+import { CONFIG, validateOrPromptConfig } from "./core/config.js";
 import { provisionOpenClaw } from "./core/provisioning.js";
-import { validateStartup } from "./core/startup-validation.js";
+import { LLM_UNAVAILABLE_MSG, validateStartup } from "./core/startup-validation.js";
 import { appendFile } from "node:fs/promises";
 import { clearSessionWarnings, getSessionWarnings } from "./core/session-warnings.js";
 import { logger } from "./core/logger.js";
 import { ensureWorkspaceDir } from "./core/workspace-fs.js";
 import type { MemoryBackend } from "./core/config.js";
+import type { GraphState } from "./core/graph-state.js";
+import { log as clackLog, note, spinner } from "@clack/prompts";
+import { runGatewayHealthCheck } from "./core/health.js";
+
+const LOG_FILE_PATH = "/tmp/teamclaw.log";
 
 function log(level: "info" | "warn" | "error", msg: string): void {
   const levelUp = level.toUpperCase() as "INFO" | "WARN" | "ERROR";
@@ -23,6 +28,29 @@ function log(level: "info" | "warn" | "error", msg: string): void {
   else if (level === "warn") logger.warn(msg);
   else logger.error(msg);
   appendFile("work_history.log", logger.plainLine(levelUp, msg) + "\n").catch(() => {});
+}
+
+async function withConsoleRedirect<T>(fn: () => Promise<T> | T): Promise<T> {
+  const originalLog = console.log;
+  const originalWarn = console.warn;
+  const originalError = console.error;
+
+  const write = (level: string, args: unknown[]): void => {
+    const line = `[${new Date().toISOString()}] ${level}: ${args.map((a) => String(a)).join(" ")}\n`;
+    appendFile(LOG_FILE_PATH, line).catch(() => {});
+  };
+
+  console.log = (...args: unknown[]) => write("INFO", args);
+  console.warn = (...args: unknown[]) => write("WARN", args);
+  console.error = (...args: unknown[]) => write("ERROR", args);
+
+  try {
+    return await fn();
+  } finally {
+    console.log = originalLog;
+    console.warn = originalWarn;
+    console.error = originalError;
+  }
 }
 
 function printRunBanner(runId: number, lessonsCount: number, totalRuns: number): void {
@@ -154,13 +182,48 @@ export async function runWork(input: string[] | { args?: string[]; goal?: string
     }
   }
 
+  await validateOrPromptConfig();
+
+  const health = await runGatewayHealthCheck();
+  const pingCheck = health.checks.find((c) => c.name === "ping");
+  const authCheck = health.checks.find((c) => c.name === "auth");
+  const modelCheck = health.checks.find((c) => c.name === "model");
+  const pingPass = pingCheck?.level === "pass";
+  const authPass = authCheck?.level === "pass";
+  const wsModelUnverified =
+    health.protocol === "ws" && health.status === "degraded" && modelCheck?.level === "warn";
+  const fatalConnectivityIssue =
+    !pingPass || (!authPass && health.authStatus === "invalid");
+
+  if (fatalConnectivityIssue) {
+    log("error", `Pre-flight health check failed (${health.status}).`);
+    for (const check of health.checks) {
+      if (check.level === "fail") {
+        log("error", `${check.name}: ${check.message}`);
+      }
+    }
+    if (health.tip) {
+      log("warn", health.tip);
+    } else {
+      log("warn", "Tip: Run `teamclaw config` and verify your OpenClaw gateway settings.");
+    }
+    process.exit(1);
+  }
+  if (wsModelUnverified && pingPass && authPass) {
+    log("warn", "⚠️ Proceeding with unverified model state (WebSocket mode)");
+  }
+
   if (maxRuns > CONFIG.maxRuns) {
     maxRuns = CONFIG.maxRuns;
   }
 
-  log("info", "Start working!");
-  log("info", `   Runs: ${maxRuns}`);
-  log("info", "");
+  const canRenderSpinner = Boolean(process.stdout.isTTY && process.stderr.isTTY);
+
+  if (!canRenderSpinner) {
+    log("info", "Start working!");
+    log("info", `   Runs: ${maxRuns}`);
+    log("info", "");
+  }
 
   await ensureWorkspaceDir(CONFIG.workspaceDir);
 
@@ -197,8 +260,12 @@ export async function runWork(input: string[] | { args?: string[]; goal?: string
     maxRuns,
   });
   if (!result.ok) {
+    if (wsModelUnverified && pingPass && authPass && result.message === LLM_UNAVAILABLE_MSG) {
+      log("warn", "⚠️ Startup HTTP model probe failed; continuing in WebSocket mode");
+    } else {
     log("error", result.message);
     process.exit(1);
+    }
   }
 
   for (let runId = 1; runId <= maxRuns; runId++) {
@@ -212,12 +279,14 @@ export async function runWork(input: string[] | { args?: string[]; goal?: string
         runWarnings.push("Vector DB unavailable or disabled. Using JSON fallback for lessons.");
       }
 
-      if (maxRuns > 1) {
-        printRunBanner(runId, priorLessons.length, maxRuns);
-      } else {
-        log("info", "Initializing work session...");
+      if (!canRenderSpinner) {
+        if (maxRuns > 1) {
+          printRunBanner(runId, priorLessons.length, maxRuns);
+        } else {
+          log("info", "Initializing work session...");
+        }
+        log("info", `   Goal: ${goal}`);
       }
-      log("info", `   Goal: ${goal}`);
 
       const template = teamConfig?.template ?? "game_dev";
       const creativity =
@@ -259,6 +328,17 @@ export async function runWork(input: string[] | { args?: string[]; goal?: string
           if (attempt < 2) await new Promise((res) => setTimeout(res, 2000));
         }
         if (!provisioned) {
+          if (wsModelUnverified && pingPass && authPass) {
+            log(
+              "warn",
+              `⚠️ OpenClaw HTTP model precheck failed; continuing in WebSocket mode${
+                lastError ? ` (${lastError})` : ""
+              }`,
+            );
+            provisioned = true;
+          }
+        }
+        if (!provisioned) {
           throw new Error(
             `❌ OpenClaw Gateway not found. TeamClaw requires OpenClaw to function.${
               lastError ? ` Details: ${lastError}` : ""
@@ -267,10 +347,61 @@ export async function runWork(input: string[] | { args?: string[]; goal?: string
         }
       }
       const orchestration = createTeamOrchestration({ team, workerUrls });
-      const finalState = await orchestration.run({
-        userGoal: goal,
-        ancestralLessons: priorLessons,
-      });
+
+      let finalState: Record<string, unknown>;
+      if (canRenderSpinner) {
+        const sPlan = spinner();
+        sPlan.start("🧠 Coordinator is decomposing the goal...");
+        try {
+          finalState = (await (CONFIG.verboseLogging
+            ? orchestration.run({
+                userGoal: goal,
+                ancestralLessons: priorLessons,
+              })
+            : withConsoleRedirect(() =>
+                orchestration.run({
+                  userGoal: goal,
+                  ancestralLessons: priorLessons,
+                })
+              ))) as Record<string, unknown>;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          sPlan.stop(`❌ Coordinator failed to connect to OpenClaw: ${message}`);
+          throw error;
+        }
+
+        const taskQueue = (finalState.task_queue ?? []) as Record<string, unknown>[];
+        sPlan.stop(`✅ Goal decomposed into ${taskQueue.length} tasks.`);
+
+        for (const t of taskQueue) {
+          const id = (t.task_id as string) ?? "?";
+          const assignedTo = (t.assigned_to as string) ?? "?";
+          const desc = String(t.description ?? "(no description)").slice(0, 60);
+          const status = (t.status as string) ?? "pending";
+
+          const sTask = spinner();
+          sTask.start(`🤖 [${assignedTo}] Executing Task: ${desc}...`);
+          if (status === "completed") {
+            sTask.stop(`✅ [${assignedTo}] Completed: ${id} — ${desc}`);
+          } else if (status === "failed") {
+            const result = (t.result ?? null) as Record<string, unknown> | null;
+            const rawReason = result?.output != null ? String(result.output).trim() : "Unknown failure";
+            const oneLineReason = rawReason.replace(/\s+/g, " ");
+            const shortReason = oneLineReason.slice(0, 120);
+            sTask.stop(`❌ [${assignedTo}] Failed: ${id} — ${desc} | Reason: ${shortReason}${oneLineReason.length > 120 ? "…" : ""}`);
+            if (oneLineReason.length > 120) {
+              clackLog.error(oneLineReason);
+            }
+          } else {
+            sTask.stop(`⚪ [${assignedTo}] Status: ${status} — ${id} — ${desc}`);
+          }
+        }
+      } else {
+        finalState = (await orchestration.run({
+          userGoal: goal,
+          ancestralLessons: priorLessons,
+        })) as Record<string, unknown>;
+      }
 
       const botStats = (finalState as Record<string, unknown>).bot_stats as Record<
         string,
@@ -302,7 +433,7 @@ export async function runWork(input: string[] | { args?: string[]; goal?: string
           ...finalState,
           death_reason: cause,
           generation_id: runId,
-        };
+        } as GraphState;
         const lesson = await analyst.analyzeFailure(stateWithCause);
         workStats.total_lessons_learned += 1;
         const report = analyst.generatePostMortemReport(stateWithCause, lesson);
@@ -344,8 +475,28 @@ export async function runWork(input: string[] | { args?: string[]; goal?: string
   clearSessionConfig();
   if (maxRuns > 1) {
     const lessons = await vectorMemory.getCumulativeLessons();
-    printWorkSummary(workStats, lessons);
+    if (canRenderSpinner) {
+      const oldest = lessons[0] ?? "(none)";
+      const newest = lessons[lessons.length - 1] ?? "(none)";
+      const body = [
+        `Runs: ${workStats.runs_completed} (failures: ${workStats.failures})`,
+        `Longest run: ${workStats.longest_run_cycles} cycles`,
+        `Tasks completed: ${workStats.total_tasks_completed}`,
+        `Lessons learned: ${workStats.total_lessons_learned}`,
+        "",
+        `Total lessons: ${lessons.length}`,
+        `Oldest: "${oldest}"`,
+        `Newest: "${newest}"`,
+      ].join("\n");
+      note(body, "Work sessions complete");
+    } else {
+      printWorkSummary(workStats, lessons);
+    }
   } else {
-    log("info", "Work session finished.");
+    if (canRenderSpinner) {
+      note("Single work session finished.", "Work session complete");
+    } else {
+      log("info", "Work session finished.");
+    }
   }
 }

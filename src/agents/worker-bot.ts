@@ -19,6 +19,25 @@ function log(msg: string): void {
   }
 }
 
+function formatExecutionError(err: unknown): string {
+  if (err instanceof Error) {
+    const stack = err.stack?.trim();
+    return stack && stack.length > 0 ? stack : err.message;
+  }
+  if (err && typeof err === "object") {
+    const obj = err as Record<string, unknown>;
+    const response = obj.response as { data?: unknown; status?: unknown } | undefined;
+    if (response?.data != null) {
+      return `HTTP ${String(response.status ?? "unknown")}: ${String(response.data)}`;
+    }
+    const message = obj.message;
+    if (typeof message === "string" && message.trim().length > 0) {
+      return message;
+    }
+  }
+  return String(err);
+}
+
 export type WorkerTier = "light" | "heavy";
 
 export class WorkerBot {
@@ -157,38 +176,50 @@ export function createWorkerExecuteNode(
           continue;
         }
 
-        const healthy = await worker.healthCheck();
-        if (!healthy) {
+        try {
+          const healthy = await worker.healthCheck();
+          if (!healthy) {
+            out.push({
+              taskId,
+              assignedTo,
+              workerName: worker.bot.name,
+              success: false,
+              output: "Worker unreachable (health check failed)",
+              qualityScore: 0,
+            });
+            continue;
+          }
+
+          const worker_tier = (taskItem.worker_tier as WorkerTier) ?? "light";
+          const result = await worker.executeTask(
+            {
+              task_id: taskId,
+              description,
+              priority: (taskItem.priority as string) ?? "MEDIUM",
+              estimated_cost: 0,
+            },
+            { worker_tier },
+          );
+
+          out.push({
+            taskId,
+            assignedTo,
+            workerName: worker.bot.name,
+            success: result.success,
+            output: result.output,
+            qualityScore: result.quality_score,
+          });
+        } catch (error) {
+          const detail = formatExecutionError(error);
           out.push({
             taskId,
             assignedTo,
             workerName: worker.bot.name,
             success: false,
-            output: "Worker unreachable (health check failed)",
+            output: `Task execution failed: ${detail}`,
             qualityScore: 0,
           });
-          continue;
         }
-
-        const worker_tier = (taskItem.worker_tier as WorkerTier) ?? "light";
-        const result = await worker.executeTask(
-          {
-            task_id: taskId,
-            description,
-            priority: (taskItem.priority as string) ?? "MEDIUM",
-            estimated_cost: 0,
-          },
-          { worker_tier },
-        );
-
-        out.push({
-          taskId,
-          assignedTo,
-          workerName: worker.bot.name,
-          success: result.success,
-          output: result.output,
-          qualityScore: result.quality_score,
-        });
       }
       return out;
     };

@@ -8,7 +8,7 @@ import FastifyCors from "@fastify/cors";
 import FastifyStatic from "@fastify/static";
 import FastifyWebSocket from "@fastify/websocket";
 import { randomUUID } from "node:crypto";
-import * as readline from "node:readline";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createTeamOrchestration } from "../core/simulation.js";
@@ -35,11 +35,29 @@ import { validateStartup } from "../core/startup-validation.js";
 import { getTeamTemplate } from "../core/team-templates.js";
 import { logger } from "../core/logger.js";
 import { ensureWorkspaceDir } from "../core/workspace-fs.js";
+import { log, note, spinner } from "@clack/prompts";
+import { findAvailablePort } from "../core/port.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const isProduction = process.env.NODE_ENV === "production";
-const CLIENT_DIR = path.join(__dirname, "client");
+
+function resolveClientDir(): string | null {
+  const candidates = [
+    // Built runtime: dist/web/server.js -> dist/client
+    path.join(__dirname, "..", "client"),
+    // Source runtime fallback: src/web/server.ts -> src/web/client/dist
+    path.join(__dirname, "client", "dist"),
+    // Legacy fallback
+    path.join(__dirname, "client"),
+  ];
+  for (const p of candidates) {
+    if (existsSync(path.join(p, "index.html"))) {
+      return p;
+    }
+  }
+  return null;
+}
 
 let cliCycles = CONFIG.maxCycles;
 let cliGenerations = CONFIG.maxRuns;
@@ -240,36 +258,58 @@ function getBotActions(nodeName: string, data: Record<string, unknown>): unknown
 }
 
 export async function runWeb(args: string[]): Promise<void> {
+  const canRenderSpinner = Boolean(process.stdout.isTTY && process.stderr.isTTY);
+  const s = canRenderSpinner ? spinner() : null;
+  if (s) {
+    s.start("🌐 Booting up Web UI environment...");
+  }
+
   startTimeoutChecker();
   const result = await validateStartup({ templateId: "game_dev" });
   if (!result.ok) {
+    if (s) {
+      s.stop(`❌ Web server failed to start: ${result.message}`);
+    }
     logger.error(result.message);
     process.exit(1);
   }
 
   await ensureWorkspaceDir(CONFIG.workspaceDir);
+  if (s) {
+    s.message("🌐 Initializing Vector Memory and workspace...");
+  }
 
-  let port = 8000;
+  let requestedPort = 8000;
   for (let i = 0; i < args.length; i++) {
     if ((args[i] === "-p" || args[i] === "--port") && args[i + 1]) {
-      port = parseInt(args[i + 1], 10) || 8000;
+      requestedPort = parseInt(args[i + 1], 10) || 8000;
       i++;
     }
   }
+  const port = await findAvailablePort(requestedPort);
+  if (canRenderSpinner && port !== requestedPort) {
+    log.info(`Port ${requestedPort} is in use, trying ${port}...`);
+  }
 
   const fastify = Fastify({ logger: false });
+  if (s) {
+    s.message("🌐 Configuring HTTP server and routes...");
+  }
   await fastify.register(FastifyCors, {
     origin: isProduction ? false : "http://localhost:5173",
   });
 
-  if (isProduction) {
-    await fastify.register(FastifyStatic, { root: CLIENT_DIR, index: ["index.html"] });
-    fastify.setNotFoundHandler((request, reply) => {
-      if (request.method !== "GET") return reply.status(404).send();
-      if (request.url.startsWith("/api") || request.url.startsWith("/ws"))
-        return reply.status(404).send();
-      return reply.sendFile("index.html", CLIENT_DIR);
+  const clientDir = resolveClientDir();
+  if (clientDir) {
+    await fastify.register(FastifyStatic, {
+      root: clientDir,
+      index: ["index.html"],
+      wildcard: false,
     });
+  } else {
+    logger.warn(
+      "Web client build not found. Run `pnpm run client:build` to serve the dashboard UI.",
+    );
   }
 
   fastify.get("/api/config", async () => {
@@ -686,37 +726,30 @@ export async function runWeb(args: string[]): Promise<void> {
     socket.send(JSON.stringify({ type: "init", config }));
   });
 
-  let bound = false;
-  while (!bound) {
-    try {
-      await fastify.listen({ port, host: "0.0.0.0" });
-      logger.success(`Web UI: http://localhost:${port}`);
-      bound = true;
-    } catch (err) {
-      const e = err as NodeJS.ErrnoException;
-      if (e.code === "EADDRINUSE") {
-        const suggestedPort = port + 1;
-        const answer = await new Promise<string>((resolve) => {
-          const rl = readline.createInterface({
-            input: process.stdin,
-            output: process.stdout,
-          });
-          rl.question(
-            `Port ${port} is in use. Enter new port [${suggestedPort}]: `,
-            (a) => {
-              rl.close();
-              resolve(a.trim());
-            }
-          );
-        });
-        const parsed = answer ? parseInt(answer, 10) : suggestedPort;
-        port =
-          Number.isFinite(parsed) && parsed >= 1 && parsed <= 65535
-            ? parsed
-            : suggestedPort;
-      } else {
-        throw err;
+  // Register SPA fallback AFTER all API/WS routes so backend endpoints keep priority.
+  if (clientDir) {
+    fastify.setNotFoundHandler((request, reply) => {
+      if (request.method !== "GET") return reply.status(404).send();
+      if (request.url.startsWith("/api") || request.url.startsWith("/ws")) {
+        return reply.status(404).send();
       }
+      return reply.sendFile("index.html", clientDir);
+    });
+  }
+
+  try {
+    await fastify.listen({ port, host: "0.0.0.0" });
+    if (s) {
+      const url = `http://localhost:${port}`;
+      s.stop("✅ Web Server is live!");
+      note(`Access the dashboard at: ${url}`, "TeamClaw Web UI");
+    } else {
+      logger.success(`Web UI: http://localhost:${port}`);
     }
+  } catch (err) {
+    if (s) {
+      s.stop(`❌ Web server failed to start: ${String(err)}`);
+    }
+    throw err;
   }
 }

@@ -18,6 +18,7 @@ import { CoordinatorAgent } from "../agents/coordinator.js";
 import { createWorkerBots, createWorkerExecuteNode } from "../agents/worker-bot.js";
 import { getFirstTaskNeedingApproval, createApprovalNode } from "../agents/approval.js";
 import type { ApprovalProvider } from "../agents/approval.js";
+import { UniversalOpenClawAdapter } from "../interfaces/worker-adapter.js";
 import { logger } from "./logger.js";
 
 function log(msg: string): void {
@@ -45,7 +46,13 @@ export class TeamOrchestration {
     const { team, teamTemplateId = "game_dev", workerUrls = {}, approvalProvider = null } = options;
     this.team = team ?? buildTeamFromTemplate(teamTemplateId);
     this.workerBots = createWorkerBots(this.team, workerUrls);
-    this.coordinator = new CoordinatorAgent();
+    const sharedLlmAdapter =
+      Object.values(this.workerBots)[0]?.adapter ??
+      new UniversalOpenClawAdapter({
+        workerUrl: CONFIG.openclawWorkerUrl,
+        authToken: CONFIG.openclawToken,
+      });
+    this.coordinator = new CoordinatorAgent({ llmAdapter: sharedLlmAdapter });
 
     const workerNode = createWorkerExecuteNode(this.workerBots);
     const approvalNode = createApprovalNode(approvalProvider);

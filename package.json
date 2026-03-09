@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "OpenClaw bot team orchestration. Define goals, assign work, and run company-like workflows with LangGraph and RAG.",
   "type": "module",
-  "packageManager": "pnpm@9.15.0",
+  "packageManager": "pnpm@10.31.0",
   "main": "./dist/index.js",
   "bin": {
     "teamclaw": "./dist/cli.js"
@@ -39,19 +39,16 @@
     "@fastify/static": "^8.0.2",
     "@fastify/websocket": "^11.0.1",
     "@lancedb/lancedb": "^0.26.2",
-    "@langchain/core": "^0.3.29",
     "@langchain/langgraph": "^0.2.20",
     "@langchain/langgraph-checkpoint": "^0.0.17",
     "dotenv": "^16.4.5",
     "fastify": "^5.1.0",
     "picocolors": "^1.1.1",
-    "react": "^18.3.1",
-    "ws": "^8.18.0",
+    "ws": "^8.19.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/node": "^22.10.1",
-    "@types/react": "^18.3.12",
     "@types/ws": "^8.18.1",
     "@typescript-eslint/eslint-plugin": "^8.15.0",
     "@typescript-eslint/parser": "^8.15.0",

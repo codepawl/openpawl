@@ -10,6 +10,8 @@ export type RosterEntry = { role: string; count: number; description: string };
 export interface PersistConfig {
   workerUrl: string;
   authToken: string;
+  chatEndpoint?: string;
+  model?: string;
   roster: RosterEntry[];
   workers?: Record<string, string>;
   goal: string;
@@ -38,6 +40,8 @@ export function writeConfig(cfg: PersistConfig): void {
   // OpenClaw connectivity
   setEnv("OPENCLAW_WORKER_URL", cfg.workerUrl);
   setEnv("OPENCLAW_TOKEN", cfg.authToken);
+  setEnv("OPENCLAW_CHAT_ENDPOINT", cfg.chatEndpoint ?? "/v1/chat/completions");
+  setEnv("OPENCLAW_MODEL", cfg.model ?? "");
 
   writeFileSync(envPath, envContent, "utf-8");
 

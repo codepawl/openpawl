@@ -5,11 +5,10 @@
 import type { GraphState } from "../core/graph-state.js";
 import { getRoleTemplate } from "../core/bot-definitions.js";
 import { CONFIG } from "../core/config.js";
-import { generate } from "../core/llm-client.js";
-import { getSessionTemperature } from "../core/config.js";
-import { pushSessionWarning } from "../core/session-warnings.js";
 import { logger } from "../core/logger.js";
 import { parseLlmJson } from "../utils/jsonExtractor.js";
+import type { WorkerAdapter } from "../interfaces/worker-adapter.js";
+import { UniversalOpenClawAdapter } from "../interfaces/worker-adapter.js";
 
 function log(msg: string): void {
   if (CONFIG.verboseLogging) {
@@ -19,8 +18,16 @@ function log(msg: string): void {
 
 export class CoordinatorAgent {
   private taskCounter = 0;
+  private readonly llmAdapter: WorkerAdapter;
+  private static readonly DECOMPOSITION_TIMEOUT_MS = 30_000;
 
-  constructor() {
+  constructor(options: { llmAdapter?: WorkerAdapter } = {}) {
+    this.llmAdapter =
+      options.llmAdapter ??
+      new UniversalOpenClawAdapter({
+        workerUrl: CONFIG.openclawWorkerUrl,
+        authToken: CONFIG.openclawToken,
+      });
     log("🎯 Coordinator Agent initialized");
   }
 
@@ -78,6 +85,9 @@ ${ancestralLessons.map((l, i) => `  ${i + 1}. ${l}`).join("\n")}
 
     const prompt = `You are a team coordinator. Break this goal into 3-6 concrete subtasks.
 Assign each subtask to ONE team member based on their role and skills.
+You MUST decompose the goal into multiple smaller, actionable tasks.
+You MUST create at least one specific task for EACH role provided in the roster.
+Do not output a single monolithic task.
 
 You are confined to a strict workspace directory. Treat this workspace as your root directory.
 Do not attempt to read or write files outside of it.
@@ -98,12 +108,37 @@ Output a JSON array. Each element MUST be an object with exactly three keys:
 - "worker_tier" (string): MUST be either "light" or "heavy". Use "heavy" only when the task explicitly requires UI automation, browser control, or complex GUI interaction; otherwise use "light".
 
 You must include worker_tier for every task. No other keys. No explanations, only the JSON array.
+The array MUST contain at least ${Math.max(3, team.length)} tasks and cover all roster roles.
+You are managing a roster of specific roles. You MUST output an array of MULTIPLE tasks.
+You MUST create at least one distinct task for EACH role in the roster that is relevant to the goal.
+It is strictly FORBIDDEN to output only 1 task if the roster has more than 1 bot.
 
 Example:
 [{"description": "Implement login API", "assigned_to": "bot_0", "worker_tier": "light"}, {"description": "Open browser and click Login button", "assigned_to": "bot_1", "worker_tier": "heavy"}]`;
 
     try {
-      const raw = await generate(prompt, { temperature: getSessionTemperature() });
+      const llmTaskId = `COORD-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+      const llmResult = await Promise.race([
+        this.llmAdapter.executeTask({
+          task_id: llmTaskId,
+          description: prompt,
+          priority: "HIGH",
+          estimated_cost: 0,
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () => reject(new Error("❌ Decomposition timed out - Check Gateway logs")),
+            CoordinatorAgent.DECOMPOSITION_TIMEOUT_MS,
+          ),
+        ),
+      ]);
+      if (!llmResult.success) {
+        throw new Error(String(llmResult.output ?? "Coordinator decomposition failed"));
+      }
+      const raw = String(llmResult.output ?? "").trim();
+      if (!raw) {
+        throw new Error("Coordinator decomposition returned empty output");
+      }
       const items = parseLlmJson<
         Array<{ description?: string; assigned_to?: string; worker_tier?: string }> | {
           description?: string;
@@ -112,9 +147,9 @@ Example:
         }
       >(raw);
       const list = Array.isArray(items) ? items : [items];
-      return list.map((item) => {
+      const parsed: Array<{ description: string; assigned_to: string; worker_tier: "light" | "heavy" }> = list.map((item) => {
         const rawTier = typeof item.worker_tier === "string" ? item.worker_tier.trim().toLowerCase() : "";
-        const tier = rawTier === "heavy" ? "heavy" : "light";
+        const tier: "light" | "heavy" = rawTier === "heavy" ? "heavy" : "light";
         if (rawTier !== "" && rawTier !== "light" && rawTier !== "heavy") {
           log(`Invalid worker_tier "${item.worker_tier}" for task, defaulting to "light"`);
         }
@@ -124,21 +159,38 @@ Example:
           worker_tier: tier,
         };
       });
+      const minTasks = team.length > 1 ? Math.max(3, team.length) : 1;
+      const out: Array<{ description: string; assigned_to: string; worker_tier: "light" | "heavy" }> =
+        parsed.filter((x) => x.description.trim().length > 0);
+      const covered = new Set(out.map((x) => x.assigned_to));
+      for (const bot of team) {
+        const botId = String(bot.id ?? "").trim();
+        if (!botId || covered.has(botId)) continue;
+        out.push({
+          description: `Create a role-specific deliverable for "${goal.slice(0, 120)}"`,
+          assigned_to: botId,
+          worker_tier: "light",
+        });
+        covered.add(botId);
+      }
+      while (out.length < minTasks) {
+        const idx = out.length % Math.max(team.length, 1);
+        const botId = String(team[idx]?.id ?? team[0]?.id ?? "bot_0");
+        out.push({
+          description: `Implement concrete subtask ${out.length + 1} for "${goal.slice(0, 100)}"`,
+          assigned_to: botId,
+          worker_tier: "light",
+        });
+      }
+      return out;
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
-      pushSessionWarning(`LLM decomposition failed (${errMsg}). Used fallback: single task from goal.`);
       const extra =
         CONFIG.verboseLogging
           ? ` goalChars=${goal.length} teamSize=${team.length} lessons=${ancestralLessons.length} timeoutMs=${CONFIG.llmTimeoutMs}`
           : "";
-      log(`⚠️ LLM decomposition failed: ${errMsg}.${extra} Using fallback.`);
-      return [
-        {
-          description: goal.slice(0, 200),
-          assigned_to: (team[0]?.id as string) ?? "bot_0",
-          worker_tier: "light" as const,
-        },
-      ];
+      log(`❌ LLM decomposition failed: ${errMsg}.${extra}`);
+      throw new Error(`Coordinator failed to decompose goal: ${errMsg}`);
     }
   }
 
