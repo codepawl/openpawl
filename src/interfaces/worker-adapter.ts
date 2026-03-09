@@ -1,14 +1,12 @@
 /**
- * WorkerAdapter - Pluggable worker interface for TeamClaw.
- * Supports OpenClaw, Ollama, and generic HTTP endpoints.
- * healthCheck enables fail-fast before assigning tasks.
+ * WorkerAdapter - OpenClaw-only worker interface for TeamClaw.
  */
 
 import type { TaskRequest, TaskResult } from "../core/state.js";
-import { CONFIG, getSessionTemperature } from "../core/config.js";
-import { generate, llmHealthCheck, getEffectiveModel } from "../core/llm-client.js";
+import { CONFIG } from "../core/config.js";
+import { logger } from "../core/logger.js";
 
-export type WorkerAdapterType = "openclaw" | "ollama" | "http";
+export type WorkerAdapterType = "openclaw";
 
 export interface WorkerAdapter {
   executeTask(task: TaskRequest): Promise<TaskResult>;
@@ -18,118 +16,70 @@ export interface WorkerAdapter {
   readonly adapterType: WorkerAdapterType;
 }
 
-function log(msg: string): void {
-  if (CONFIG.verboseLogging) {
-    console.log(`[worker-adapter] ${msg}`);
-  }
+function normalizeWorkerKey(input: string): string {
+  return input.trim().toLowerCase().replace(/[\s_-]+/g, "");
 }
 
-export class OllamaAdapter implements WorkerAdapter {
-  readonly adapterType: WorkerAdapterType = "ollama";
-  readonly agentId: string;
-  tasksProcessed = 0;
-  private llmAvailable = false;
+/**
+ * Resolve worker URL for a bot using prioritized keys:
+ * - exact/prefixed bot id
+ * - exact/prefixed bot name
+ * - exact/prefixed role id
+ * - exact/prefixed role label (for dynamic roster role-based mapping)
+ * Falls back to global OPENCLAW_WORKER_URL.
+ */
+export function resolveTargetUrl(
+  bot: { id: string; name?: string; role_id?: string; worker_url?: string | null; traits?: Record<string, unknown> },
+  workerUrls: Record<string, string> = {},
+  fallbackUrl = CONFIG.openclawWorkerUrl
+): string {
+  const local = (bot.worker_url ?? "").trim();
+  if (local) return local;
 
-  constructor(agentId = "sparki-001") {
-    this.agentId = agentId;
-    this.llmAvailable = true;
-    log(`OllamaAdapter '${agentId}' initialized`);
+  const roleLabel =
+    typeof bot.traits?.["role_label"] === "string" ? String(bot.traits["role_label"]).trim() : "";
+
+  const candidates = [
+    bot.id,
+    `id:${bot.id}`,
+    bot.name ?? "",
+    bot.name ? `name:${bot.name}` : "",
+    bot.role_id ?? "",
+    bot.role_id ? `role:${bot.role_id}` : "",
+    roleLabel,
+    roleLabel ? `role:${roleLabel}` : "",
+  ]
+    .map((x) => x.trim())
+    .filter(Boolean);
+
+  for (const key of candidates) {
+    const direct = workerUrls[key];
+    if (typeof direct === "string" && direct.trim()) return direct.trim();
   }
 
-  async healthCheck(): Promise<boolean> {
-    const ok = await llmHealthCheck();
-    if (!ok) log(`LLM health check failed`);
-    return ok;
+  const normalizedMap = new Map<string, string>();
+  for (const [k, v] of Object.entries(workerUrls)) {
+    if (!v?.trim()) continue;
+    normalizedMap.set(normalizeWorkerKey(k), v.trim());
+  }
+  for (const key of candidates) {
+    const hit = normalizedMap.get(normalizeWorkerKey(key));
+    if (hit) return hit;
   }
 
-  async executeTask(task: TaskRequest): Promise<TaskResult> {
-    log(`OllamaAdapter executing task: ${task.task_id}`);
-    this.tasksProcessed += 1;
+  return (fallbackUrl ?? "").trim();
+}
 
-    let plan: string;
-    let quality: number;
-    let success: boolean;
-
-    try {
-      plan = await this._generatePlanWithLlm(task);
-      if (!plan) {
-        plan = this._getFallbackPlan(task);
-        quality = 0.5;
-        success = true;
-      } else {
-        quality = this._estimateQuality(plan);
-        success = quality > 0.3;
-      }
-    } catch (err) {
-      log(`LLM unavailable: ${err}. Using fallback.`);
-      this.llmAvailable = false;
-      plan = this._getFallbackPlan(task);
-      quality = 0.5;
-      success = true;
-    }
-
-    log(`${success ? "✅" : "❌"} Task ${task.task_id} completed (Quality: ${quality.toFixed(2)})`);
-    return { task_id: task.task_id, success, output: plan, quality_score: quality };
-  }
-
-  private async _generatePlanWithLlm(task: TaskRequest): Promise<string> {
-    const prompt = `You are a software developer AI agent working in a team.
-
-Task ID: ${task.task_id}
-Priority: ${task.priority}
-Description: ${task.description}
-
-Generate a concise development plan (3-5 bullet points). Be specific and practical.
-
-Development Plan:`;
-    try {
-      return await generate(prompt, { temperature: getSessionTemperature() });
-    } catch (err) {
-      this.llmAvailable = false;
-      throw err;
-    }
-  }
-
-  private _getFallbackPlan(task: TaskRequest): string {
-    return `Development Plan for: ${task.description}
-
-1. Analyze requirements and define scope
-2. Design architecture and select technologies
-3. Implement core functionality with tests
-4. Integrate and document
-
-Status: Ready for implementation (fallback mode)`;
-  }
-
-  private _estimateQuality(plan: string): number {
-    if (!plan || plan.length < 50) return 0.2;
-    let quality = 0.5;
-    if (/[12]\.|-|\*/.test(plan)) quality += 0.2;
-    if (plan.length > 200) quality += 0.1;
-    if (plan.length > 400) quality += 0.2;
-    return Math.min(quality, 1);
-  }
-
-  async getStatus(): Promise<Record<string, unknown>> {
-    return {
-      agent_id: this.agentId,
-      type: "ollama",
-      tasks_processed: this.tasksProcessed,
-      llm_available: this.llmAvailable,
-      model: this.llmAvailable ? getEffectiveModel() : "fallback",
-    };
-  }
-
-  async reset(): Promise<void> {
-    this.tasksProcessed = 0;
-    log(`OllamaAdapter '${this.agentId}' reset`);
+function log(msg: string): void {
+  if (CONFIG.verboseLogging) {
+    logger.agent(msg);
   }
 }
 
 const MAX_RETRIES = 3;
 const DEFAULT_TIMEOUT_MS = 120_000;
 
-export class OpenClawAdapter implements WorkerAdapter {
+export class UniversalOpenClawAdapter implements WorkerAdapter {
   readonly adapterType: WorkerAdapterType = "openclaw";
   readonly workerUrl: string;
   private readonly authToken: string | null;
@@ -137,16 +87,20 @@ export class OpenClawAdapter implements WorkerAdapter {
   tasksProcessed = 0;
 
   constructor(options: { workerUrl?: string; authToken?: string | null; timeout?: number } = {}) {
-    this.workerUrl = (options.workerUrl ?? "http://localhost:8001").replace(/\/$/, "");
-    this.authToken = options.authToken ?? null;
+    this.workerUrl = (options.workerUrl ?? CONFIG.openclawWorkerUrl ?? "").replace(/\/$/, "");
+    this.authToken = options.authToken ?? (CONFIG.openclawToken || null);
     this.timeout = options.timeout ?? DEFAULT_TIMEOUT_MS;
-    log(`OpenClawAdapter → ${this.workerUrl}`);
+    log(`UniversalOpenClawAdapter → ${this.workerUrl}`);
   }
 
   async healthCheck(): Promise<boolean> {
+    if (!this.workerUrl) return false;
     try {
+      const headers: Record<string, string> = {};
+      if (this.authToken) headers.Authorization = `Bearer ${this.authToken}`;
       const res = await fetch(`${this.workerUrl}/health`, {
         method: "GET",
+        headers,
         signal: AbortSignal.timeout(5000),
       });
       return res.ok;
@@ -191,7 +145,6 @@ export class OpenClawAdapter implements WorkerAdapter {
         };
 
         this.tasksProcessed += 1;
-        log(`${data.success ? "✅" : "❌"} Worker returned: ${data.task_id}`);
         return {
           task_id: data.task_id,
           success: data.success,
@@ -214,7 +167,9 @@ export class OpenClawAdapter implements WorkerAdapter {
 
   async getStatus(): Promise<Record<string, unknown>> {
     try {
-      const res = await fetch(`${this.workerUrl}/health`);
+      const headers: Record<string, string> = {};
+      if (this.authToken) headers.Authorization = `Bearer ${this.authToken}`;
+      const res = await fetch(`${this.workerUrl}/health`, { headers });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return (await res.json()) as Record<string, unknown>;
     } catch (err) {
@@ -224,7 +179,9 @@ export class OpenClawAdapter implements WorkerAdapter {
 
   async reset(): Promise<void> {
     try {
-      const res = await fetch(`${this.workerUrl}/reset`, { method: "POST" });
+      const headers: Record<string, string> = {};
+      if (this.authToken) headers.Authorization = `Bearer ${this.authToken}`;
+      const res = await fetch(`${this.workerUrl}/reset`, { method: "POST", headers });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       this.tasksProcessed = 0;
     } catch (err) {
@@ -233,146 +190,20 @@ export class OpenClawAdapter implements WorkerAdapter {
   }
 }
 
-export class HttpAdapter implements WorkerAdapter {
-  readonly adapterType: WorkerAdapterType = "http";
-  readonly endpoint: string;
-  private readonly authToken: string | null;
-  private readonly timeout: number;
-
-  constructor(options: {
-    endpoint: string;
-    authToken?: string | null;
-    timeout?: number;
-  }) {
-    this.endpoint = options.endpoint.replace(/\/$/, "");
-    this.authToken = options.authToken ?? null;
-    this.timeout = options.timeout ?? 60_000;
-    log(`HttpAdapter → ${this.endpoint}`);
-  }
-
-  async healthCheck(): Promise<boolean> {
-    try {
-      const healthUrl = `${this.endpoint}/health`;
-      const res = await fetch(healthUrl, {
-        method: "GET",
-        signal: AbortSignal.timeout(5000),
-      });
-      return res.ok;
-    } catch {
-      try {
-        const res = await fetch(this.endpoint, {
-          method: "GET",
-          signal: AbortSignal.timeout(5000),
-        });
-        return res.ok;
-      } catch (err) {
-        log(`HttpAdapter health check failed: ${err}`);
-        return false;
-      }
-    }
-  }
-
-  async executeTask(task: TaskRequest): Promise<TaskResult> {
-    const payload = {
-      task_id: task.task_id,
-      description: task.description,
-      priority: task.priority,
-      estimated_cost: task.estimated_cost ?? 0,
-    };
-
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (this.authToken) headers["Authorization"] = `Bearer ${this.authToken}`;
-
-    const ctrl = new AbortController();
-    const timeout = setTimeout(() => ctrl.abort(), this.timeout);
-
-    try {
-      const res = await fetch(`${this.endpoint}/execute`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(payload),
-        signal: ctrl.signal,
-      });
-      clearTimeout(timeout);
-
-      if (!res.ok) {
-        return {
-          task_id: task.task_id,
-          success: false,
-          output: `HTTP ${res.status}`,
-          quality_score: 0,
-        };
-      }
-
-      const data = (await res.json()) as {
-        task_id?: string;
-        success?: boolean;
-        output?: string;
-        quality_score?: number;
-      };
-
-      return {
-        task_id: data.task_id ?? task.task_id,
-        success: data.success ?? false,
-        output: data.output ?? "",
-        quality_score: data.quality_score ?? 0.5,
-      };
-    } catch (err) {
-      return {
-        task_id: task.task_id,
-        success: false,
-        output: `Request failed: ${err}`,
-        quality_score: 0,
-      };
-    }
-  }
-
-  async getStatus(): Promise<Record<string, unknown>> {
-    try {
-      const res = await fetch(`${this.endpoint}/health`);
-      return res.ok ? ((await res.json()) as Record<string, unknown>) : { status: "error" };
-    } catch {
-      return { status: "unreachable" };
-    }
-  }
-
-  async reset(): Promise<void> {
-    try {
-      await fetch(`${this.endpoint}/reset`, { method: "POST" });
-    } catch {
-      // ignore
-    }
-  }
-}
-
-const AUTH_TOKEN = CONFIG.openclawAuthToken?.trim() || null;
+export const OpenClawAdapter = UniversalOpenClawAdapter;
 
 export function createWorkerAdapter(
-  bot: { id: string; worker_url?: string | null; adapter_type?: WorkerAdapterType },
+  bot: { id: string; name?: string; role_id?: string; worker_url?: string | null; traits?: Record<string, unknown> },
   workerUrls: Record<string, string> = {}
 ): WorkerAdapter {
-  const url = bot.worker_url ?? workerUrls[bot.id];
-  const adapterType = bot.adapter_type ?? (url ? "openclaw" : "ollama");
-
-  if (adapterType === "http" && url) {
-    return new HttpAdapter({ endpoint: url, authToken: AUTH_TOKEN });
-  }
-  if (url) {
-    return new OpenClawAdapter({ workerUrl: url, authToken: AUTH_TOKEN });
-  }
-  return new OllamaAdapter(bot.id);
+  const url = resolveTargetUrl(bot, workerUrls, CONFIG.openclawWorkerUrl);
+  return new UniversalOpenClawAdapter({ workerUrl: url, authToken: CONFIG.openclawToken });
 }
 
 export function createRoutingAdapters(
-  bot: { id: string; worker_url?: string | null; adapter_type?: WorkerAdapterType },
+  bot: { id: string; worker_url?: string | null },
   workerUrls: Record<string, string> = {}
 ): { light: WorkerAdapter; heavy: WorkerAdapter | null } {
-  const light = new OllamaAdapter(bot.id);
-  const url = bot.worker_url ?? workerUrls[bot.id];
-  const adapterType = bot.adapter_type ?? (url ? "openclaw" : "ollama");
-  let heavy: WorkerAdapter | null = null;
-  if (url && adapterType !== "http") {
-    heavy = new OpenClawAdapter({ workerUrl: url, authToken: AUTH_TOKEN });
-  }
-  return { light, heavy };
+  const universal = createWorkerAdapter(bot, workerUrls);
+  return { light: universal, heavy: universal };
 }

@@ -1,6 +1,10 @@
 # Logs
 *.log
 logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
 # Node
 node_modules/
@@ -11,10 +15,24 @@ yarn.lock
 .turbo
 coverage/
 
+# Test & coverage tooling
+.nyc_output/
+*.lcov
+
+# Tool caches
+.mypy_cache/
+__pycache__/
+.eslintcache
+.cache/
+.pnpm-store/
+
 # IDEs
 .vscode/
 .idea/
 .cursor/
+*.code-workspace
+*.iml
+.history/
 *.swp
 *.swo
 *~
@@ -30,6 +48,8 @@ __pycache__/
 # Runtime data
 data/
 work_history.log
+.teamclaw/
+teamclaw
 
 # Environment
 .env

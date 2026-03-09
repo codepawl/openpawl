@@ -12,7 +12,7 @@ import * as readline from "node:readline";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createTeamOrchestration } from "../core/simulation.js";
-import { buildTeamFromTemplate } from "../core/team-templates.js";
+import { buildTeamFromRoster, buildTeamFromTemplate } from "../core/team-templates.js";
 import type { ApprovalPending, ApprovalResponse } from "../agents/approval.js";
 import {
   getWorkerUrlsForTeam,
@@ -33,6 +33,8 @@ import {
 import { provisionOpenClaw } from "../core/provisioning.js";
 import { validateStartup } from "../core/startup-validation.js";
 import { getTeamTemplate } from "../core/team-templates.js";
+import { logger } from "../core/logger.js";
+import { ensureWorkspaceDir } from "../core/workspace-fs.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -241,9 +243,11 @@ export async function runWeb(args: string[]): Promise<void> {
   startTimeoutChecker();
   const result = await validateStartup({ templateId: "game_dev" });
   if (!result.ok) {
-    console.error(result.message);
+    logger.error(result.message);
     process.exit(1);
   }
+
+  await ensureWorkspaceDir(CONFIG.workspaceDir);
 
   let port = 8000;
   for (let i = 0; i < args.length; i++) {
@@ -274,6 +278,7 @@ export async function runWeb(args: string[]): Promise<void> {
     return {
       ...runtime,
       saved_template: teamConfig?.template,
+      saved_roster: teamConfig?.roster,
       saved_goal: teamConfig?.goal,
       saved_worker_url: teamConfig?.worker_url,
     };
@@ -289,11 +294,12 @@ export async function runWeb(args: string[]): Promise<void> {
   fastify.post("/api/config", async (req, reply) => {
     const body = req.body as Record<string, unknown>;
     const template = (body.template as string)?.trim() || "game_dev";
+    const roster = Array.isArray(body.roster) ? (body.roster as unknown[]) : undefined;
     const goal = (body.goal as string)?.trim() || "";
     const workerUrl = (body.worker_url as string)?.trim() || "";
     const workers = body.workers as Record<string, string> | undefined;
     const configPath = path.join(process.cwd(), "teamclaw.config.json");
-    const config: Record<string, unknown> = { template, goal };
+    const config: Record<string, unknown> = roster ? { roster, goal } : { template, goal };
     if (workerUrl) config.worker_url = workerUrl;
     if (workers && Object.keys(workers).length > 0) config.workers = workers;
     try {
@@ -460,16 +466,26 @@ export async function runWeb(args: string[]): Promise<void> {
             workerUrlOverride?.trim() ||
             (teamConfig?.worker_url as string | undefined)?.trim() ||
             CONFIG.openclawWorkerUrl?.trim();
-          if (openclawUrl) {
-            const provisionResult = await provisionOpenClaw({ workerUrl: openclawUrl });
-            if (!provisionResult.ok) {
-              socket.send(
-                JSON.stringify({
-                  type: "provision_error",
-                  error: provisionResult.error ?? "OpenClaw provisioning failed",
-                })
-              );
-            }
+          if (!openclawUrl) {
+            socket.send(
+              JSON.stringify({
+                type: "provision_error",
+                error: "❌ OpenClaw Gateway not found. TeamClaw requires OpenClaw to function.",
+              })
+            );
+            return;
+          }
+          const provisionResult = await provisionOpenClaw({ workerUrl: openclawUrl });
+          if (!provisionResult.ok) {
+            const detail = provisionResult.error ?? "unknown error";
+            logger.warn(`OpenClaw provisioning failed: ${detail}`);
+            socket.send(
+              JSON.stringify({
+                type: "provision_error",
+                error: `❌ OpenClaw Gateway not found. TeamClaw requires OpenClaw to function. Details: ${detail}`,
+              })
+            );
+            return;
           }
 
           const vectorMemory = new VectorMemory(CONFIG.chromadbPersistDir);
@@ -489,7 +505,10 @@ export async function runWeb(args: string[]): Promise<void> {
               })
             );
 
-            const team = buildTeamFromTemplate(teamTemplate);
+            const team =
+              teamConfig?.roster && teamConfig.roster.length > 0
+                ? buildTeamFromRoster(teamConfig.roster)
+                : buildTeamFromTemplate(teamTemplate);
             const workerUrls = getWorkerUrlsForTeam(team.map((b) => b.id), {
               singleUrl: workerUrlOverride || teamConfig?.worker_url,
               workers: workerUrlOverride || teamConfig?.worker_url ? undefined : teamConfig?.workers,
@@ -664,7 +683,7 @@ export async function runWeb(args: string[]): Promise<void> {
   while (!bound) {
     try {
       await fastify.listen({ port, host: "0.0.0.0" });
-      console.log(`Web UI: http://localhost:${port}`);
+      logger.success(`Web UI: http://localhost:${port}`);
       bound = true;
     } catch (err) {
       const e = err as NodeJS.ErrnoException;

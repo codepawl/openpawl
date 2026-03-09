@@ -76,6 +76,30 @@ export function getRoleTemplate(roleId: string): RoleTemplate | null {
   return ROLE_TEMPLATES[roleId] ?? null;
 }
 
+function norm(s: string): string {
+  return s.trim().toLowerCase().replace(/[\s_-]+/g, " ");
+}
+
+/**
+ * Attempts to map a human-facing role label (e.g. "Software Engineer")
+ * to a known internal role id (e.g. "software_engineer") so skills/task_types apply.
+ * Returns null if no known role matches.
+ */
+export function matchRoleIdFromLabel(roleLabel: string): string | null {
+  const raw = roleLabel.trim();
+  if (!raw) return null;
+
+  // Direct id match
+  if (raw in ROLE_TEMPLATES) return raw;
+
+  const n = norm(raw);
+  for (const [id, tpl] of Object.entries(ROLE_TEMPLATES)) {
+    if (norm(tpl.name) === n) return id;
+    if (norm(id) === n) return id;
+  }
+  return null;
+}
+
 export function getMergedTraits(
   roleId: string,
   userOverrides: Record<string, unknown> | null = null
@@ -97,7 +121,7 @@ export const BotDefinitionSchema = z.object({
   role_id: z.string(),
   traits: z.record(z.unknown()).default({}),
   worker_url: z.string().nullable().default(null),
-  adapter_type: z.enum(["openclaw", "ollama", "http"]).optional(),
+  adapter_type: z.enum(["openclaw"]).optional(),
 });
 export type BotDefinition = z.infer<typeof BotDefinitionSchema>;
 

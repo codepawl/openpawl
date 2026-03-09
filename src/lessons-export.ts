@@ -4,6 +4,7 @@
 
 import { VectorMemory } from "./core/knowledge-base.js";
 import { CONFIG } from "./core/config.js";
+import { logger } from "./core/logger.js";
 
 export async function runLessonsExport(args: string[]): Promise<void> {
   const format = args.includes("--format") && args[args.indexOf("--format") + 1]
@@ -28,8 +29,8 @@ export async function runLessonsExport(args: string[]): Promise<void> {
       "---",
       `*Exported ${new Date().toISOString()} | ${lessons.length} lessons*`,
     ].join("\n");
-    console.log(md);
+    logger.plain(md);
   } else {
-    console.log(JSON.stringify(lessons, null, 2));
+    logger.plain(JSON.stringify(lessons, null, 2));
   }
 }

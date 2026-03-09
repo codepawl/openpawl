@@ -3,7 +3,7 @@
  * TeamClaw POSTs context; OpenClaw (optional plugin) configures and returns ready.
  */
 
-import { CONFIG, getGatewayUrl, getTeamModel } from "./config.js";
+import { CONFIG } from "./config.js";
 
 export interface ProvisionOptions {
   workerUrl: string;
@@ -21,19 +21,11 @@ export interface ProvisionResult {
 export async function provisionOpenClaw(options: ProvisionOptions): Promise<ProvisionResult> {
   const url = options.workerUrl.replace(/\/$/, "");
   const timeoutMs = options.timeoutMs ?? CONFIG.openclawProvisionTimeout;
-  const gatewayUrl = getGatewayUrl();
   const body: Record<string, unknown> = {
     project_context: options.projectContext,
     role: options.role,
     params: options.params,
   };
-  if (gatewayUrl) {
-    const base = gatewayUrl.replace(/\/$/, "");
-    body.llm = {
-      gateway_url: base.includes("/v1") ? base : `${base}/v1`,
-      model: getTeamModel(),
-    };
-  }
 
   try {
     const res = await fetch(`${url}/provision`, {

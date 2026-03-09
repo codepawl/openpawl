@@ -8,7 +8,7 @@
 
 ## 1. What TeamClaw Is
 
-TeamClaw orchestrates AI bot teams (programmers, artist, SFX, etc.) via **LangGraph**. Users set a goal; the **Coordinator** decomposes it into subtasks; **WorkerBots** execute tasks via OpenClaw (RealSparki) or Ollama (MockSparki). Optional multi-run mode uses **RAG** (ChromaDB or JSON fallback) to learn from failed runs via **PostMortemAnalyst**.
+TeamClaw orchestrates AI bot teams (programmers, artist, SFX, etc.) via **LangGraph**. Users set a goal; the **Coordinator** decomposes it into subtasks; **WorkerBots** execute tasks via OpenClaw. Optional multi-run mode uses **RAG** (ChromaDB or JSON fallback) to learn from failed runs via **PostMortemAnalyst**.
 
 - **No economics** — pure coordination
 - **No Python** — TypeScript only
@@ -21,8 +21,8 @@ TeamClaw orchestrates AI bot teams (programmers, artist, SFX, etc.) via **LangGr
 | Feature | Status | Notes |
 |--------|--------|-------|
 | LangGraph orchestration | Done | coordinator → worker_execute → increment_cycle loop |
-| Coordinator (Ollama) | Done | Goal decomposition, assigns by role |
-| WorkerBot + Sparki SDK | Done | RealSparki (HTTP), MockSparki (Ollama) |
+| Coordinator (OpenClaw) | Done | Goal decomposition, assigns by role |
+| WorkerBot + Sparki SDK | Done | OpenClaw-backed execution |
 | Team templates | Done | game_dev, startup, content |
 | RAG / VectorMemory | Done | ChromaDB + JSON fallback |
 | PostMortemAnalyst | Done | Failure analysis, heuristic lessons |
@@ -30,7 +30,7 @@ TeamClaw orchestrates AI bot teams (programmers, artist, SFX, etc.) via **LangGr
 | CLI work sessions | Done | `teamclaw work`, `--runs N` for multi-run |
 | Onboarding wizard | Done | Ink TUI: goal, template, worker URL |
 | Config | Done | Web UI, teamclaw.config.json, .env; creativity (0–1) → LLM temp |
-| Docker | Done | teamclaw-web + ChromaDB; `--profile ollama` for Ollama |
+| Docker | Done | teamclaw-web + ChromaDB + OpenClaw worker |
 | CI/CD | Done | pnpm, lint + typecheck + test matrix (Node 20/22, Ubuntu/Windows) |
 | Issue templates | Done | Bug report, feature request |
 | PR template | Done | Basic checklist |
@@ -50,7 +50,7 @@ LangGraph flow:
 **Key files:**
 - `src/core/simulation.ts` — TeamOrchestration, graph definition
 - `src/core/graph-state.ts` — LangGraph Annotation (lastValue reducers)
-- `src/agents/coordinator.ts` — decomposeGoalWithLlm via Ollama
+- `src/agents/coordinator.ts` — decomposeGoalWithLlm via OpenClaw
 - `src/agents/worker-bot.ts` — executeTask, createWorkerExecuteNode
 - `src/agents/analyst.ts` — PostMortemAnalyst, heuristic + RAG lessons
 - `src/interfaces/sparki-sdk.ts` — RealSparki, MockSparki
@@ -81,12 +81,12 @@ LangGraph flow:
 
 ### Configuration
 - Session config: creativity, max_cycles, max_generations, worker_url, goal, team_template
-- Env-only: OLLAMA_MODEL, OLLAMA_BASE_URL, CHROMADB_PERSIST_DIR, OPENCLAW_WORKERS (per-bot URLs)
+- Env-only: CHROMADB_PERSIST_DIR, OPENCLAW_WORKERS (per-bot URLs)
 - LLM model and base URL not exposed in Web UI
 
 ### Testing
 - Vitest; no coverage thresholds
-- No mocks for Ollama/ChromaDB in tests
+- No mocks for OpenClaw/ChromaDB in tests
 - No end-to-end tests (Web or CLI)
 
 ---
@@ -94,7 +94,7 @@ LangGraph flow:
 ## 6. Possible Idea Directions
 
 1. **Testing**
-   - Unit tests for Coordinator, WorkerBot, Analyst with mocked Ollama
+   - Unit tests for Coordinator, WorkerBot, Analyst with mocked OpenClaw responses
    - Integration test for simulation (mock Sparki)
    - E2E for Web UI or CLI flow
 
@@ -104,7 +104,7 @@ LangGraph flow:
    - Human-in-the-loop / approval nodes
 
 3. **Configuration**
-   - Expose OLLAMA_MODEL, OLLAMA_BASE_URL in Web UI
+   - Expose OpenClaw endpoint and auth settings in Web UI
    - Per-bot worker URLs table in UI
    - Validation and clearer error messages for misconfiguration
 
@@ -120,7 +120,7 @@ LangGraph flow:
 
 6. **Production**
    - Health checks, metrics, graceful shutdown
-   - Docker Compose for full stack (TeamClaw + ChromaDB + Ollama + OpenClaw workers)
+   - Docker Compose for full stack (TeamClaw + ChromaDB + OpenClaw workers)
    - Release / versioning process
 
 7. **Extensibility**

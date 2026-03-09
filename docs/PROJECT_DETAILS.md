@@ -15,7 +15,7 @@
 
 - User chooses a **team template** (Game Dev, Startup, Content) and sets a **goal**
 - The **Coordinator** decomposes the goal into subtasks and assigns by role
-- **WorkerBots** execute tasks via OpenClaw (RealSparki) or Ollama (MockSparki for local dev)
+- **WorkerBots** execute tasks via OpenClaw
 - Single run by default; optional multi-run mode learns from failed runs
 - Lessons persist via **ChromaDB** (or JSON fallback) for RAG
 
@@ -69,10 +69,10 @@ coordinator → [has_pending] → worker_execute → recharge → increment_cycl
 | `src/core/knowledge-base.ts` | `VectorMemory` (ChromaDB / JSON fallback) |
 | `src/core/bot-definitions.ts` | Role templates, `BotDefinition` |
 | `src/core/team-templates.ts` | Presets: game_dev, startup, content |
-| `src/agents/coordinator.ts` | Goal decomposition via Ollama |
+| `src/agents/coordinator.ts` | Goal decomposition via OpenClaw |
 | `src/agents/worker-bot.ts` | Task execution via Sparki SDK |
 | `src/agents/analyst.ts` | PostMortemAnalyst for failure analysis |
-| `src/interfaces/sparki-sdk.ts` | RealSparki (OpenClaw HTTP), MockSparki (Ollama) |
+| `src/interfaces/sparki-sdk.ts` | OpenClaw-backed worker SDK integration |
 | `src/web/server.ts` | Fastify + WebSocket, streams workflow events |
 | `src/work-runner.ts` | CLI work sessions with lesson learning |
 
@@ -106,7 +106,7 @@ coordinator → [has_pending] → worker_execute → recharge → increment_cycl
 
 ### First-time Setup (UI-first)
 
-1. **Web UI**: Run `pnpm run web`; set **OpenClaw Worker URL** in the splash before starting. Leave empty for local Ollama.
+1. **Web UI**: Run `pnpm run web`; set **OpenClaw Worker URL** in the splash before starting.
 2. **Config file**: Copy `teamclaw.config.example.json` to `teamclaw.config.json`; set `workers`, `goal`, `creativity` (0–1).
 3. **.env** (advanced): Copy `.env.example` to `.env` for env-only overrides.
 
@@ -114,7 +114,7 @@ coordinator → [has_pending] → worker_execute → recharge → increment_cycl
 
 | Option | Description |
 |--------|-------------|
-| `creativity` | 0–1, maps to LLM temperature (Coordinator + MockSparki) |
+| `creativity` | 0–1, maps to LLM temperature |
 | `max_cycles` | Work session cycle limit |
 | `max_generations` | Max retries with lesson learning |
 | `worker_url` | OpenClaw worker URL (Web UI) |
@@ -123,7 +123,7 @@ coordinator → [has_pending] → worker_execute → recharge → increment_cycl
 
 ### Env-only (`.env`)
 
-- `OLLAMA_MODEL`, `OLLAMA_BASE_URL`, `CREATIVITY` — LLM defaults
+- `CREATIVITY` — LLM default tuning
 - `MAX_CYCLES`, `MAX_RUNS` — Session limits
 - `CHROMADB_PERSIST_DIR` — Vector store path
 - `OPENCLAW_WORKER_URL`, `OPENCLAW_WORKERS` — Fallback worker URLs
@@ -132,4 +132,4 @@ coordinator → [has_pending] → worker_execute → recharge → increment_cycl
 
 ## 7. Tech Stack
 
-LangGraph.js, Zod, Fastify, WebSocket, ChromaDB (optional), Ollama. TypeScript only.
+LangGraph.js, Zod, Fastify, WebSocket, ChromaDB (optional), OpenClaw. TypeScript only.

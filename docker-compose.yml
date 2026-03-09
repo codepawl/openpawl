@@ -1,10 +1,7 @@
 # TeamClaw | Docker Compose
 # Quick start:
 #   docker compose up                         # web + chromadb
-#   docker compose --profile ollama up       # web + chromadb + ollama (local dev)
-#   docker compose --profile openclaw up    # + OpenClaw worker (set OPENCLAW_WORKER_URL=http://openclaw:3000 in .env)
-#   docker compose --profile gateway up     # + LiteLLM (set GATEWAY_URL=http://litellm:4000, TEAM_MODEL=team-default in .env)
-#   docker compose --profile ollama --profile openclaw up   # full stack
+#   docker compose --profile openclaw up     # + OpenClaw worker
 #   docker compose up --build                # rebuild after code changes
 
 services:
@@ -17,15 +14,12 @@ services:
     ports:
       - "${WEB_PORT:-8000}:8000"
     environment:
-      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5-coder:7b}
-      - GATEWAY_URL=${GATEWAY_URL:-}
-      - TEAM_MODEL=${TEAM_MODEL:-team-default}
       - CHROMADB_HOST=chromadb
       - CHROMADB_PORT=8000
       - MAX_CYCLES=${MAX_CYCLES:-10}
       - MAX_RUNS=${MAX_RUNS:-5}
       - OPENCLAW_WORKER_URL=${OPENCLAW_WORKER_URL:-}
+      - OPENCLAW_TOKEN=${OPENCLAW_TOKEN:-}
     depends_on:
       chromadb:
         condition: service_healthy
@@ -54,47 +48,6 @@ services:
     networks:
       - teamclaw-net
 
-  # Ollama LLM Server (optional profile) ─────────────────────────────────
-  ollama:
-    image: ollama/ollama:latest
-    container_name: teamclaw-ollama
-    profiles:
-      - ollama
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama-models:/root/.ollama
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/"]
-      interval: 15s
-      timeout: 5s
-      start_period: 30s
-      retries: 3
-    restart: unless-stopped
-    networks:
-      - teamclaw-net
-
-  # LiteLLM Proxy (optional profile) ──────────────────────────────────────
-  # Single AI gateway for TeamClaw + OpenClaw. Mount llm-config.yaml; set API keys via env.
-  # With profile gateway: set GATEWAY_URL=http://litellm:4000 and TEAM_MODEL=team-default in .env
-  litellm:
-    image: docker.litellm.ai/berriai/litellm:main-stable
-    container_name: teamclaw-litellm
-    profiles:
-      - gateway
-    ports:
-      - "${LITELLM_PORT:-4000}:4000"
-    volumes:
-      - ./llm-config.yaml:/app/config.yaml:ro
-    command: ["--config", "/app/config.yaml", "--port", "4000"]
-    environment:
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-    restart: unless-stopped
-    networks:
-      - teamclaw-net
-
   # OpenClaw Worker (optional profile) ────────────────────────────────────
   # UI/browser automation container. Replace image with your OpenClaw worker image.
   # When using this profile, set OPENCLAW_WORKER_URL=http://openclaw:3000 in .env
@@ -105,7 +58,7 @@ services:
   #   - VNC port (e.g. 6080:6080) to attach a client and watch the bot's virtual display
   # Uncomment or add below as needed. See docs for "OpenClaw in Docker".
   openclaw:
-    image: ${OPENCLAW_IMAGE:-openclaw/worker:latest}
+    image: ${OPENCLAW_IMAGE:?Set OPENCLAW_IMAGE to your OpenClaw worker image (the default openclaw/worker:latest is not published)}
     container_name: teamclaw-openclaw
     profiles:
       - openclaw
@@ -118,8 +71,6 @@ services:
 
 volumes:
   chromadb-data:
-    driver: local
-  ollama-models:
     driver: local
 
 networks:

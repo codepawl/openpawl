@@ -8,10 +8,12 @@ import { CONFIG } from "../core/config.js";
 import { generate } from "../core/llm-client.js";
 import { getSessionTemperature } from "../core/config.js";
 import { pushSessionWarning } from "../core/session-warnings.js";
+import { logger } from "../core/logger.js";
+import { parseLlmJson } from "../utils/jsonExtractor.js";
 
 function log(msg: string): void {
   if (CONFIG.verboseLogging) {
-    console.log(`[coordinator] ${msg}`);
+    logger.agent(msg);
   }
 }
 
@@ -33,14 +35,37 @@ export class CoordinatorAgent {
     ancestralLessons: string[] = []
   ): Promise<Array<{ description: string; assigned_to: string; worker_tier: "light" | "heavy" }>> {
     const roleSummary: string[] = [];
+    const rosterAgg = new Map<string, { count: number; descriptions: Set<string> }>();
+
     for (const bot of team) {
       const bid = (bot?.id as string) ?? "?";
       const rid = (bot?.role_id as string) ?? "?";
       const name = (bot?.name as string) ?? bid;
       const template = getRoleTemplate(rid);
       const skills = template?.task_types ?? [];
-      roleSummary.push(`- ${name} (id=${bid}): role=${rid}, skills=${skills.join(", ")}`);
+
+      const traits = (bot?.traits as Record<string, unknown> | undefined) ?? undefined;
+      const roleLabelRaw = (traits?.role_label as string | undefined)?.trim();
+      const roleDescRaw = (traits?.role_description as string | undefined)?.trim();
+      const roleLabel = roleLabelRaw || template?.name || rid;
+      const roleDesc = roleDescRaw || "";
+
+      const cur = rosterAgg.get(roleLabel) ?? { count: 0, descriptions: new Set<string>() };
+      cur.count += 1;
+      if (roleDesc) cur.descriptions.add(roleDesc);
+      rosterAgg.set(roleLabel, cur);
+
+      roleSummary.push(`- ${name} (id=${bid}): role=${roleLabel}, skills=${skills.join(", ")}`);
     }
+
+    const rosterLines =
+      rosterAgg.size > 0
+        ? Array.from(rosterAgg.entries()).map(([role, v]) => {
+            const desc =
+              v.descriptions.size > 0 ? ` — ${Array.from(v.descriptions).join(" / ")}` : "";
+            return `- ${role} x${v.count}${desc}`;
+          })
+        : [];
 
     const lessonsBlock =
       ancestralLessons.length > 0
@@ -53,9 +78,16 @@ ${ancestralLessons.map((l, i) => `  ${i + 1}. ${l}`).join("\n")}
 
     const prompt = `You are a team coordinator. Break this goal into 3-6 concrete subtasks.
 Assign each subtask to ONE team member based on their role and skills.
+
+You are confined to a strict workspace directory. Treat this workspace as your root directory.
+Do not attempt to read or write files outside of it.
 ${lessonsBlock}
 
 Goal: ${goal}
+
+You are managing a team of ${team.length} bots.
+Your roster:
+${rosterLines.join("\n")}
 
 Team:
 ${roleSummary.join("\n")}
@@ -71,17 +103,14 @@ Example:
 [{"description": "Implement login API", "assigned_to": "bot_0", "worker_tier": "light"}, {"description": "Open browser and click Login button", "assigned_to": "bot_1", "worker_tier": "heavy"}]`;
 
     try {
-      let content = await generate(prompt, { temperature: getSessionTemperature() });
-      if (content.includes("```json")) {
-        content = content.split("```json")[1]?.split("```")[0]?.trim() ?? content;
-      } else if (content.includes("```")) {
-        content = content.split("```")[1]?.split("```")[0]?.trim() ?? content;
-      }
-      const items = JSON.parse(content) as Array<{
-        description?: string;
-        assigned_to?: string;
-        worker_tier?: string;
-      }>;
+      const raw = await generate(prompt, { temperature: getSessionTemperature() });
+      const items = parseLlmJson<
+        Array<{ description?: string; assigned_to?: string; worker_tier?: string }> | {
+          description?: string;
+          assigned_to?: string;
+          worker_tier?: string;
+        }
+      >(raw);
       const list = Array.isArray(items) ? items : [items];
       return list.map((item) => {
         const rawTier = typeof item.worker_tier === "string" ? item.worker_tier.trim().toLowerCase() : "";
@@ -98,7 +127,11 @@ Example:
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       pushSessionWarning(`LLM decomposition failed (${errMsg}). Used fallback: single task from goal.`);
-      log(`⚠️ LLM decomposition failed: ${err}. Using fallback.`);
+      const extra =
+        CONFIG.verboseLogging
+          ? ` goalChars=${goal.length} teamSize=${team.length} lessons=${ancestralLessons.length} timeoutMs=${CONFIG.llmTimeoutMs}`
+          : "";
+      log(`⚠️ LLM decomposition failed: ${errMsg}.${extra} Using fallback.`);
       return [
         {
           description: goal.slice(0, 200),

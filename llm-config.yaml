@@ -1,26 +1,3 @@
-# TeamClaw LiteLLM Gateway – single config for TeamClaw + OpenClaw.
-# Run: teamclaw gateway start  (or docker compose --profile gateway up)
-# Then set GATEWAY_URL=http://localhost:4000 and TEAM_MODEL=team-default (or another model_name below).
-
-model_list:
-  - model_name: team-default
-    litellm_params:
-      model: ollama/qwen3.5:2b
-      api_base: http://localhost:11434
-
-  # Optional cloud models (uncomment and set env vars):
-  # - model_name: gpt-4o
-  #   litellm_params:
-  #     model: openai/gpt-4o
-  #     api_key: os.environ/OPENAI_API_KEY
-  # - model_name: claude-haiku
-  #   litellm_params:
-  #     model: anthropic/claude-3-haiku-20240307
-  #     api_key: os.environ/ANTHROPIC_API_KEY
-  # - model_name: gemini-flash
-  #   litellm_params:
-  #     model: gemini/gemini-1.5-flash
-  #     api_key: os.environ/GEMINI_API_KEY
-
-# general_settings:
-#   master_key: os.environ/LITELLM_MASTER_KEY  # optional; omit for local-only
+# Deprecated in TeamClaw OpenClaw-only mode.
+# TeamClaw no longer manages gateway model configuration.
+# Keep this file only if your external OpenClaw deployment uses it.

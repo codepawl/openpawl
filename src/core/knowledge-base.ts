@@ -1,19 +1,69 @@
 /**
- * Vector Knowledge Base - RAG via ChromaDB and Ollama embeddings.
+ * Vector Knowledge Base - RAG via ChromaDB with local embedding endpoint.
  * Falls back to JSON file when Chroma server is unavailable.
  */
 
-import { ChromaClient, OllamaEmbeddingFunction } from "chromadb";
+import { ChromaClient } from "chromadb";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { CONFIG } from "./config.js";
+import { logger } from "./logger.js";
 
 const LESSONS_COLLECTION = "lessons";
 const EMBEDDING_MODEL = "nomic-embed-text";
+const DEFAULT_EMBEDDING_BASE = "http://localhost:11434";
+
+class HttpEmbeddingFunction {
+  private readonly baseUrl: string;
+  private readonly model: string;
+  private readonly token: string;
+
+  constructor(opts: { baseUrl: string; model: string; token?: string }) {
+    this.baseUrl = opts.baseUrl.replace(/\/+$/, "");
+    this.model = opts.model;
+    this.token = (opts.token ?? "").trim();
+  }
+
+  async generate(texts: string[]): Promise<number[][]> {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (this.token) {
+      headers.Authorization = `Bearer ${this.token}`;
+    }
+    const payload = { model: this.model, input: texts };
+
+    const cleanBase = this.baseUrl.replace(/\/+$/, "");
+    const openAiBase = cleanBase.endsWith("/v1") ? cleanBase : `${cleanBase}/v1`;
+    const candidateEndpoints = [`${openAiBase}/embeddings`, `${cleanBase}/api/embeddings`];
+
+    let lastError = "";
+    for (const endpoint of candidateEndpoints) {
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const detail = await res.text().catch(() => "");
+        lastError = `(${res.status}) ${detail || res.statusText}`;
+        continue;
+      }
+      const json = (await res.json()) as { embeddings?: number[][]; data?: Array<{ embedding?: number[] }> };
+      if (Array.isArray(json.embeddings)) {
+        return json.embeddings;
+      }
+      if (Array.isArray(json.data)) {
+        return json.data.map((item) => item.embedding ?? []).filter((v) => Array.isArray(v));
+      }
+      lastError = "unexpected payload shape";
+    }
+
+    throw new Error(`Embedding endpoint failed: ${lastError}`);
+  }
+}
 
 function log(msg: string): void {
   if (CONFIG.verboseLogging) {
-    console.log(`[vector-memory] ${msg}`);
+    logger.info(msg);
   }
 }
 
@@ -44,9 +94,14 @@ export class VectorMemory {
     const path = `http://${chromaHost}:${chromaPort}`;
 
     try {
-      const embedder = new OllamaEmbeddingFunction({
-        url: CONFIG.llmBaseUrl,
+      const embeddingBase =
+        process.env["EMBEDDING_BASE_URL"] ??
+        process.env["OPENCLAW_WORKER_URL"] ??
+        DEFAULT_EMBEDDING_BASE;
+      const embedder = new HttpEmbeddingFunction({
+        baseUrl: embeddingBase,
         model: EMBEDDING_MODEL,
+        token: process.env["OPENCLAW_TOKEN"],
       });
 
       this.client = new ChromaClient({ path });
@@ -59,9 +114,12 @@ export class VectorMemory {
       this.enabled = true;
       log(`✅ Vector Memory initialized at ${path}`);
     } catch (err) {
-      log(`⚠️ ChromaDB unavailable: ${err}. Using JSON fallback.`);
+      const detail = err instanceof Error ? err.message : String(err);
       this.enabled = false;
       await this._ensureFallbackDir();
+      log(
+        `⚠️ ChromaDB unavailable (${detail}). Vector Memory initialized (Mode: Local JSON Fallback).`,
+      );
     }
   }
 

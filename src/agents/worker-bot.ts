@@ -9,12 +9,13 @@ import type { WorkerAdapter } from "../interfaces/worker-adapter.js";
 import { createRoutingAdapters } from "../interfaces/worker-adapter.js";
 import { CONFIG } from "../core/config.js";
 import type { TaskRequest, TaskResult } from "../core/state.js";
+import { logger } from "../core/logger.js";
 
 const OPENCLAW_UNAVAILABLE_MSG = "OpenClaw required but service unavailable";
 
 function log(msg: string): void {
   if (CONFIG.verboseLogging) {
-    console.log(`[worker] ${msg}`);
+    logger.agent(msg);
   }
 }
 
@@ -23,6 +24,7 @@ export type WorkerTier = "light" | "heavy";
 export class WorkerBot {
   readonly bot: BotDefinition;
   readonly adapter: WorkerAdapter;
+  readonly targetUrl: string;
   private readonly heavyAdapter: WorkerAdapter | null;
 
   constructor(
@@ -33,6 +35,9 @@ export class WorkerBot {
     this.bot = botDefinition;
     this.adapter = adapterImpl;
     this.heavyAdapter = heavyAdapterImpl;
+    this.targetUrl = typeof (adapterImpl as { workerUrl?: unknown }).workerUrl === "string"
+      ? String((adapterImpl as { workerUrl?: string }).workerUrl ?? "").trim()
+      : "";
     log(`🤖 WorkerBot '${this.bot.name}' (${this.bot.role_id}) initialized`);
   }
 
@@ -99,106 +104,153 @@ export function createWorkerExecuteNode(
       return { last_action: "No pending tasks", __node__: "worker_execute" };
     }
 
-    const taskItem = pending[0];
-    const taskId = (taskItem.task_id as string) ?? "?";
-    const assignedTo = (taskItem.assigned_to as string) ?? "";
-    const description = (taskItem.description as string) ?? "";
-
-    const worker = workerBots[assignedTo];
-    if (!worker) {
-      log(`Worker ${assignedTo} not found, skipping task ${taskId}`);
-      const idx = taskQueue.findIndex((t) => t.task_id === taskId);
-      if (idx >= 0) {
-        taskQueue[idx] = {
-          ...taskItem,
-          status: "failed",
-          result: { success: false, output: "Worker not found" },
-        };
-      }
-      return { task_queue: taskQueue, last_action: "Worker not found", __node__: "worker_execute" };
-    }
-
-    const healthy = await worker.healthCheck();
-    if (!healthy) {
-      log(`Worker ${assignedTo} unreachable, failing task ${taskId}`);
-      const idx = taskQueue.findIndex((t) => t.task_id === taskId);
-      if (idx >= 0) {
-        taskQueue[idx] = {
-          ...taskItem,
-          status: "failed",
-          result: { success: false, output: "Worker unreachable (health check failed)" },
-        };
-      }
-      const stats = botStats[assignedTo] ?? { tasks_completed: 0, tasks_failed: 0 };
-      botStats[assignedTo] = {
-        ...stats,
-        tasks_failed: ((stats.tasks_failed as number) ?? 0) + 1,
-      };
-      return {
-        task_queue: taskQueue,
-        bot_stats: botStats,
-        last_action: `Worker ${assignedTo} unreachable`,
-        __node__: "worker_execute",
-      };
-    }
-
-    const taskIdx = taskQueue.findIndex((t) => t.task_id === taskId);
-    if (taskIdx >= 0) {
-      taskQueue[taskIdx] = {
-        ...taskQueue[taskIdx],
-        status: "in_progress",
-        in_progress_at: new Date().toISOString(),
-      };
-    }
-
-    const stats = botStats[assignedTo] ?? {
-      tasks_completed: 0,
-      tasks_failed: 0,
+    type ExecutionRecord = {
+      taskId: string;
+      assignedTo: string;
+      workerName: string;
+      success: boolean;
+      output: string;
+      qualityScore: number;
     };
 
-    const worker_tier = (taskItem.worker_tier as WorkerTier) ?? "light";
-    const result = await worker.executeTask(
-      {
-        task_id: taskId,
-        description,
-        priority: (taskItem.priority as string) ?? "MEDIUM",
-        estimated_cost: 0,
-      },
-      { worker_tier }
+    const groups = new Map<string, Array<Record<string, unknown>>>();
+    const records: ExecutionRecord[] = [];
+    const uiMessages: string[] = [];
+
+    for (const taskItem of pending) {
+      const taskId = (taskItem.task_id as string) ?? "?";
+      const assignedTo = (taskItem.assigned_to as string) ?? "";
+      const worker = workerBots[assignedTo];
+      if (!worker) {
+        records.push({
+          taskId,
+          assignedTo,
+          workerName: assignedTo,
+          success: false,
+          output: "Worker not found",
+          qualityScore: 0,
+        });
+        continue;
+      }
+      const key = worker.targetUrl || "__shared_default__";
+      const bucket = groups.get(key) ?? [];
+      bucket.push(taskItem);
+      groups.set(key, bucket);
+    }
+
+    const processGroup = async (items: Array<Record<string, unknown>>): Promise<ExecutionRecord[]> => {
+      const out: ExecutionRecord[] = [];
+      for (const taskItem of items) {
+        const taskId = (taskItem.task_id as string) ?? "?";
+        const assignedTo = (taskItem.assigned_to as string) ?? "";
+        const description = (taskItem.description as string) ?? "";
+        const worker = workerBots[assignedTo];
+        if (!worker) {
+          out.push({
+            taskId,
+            assignedTo,
+            workerName: assignedTo,
+            success: false,
+            output: "Worker not found",
+            qualityScore: 0,
+          });
+          continue;
+        }
+
+        const healthy = await worker.healthCheck();
+        if (!healthy) {
+          out.push({
+            taskId,
+            assignedTo,
+            workerName: worker.bot.name,
+            success: false,
+            output: "Worker unreachable (health check failed)",
+            qualityScore: 0,
+          });
+          continue;
+        }
+
+        const worker_tier = (taskItem.worker_tier as WorkerTier) ?? "light";
+        const result = await worker.executeTask(
+          {
+            task_id: taskId,
+            description,
+            priority: (taskItem.priority as string) ?? "MEDIUM",
+            estimated_cost: 0,
+          },
+          { worker_tier },
+        );
+
+        out.push({
+          taskId,
+          assignedTo,
+          workerName: worker.bot.name,
+          success: result.success,
+          output: result.output,
+          qualityScore: result.quality_score,
+        });
+      }
+      return out;
+    };
+
+    const groupedResults = await Promise.all(
+      Array.from(groups.values()).map((items) => processGroup(items)),
     );
-    botStats[assignedTo] = {
-      ...stats,
-      tasks_completed: ((stats.tasks_completed as number) ?? 0) + (result.success ? 1 : 0),
-      tasks_failed: ((stats.tasks_failed as number) ?? 0) + (result.success ? 0 : 1),
-    };
+    for (const arr of groupedResults) records.push(...arr);
 
-    if (taskIdx >= 0) {
-      taskQueue[taskIdx] = {
-        ...taskQueue[taskIdx],
-        status: result.success ? "completed" : "failed",
-        result,
+    const byTask = new Map(records.map((r) => [r.taskId, r]));
+    for (let i = 0; i < taskQueue.length; i++) {
+      const id = (taskQueue[i].task_id as string) ?? "";
+      const rec = byTask.get(id);
+      if (!rec) continue;
+      taskQueue[i] = {
+        ...taskQueue[i],
+        status: rec.success ? "completed" : "failed",
+        result: {
+          task_id: rec.taskId,
+          success: rec.success,
+          output: rec.output,
+          quality_score: rec.qualityScore,
+        },
       };
+      const stats = botStats[rec.assignedTo] ?? { tasks_completed: 0, tasks_failed: 0 };
+      botStats[rec.assignedTo] = {
+        ...stats,
+        tasks_completed: ((stats.tasks_completed as number) ?? 0) + (rec.success ? 1 : 0),
+        tasks_failed: ((stats.tasks_failed as number) ?? 0) + (rec.success ? 0 : 1),
+      };
+      uiMessages.push(`🤖 ${rec.workerName}: ${rec.taskId} ${rec.success ? "✅" : "❌"}`);
     }
 
     const agentMessages = [...(state.agent_messages ?? [])];
-    if (result.success && result.output) {
+    for (const rec of records) {
+      if (!rec.success || !rec.output) continue;
       const ts = new Date().toTimeString().slice(0, 8);
-      const summary = result.output.slice(0, 120).replace(/\n/g, " ");
+      const summary = rec.output.slice(0, 120).replace(/\n/g, " ");
       agentMessages.push({
-        from_bot: assignedTo,
+        from_bot: rec.assignedTo,
         to_bot: "all",
-        content: `Task ${taskId} done: ${summary}${result.output.length > 120 ? "..." : ""}`,
+        content: `Task ${rec.taskId} done: ${summary}${rec.output.length > 120 ? "..." : ""}`,
         timestamp: ts,
       });
     }
+
+    const avgQuality =
+      records.length > 0
+        ? Math.round(
+            (records.reduce((sum, r) => sum + (Number.isFinite(r.qualityScore) ? r.qualityScore : 0), 0) /
+              records.length) *
+              100,
+          )
+        : 0;
 
     return {
       task_queue: taskQueue,
       bot_stats: botStats,
       agent_messages: agentMessages,
-      last_action: `Worker ${assignedTo} completed ${taskId}`,
-      messages: [`🤖 ${worker.bot.name}: ${taskId} ${result.success ? "✅" : "❌"}`],
-      last_quality_score: Math.round(result.quality_score * 100),
+      last_action: `Dispatched ${records.length} task(s) across ${groups.size} gateway group(s)`,
+      messages: uiMessages,
+      last_quality_score: avgQuality,
       __node__: "worker_execute",
     };
   };

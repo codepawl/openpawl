@@ -4,6 +4,7 @@
  */
 
 import { CONFIG } from "../core/config.js";
+import { logger } from "../core/logger.js";
 
 export interface TaskCompletePayload {
   task_id: string;
@@ -42,10 +43,10 @@ async function postWebhook(
       signal: AbortSignal.timeout(5000),
     });
     if (!res.ok) {
-      console.warn(`[webhook] POST ${url} failed: ${res.status}`);
+      logger.warn(`Webhook POST ${url} failed: ${res.status}`);
     }
   } catch (err) {
-    console.warn(`[webhook] ${url}: ${err}`);
+    logger.warn(`Webhook ${url}: ${err}`);
   }
 }
 

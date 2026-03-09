@@ -6,6 +6,7 @@
 import { spawn } from "node:child_process";
 import WebSocket from "ws";
 import { loadTeamConfig } from "./core/team-config.js";
+import { logger } from "./core/logger.js";
 
 const DEFAULT_GOAL = "Build a small 2D game with sprite assets and sound effects";
 const DEFAULT_PORT = 8000;
@@ -52,12 +53,12 @@ function waitForWebSocket(url: string, timeoutMs = 5000): Promise<WebSocket> {
   });
 }
 
-async function runViaWeb(port: number): Promise<number> {
+async function runViaWeb(port: number, goalOverride?: string): Promise<number> {
   const baseUrl = `http://localhost:${port}`;
   const wsUrl = `ws://localhost:${port}/ws`;
 
   const teamConfig = await loadTeamConfig();
-  const goal = teamConfig?.goal?.trim() || DEFAULT_GOAL;
+  const goal = goalOverride?.trim() || teamConfig?.goal?.trim() || DEFAULT_GOAL;
   const teamTemplate = teamConfig?.template ?? "game_dev";
 
   const ws = await waitForWebSocket(wsUrl);
@@ -74,15 +75,15 @@ async function runViaWeb(port: number): Promise<number> {
         if (type === "session_complete") {
           clearTimeout(timeout);
           ws.close();
-          console.log("\nWork session complete. Dashboard remains at " + baseUrl);
+          logger.success("Work session complete. Dashboard remains at " + baseUrl);
           resolve(0);
         } else if (type === "error") {
-          console.error("Error:", msg.message);
+          logger.error(String(msg.message ?? "Unknown error"));
         } else if (type === "generation_start") {
           const gen = msg.generation as number;
           const max = msg.max_generations as number;
           const lessons = (msg.lessons_count as number) ?? 0;
-          console.log(`\n▶ Generation ${gen}/${max} starting (${lessons} lessons loaded)`);
+          logger.info(`Generation ${gen}/${max} starting (${lessons} lessons loaded)`);
         } else if (type === "generation_end") {
           const gen = msg.generation as number;
           const outcome = msg.outcome as string;
@@ -90,27 +91,28 @@ async function runViaWeb(port: number): Promise<number> {
           const done = (fs.tasks_completed as number) ?? 0;
           const failed = (fs.tasks_failed as number) ?? 0;
           const cycles = (fs.cycles_survived as number) ?? 0;
-          console.log(`▶ Generation ${gen} complete (${outcome}) — ${cycles} cycles, ${done} tasks done, ${failed} failed`);
+          logger.info(`Generation ${gen} complete (${outcome}) — ${cycles} cycles, ${done} tasks done, ${failed} failed`);
         } else if (type === "cycle_start") {
           const cycle = msg.cycle as number;
           const max = msg.max_cycles as number;
-          console.log(`  Cycle ${cycle}/${max}`);
+          logger.info(`Cycle ${cycle}/${max}`);
         } else if (type === "node_event") {
           const node = msg.node as string;
           const d = (msg.data ?? {}) as Record<string, unknown>;
           if (node === "coordinator") {
             const pending = (d.pending_count as number) ?? 0;
-            console.log(`  Coordinator: ${pending} tasks pending`);
+            logger.info(`Coordinator: ${pending} tasks pending`);
           } else if (node === "worker_execute") {
             const success = d.success as boolean;
             const desc = (d.description as string)?.slice(0, 60) ?? "task";
             const icon = success ? "✓" : "✗";
-            console.log(`  ${icon} ${desc}${desc.length >= 60 ? "…" : ""}`);
+            logger.info(`${icon} ${desc}${(desc?.length ?? 0) >= 60 ? "…" : ""}`);
           }
         } else if (type === "provision_error") {
-          console.warn("OpenClaw provision failed (continuing with Ollama):", msg.error);
+          logger.error(String(msg.error ?? "❌ OpenClaw Gateway not found. TeamClaw requires OpenClaw to function."));
+          process.exit(1);
         } else if (type === "session_cancelled") {
-          console.log("\nSession cancelled.");
+          logger.info("Session cancelled.");
         }
       } catch {
         // ignore parse errors
@@ -135,19 +137,25 @@ async function runViaWeb(port: number): Promise<number> {
       })
     );
     ws.send(JSON.stringify({ command: "resume" }));
-    console.log(`Work session started. View live at ${baseUrl}`);
-    console.log(`Goal: ${goal}`);
+    logger.info(`Work session started. View live at ${baseUrl}`);
+    logger.info(`Goal: ${goal}`);
   });
 }
 
 export async function runWorkWithWeb(args: string[]): Promise<void> {
   let port = DEFAULT_PORT;
   let spawnWeb = true;
+  let goalOverride: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
     if ((args[i] === "--port" || args[i] === "-p") && args[i + 1]) {
       port = parseInt(args[i + 1], 10) || DEFAULT_PORT;
       i++;
+    } else if ((args[i] === "--goal" || args[i] === "-g") && args[i + 1]) {
+      goalOverride = String(args[i + 1]);
+      i++;
+    } else if ((args[i] ?? "").startsWith("--goal=")) {
+      goalOverride = String(args[i]).slice("--goal=".length);
     } else if (args[i] === "--no-start") {
       spawnWeb = false;
     }
@@ -190,16 +198,14 @@ export async function runWorkWithWeb(args: string[]): Promise<void> {
         }
       }
       if (spawnPort === port) {
-        console.error(
-          "Default port busy and no free port found. Stop the existing server and try again."
-        );
+        logger.error("Default port busy and no free port found. Stop the existing server and try again.");
         process.exit(1);
       }
     }
     const spawnUrl = `http://localhost:${spawnPort}`;
     const spawnUp = await waitForHttp(spawnUrl, 2);
     if (!spawnUp) {
-      console.log("Starting web server...");
+      logger.info("Starting web server...");
       serverProc = spawn(
         process.execPath,
         [process.argv[1], "web", "-p", String(spawnPort)],
@@ -212,12 +218,12 @@ export async function runWorkWithWeb(args: string[]): Promise<void> {
       );
       serverProc.unref();
       serverProc.on("error", (err) => {
-        console.error("Failed to start web server:", err);
+        logger.error("Failed to start web server: " + String(err));
         process.exit(1);
       });
       const ready = await waitForHttp(spawnUrl, 40);
       if (!ready) {
-        console.error("Web server did not become ready in time.");
+        logger.error("Web server did not become ready in time.");
         serverProc.kill();
         process.exit(1);
       }
@@ -226,9 +232,9 @@ export async function runWorkWithWeb(args: string[]): Promise<void> {
   }
 
   try {
-    await runViaWeb(port);
+    await runViaWeb(port, goalOverride);
   } catch (err) {
-    console.error(err);
+    logger.error(String(err));
     killSpawnedServer();
     process.exit(1);
   }

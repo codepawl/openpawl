@@ -3,7 +3,7 @@
  */
 
 import { createTeamOrchestration } from "./core/simulation.js";
-import { buildTeamFromTemplate } from "./core/team-templates.js";
+import { buildTeamFromRoster, buildTeamFromTemplate } from "./core/team-templates.js";
 import { getWorkerUrlsForTeam, setSessionConfig, clearSessionConfig } from "./core/config.js";
 import { loadTeamConfig } from "./core/team-config.js";
 import { VectorMemory } from "./core/knowledge-base.js";
@@ -14,12 +14,15 @@ import { validateStartup } from "./core/startup-validation.js";
 import { appendFile } from "node:fs/promises";
 import { clearSessionWarnings, getSessionWarnings } from "./core/session-warnings.js";
 import { ensureChromaDB } from "./core/ensure-chromadb.js";
+import { logger } from "./core/logger.js";
+import { ensureWorkspaceDir } from "./core/workspace-fs.js";
 
 function log(level: "info" | "warn" | "error", msg: string): void {
-  const ts = new Date().toTimeString().slice(0, 8);
-  const out = `${ts} | ${level.toUpperCase().padEnd(8)} | ${msg}`;
-  console.log(out);
-  appendFile("work_history.log", out + "\n").catch(() => {});
+  const levelUp = level.toUpperCase() as "INFO" | "WARN" | "ERROR";
+  if (level === "info") logger.info(msg);
+  else if (level === "warn") logger.warn(msg);
+  else logger.error(msg);
+  appendFile("work_history.log", logger.plainLine(levelUp, msg) + "\n").catch(() => {});
 }
 
 function printRunBanner(runId: number, lessonsCount: number, totalRuns: number): void {
@@ -32,7 +35,7 @@ function printRunBanner(runId: number, lessonsCount: number, totalRuns: number):
 ║                                                                   ║
 ╚═══════════════════════════════════════════════════════════════════╝
 `;
-  console.log(banner);
+  logger.plain(banner);
 }
 
 function printSingleRunSummary(
@@ -83,7 +86,7 @@ function printSingleRunSummary(
 
   lines.push("");
   lines.push("═".repeat(70));
-  console.log(lines.join("\n"));
+  logger.plain(lines.join("\n"));
 }
 
 function printWorkSummary(
@@ -124,16 +127,18 @@ Prior run wisdom:
 ║                    LESSONS ACCUMULATED                            ║
 ╚═══════════════════════════════════════════════════════════════════╝
 `;
-  console.log(banner);
-  lessons.forEach((l, i) => console.log(`  ${i + 1}. ${l}`));
-  console.log("\n" + "=".repeat(70));
-  console.log("History saved to:");
-  console.log("   • work_history.log");
-  console.log("   • data/vector_store/");
-  console.log("=".repeat(70) + "\n");
+  logger.plain(banner);
+  lessons.forEach((l, i) => logger.plain(`  ${i + 1}. ${l}`));
+  logger.plain("\n" + "=".repeat(70));
+  logger.plain("History saved to:");
+  logger.plain("   • work_history.log");
+  logger.plain("   • data/vector_store/");
+  logger.plain("=".repeat(70) + "\n");
 }
 
-export async function runWork(args: string[]): Promise<void> {
+export async function runWork(input: string[] | { args?: string[]; goal?: string } = []): Promise<void> {
+  const args = Array.isArray(input) ? input : (input.args ?? []);
+  const goalOverride = Array.isArray(input) ? undefined : input.goal?.trim();
   let maxRuns = 1;
   let clearLegacy = false;
 
@@ -157,6 +162,8 @@ export async function runWork(args: string[]): Promise<void> {
   log("info", `   Runs: ${maxRuns}`);
   log("info", "");
 
+  await ensureWorkspaceDir(CONFIG.workspaceDir);
+
   await ensureChromaDB((msg) => log("info", `   ${msg}`));
 
   const vectorMemory = new VectorMemory(CONFIG.chromadbPersistDir);
@@ -179,7 +186,7 @@ export async function runWork(args: string[]): Promise<void> {
 
   const teamConfigForValidation = await loadTeamConfig();
   const result = await validateStartup({
-    templateId: teamConfigForValidation?.template ?? "game_dev",
+    templateId: teamConfigForValidation?.template,
     maxCycles: CONFIG.maxCycles,
     maxRuns,
   });
@@ -191,7 +198,7 @@ export async function runWork(args: string[]): Promise<void> {
   for (let runId = 1; runId <= maxRuns; runId++) {
     try {
       const teamConfig = await loadTeamConfig();
-      const goal = teamConfig?.goal?.trim() || defaultGoal;
+      const goal = goalOverride || teamConfig?.goal?.trim() || defaultGoal;
       const priorLessons = await vectorMemory.getCumulativeLessons();
       const runWarnings: string[] = [];
       clearSessionWarnings();
@@ -216,14 +223,21 @@ export async function runWork(args: string[]): Promise<void> {
         gateway_url: teamConfig?.gateway_url,
         team_model: teamConfig?.team_model,
       });
-      const team = buildTeamFromTemplate(template);
+      const team =
+        teamConfig?.roster && teamConfig.roster.length > 0
+          ? buildTeamFromRoster(teamConfig.roster)
+          : buildTeamFromTemplate(template);
       const workerUrls = getWorkerUrlsForTeam(team.map((b) => b.id), {
         workers: teamConfig?.workers,
       });
       const openclawUrl =
         CONFIG.openclawWorkerUrl?.trim() || (Object.values(workerUrls)[0] as string | undefined);
-      if (openclawUrl && runId === 1) {
+      if (!openclawUrl) {
+        throw new Error("❌ OpenClaw Gateway not found. TeamClaw requires OpenClaw to function.");
+      }
+      if (runId === 1) {
         let provisioned = false;
+        let lastError: string | undefined;
         for (let attempt = 1; attempt <= 2; attempt++) {
           const r = await provisionOpenClaw({ workerUrl: openclawUrl });
           if (r.ok) {
@@ -231,11 +245,19 @@ export async function runWork(args: string[]): Promise<void> {
             log("info", "OpenClaw provisioned");
             break;
           }
+          lastError = r.error;
+          log(
+            "warn",
+            `OpenClaw provisioning attempt ${attempt} failed: ${r.error ?? "unknown error"}`,
+          );
           if (attempt < 2) await new Promise((res) => setTimeout(res, 2000));
         }
         if (!provisioned) {
-          runWarnings.push("OpenClaw provisioning failed. Tasks run with Ollama only (no browser automation).");
-          log("warn", "OpenClaw provisioning failed. Continuing in light-only mode.");
+          throw new Error(
+            `❌ OpenClaw Gateway not found. TeamClaw requires OpenClaw to function.${
+              lastError ? ` Details: ${lastError}` : ""
+            }`,
+          );
         }
       }
       const orchestration = createTeamOrchestration({ team, workerUrls });
@@ -278,7 +300,7 @@ export async function runWork(args: string[]): Promise<void> {
         const lesson = await analyst.analyzeFailure(stateWithCause);
         workStats.total_lessons_learned += 1;
         const report = analyst.generatePostMortemReport(stateWithCause, lesson);
-        console.log(report);
+        logger.plain(report);
         log("info", `Lesson learned. Proceeding to run ${runId + 1}`);
         log("info", "");
       } else if (failed && maxRuns === 1) {
@@ -307,7 +329,7 @@ export async function runWork(args: string[]): Promise<void> {
         log("warn", "\nWork session interrupted by user");
       } else {
         log("error", `Fatal error in run ${runId}: ${err}`);
-        console.error(err);
+        logger.error(String(err));
       }
       break;
     }

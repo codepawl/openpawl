@@ -8,10 +8,11 @@ import type { TaskRequest, TaskResult } from "../core/state.js";
 import { CONFIG, getSessionTemperature } from "../core/config.js";
 import { generate, getEffectiveModel } from "../core/llm-client.js";
 import { createWorkerAdapter } from "./worker-adapter.js";
+import { logger } from "../core/logger.js";
 
 function log(msg: string): void {
   if (CONFIG.verboseLogging) {
-    console.log(`[sparki] ${msg}`);
+    logger.agent(msg);
   }
 }
 

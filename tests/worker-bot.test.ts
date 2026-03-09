@@ -10,7 +10,7 @@ import type { GraphState } from "../src/core/graph-state.js";
 
 function createMockAdapter(result: TaskResult): WorkerAdapter {
   return {
-    adapterType: "ollama",
+    adapterType: "openclaw",
     executeTask: vi.fn(() => Promise.resolve(result)),
     healthCheck: vi.fn(() => Promise.resolve(true)),
     getStatus: vi.fn(() => Promise.resolve({})),
@@ -243,6 +243,6 @@ describe("createWorkerExecuteNode", () => {
     const q = out.task_queue as Array<{ status: string; result: { success: boolean } }>;
     expect(q[0].status).toBe("failed");
     expect(q[0].result?.success).toBe(false);
-    expect(out.last_action).toBe("Worker not found");
+    expect(String(out.last_action)).toContain("Dispatched");
   });
 });

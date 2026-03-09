@@ -8,7 +8,7 @@ import { llmHealthCheck } from "./llm-client.js";
 import { getTeamTemplate } from "./team-templates.js";
 
 export const LLM_UNAVAILABLE_MSG =
-  "LLM unavailable. Start Ollama (e.g. ollama serve) or set GATEWAY_URL to a running LiteLLM proxy, then try again.";
+  "❌ OpenClaw Gateway not found. TeamClaw requires OpenClaw to function.";
 
 const StartupConfigSchema = z.object({
   templateId: z.string().optional(),

@@ -32,7 +32,7 @@ Each LangGraph node receives `GraphState` and returns `Partial<GraphState>` (onl
 ### RAG & LLM
 
 - `VectorMemory`: ChromaDB or `data/vector_store/lessons_fallback.json`.
-- Ollama at `localhost:11434`, model `qwen2.5-coder:7b`. Configure via `.env`.
+- TeamClaw routes LLM requests through OpenClaw using `OPENCLAW_WORKER_URL` and `OPENCLAW_TOKEN`.
 
 ## Build, Test, and Development Commands
 
@@ -78,7 +78,7 @@ Each LangGraph node receives `GraphState` and returns `Partial<GraphState>` (onl
 ## Security & Configuration Tips
 
 - Never commit or publish real credentials, tokens, or live config. Use placeholders in docs, tests, and examples.
-- `.env` from `.env.example`; ChromaDB, Ollama, OpenClaw worker URLs configurable.
+- `.env` from `.env.example`; OpenClaw and ChromaDB settings are configurable.
 
 ## Agent-Specific Notes
 
@@ -94,4 +94,4 @@ Each LangGraph node receives `GraphState` and returns `Partial<GraphState>` (onl
 
 ## Tech Stack
 
-LangGraph.js, Zod, Fastify + WebSocket, ChromaDB (optional), Ollama. No Python.
+LangGraph.js, Zod, Fastify + WebSocket, ChromaDB (optional), OpenClaw Gateway. No Python.

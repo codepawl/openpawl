@@ -18,10 +18,11 @@ import { CoordinatorAgent } from "../agents/coordinator.js";
 import { createWorkerBots, createWorkerExecuteNode } from "../agents/worker-bot.js";
 import { getFirstTaskNeedingApproval, createApprovalNode } from "../agents/approval.js";
 import type { ApprovalProvider } from "../agents/approval.js";
+import { logger } from "./logger.js";
 
 function log(msg: string): void {
   if (CONFIG.verboseLogging) {
-    console.log(`[orchestration] ${msg}`);
+    logger.agent(msg);
   }
 }
 

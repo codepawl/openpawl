@@ -23,18 +23,15 @@ function envBool(key: string, defaultVal: boolean): boolean {
   return ["true", "1", "yes"].includes(val.toLowerCase());
 }
 
-const gatewayUrlRaw = env("GATEWAY_URL", "") as string;
 export const CONFIG = {
-  gatewayUrl: gatewayUrlRaw?.trim() ? gatewayUrlRaw.replace(/\/$/, "") : "",
-  teamModel: env("TEAM_MODEL", "team-default") as string,
-  llmModel: env("OLLAMA_MODEL", "qwen2.5-coder:7b") as string,
   llmTemperature: env("LLM_TEMPERATURE", 0.7) as number,
   creativity: env("CREATIVITY", 0.5) as number,
-  llmBaseUrl: env("OLLAMA_BASE_URL", "http://localhost:11434") as string,
   llmTimeoutMs: env("LLM_TIMEOUT_MS", 120_000) as number,
 
   maxCycles: env("MAX_CYCLES", 10) as number,
   maxRuns: env("MAX_RUNS", env("MAX_GENERATIONS", 5) as number) as number,
+
+  workspaceDir: env("WORKSPACE_DIR", "./teamclaw-workspace") as string,
 
   chromadbPersistDir: env("CHROMADB_PERSIST_DIR", "data/vector_store") as string,
   verboseLogging: envBool("VERBOSE_LOGGING", true),
@@ -49,7 +46,7 @@ export const CONFIG = {
       return {} as Record<string, string>;
     }
   })(),
-  openclawAuthToken: env("OPENCLAW_AUTH_TOKEN", "") as string,
+  openclawToken: (process.env["OPENCLAW_TOKEN"] ?? process.env["OPENCLAW_AUTH_TOKEN"] ?? "").trim(),
   openclawProvisionTimeout: env("OPENCLAW_PROVISION_TIMEOUT", 30_000) as number,
 
   webhookOnTaskComplete: env("WEBHOOK_ON_TASK_COMPLETE", "") as string,
@@ -98,11 +95,15 @@ export function getSessionTemperature(): number {
 }
 
 export function getGatewayUrl(): string {
-  return sessionOverrides.gateway_url?.trim() ?? CONFIG.gatewayUrl;
+  return sessionOverrides.gateway_url?.trim() ?? "";
 }
 
 export function getTeamModel(): string {
-  return sessionOverrides.team_model?.trim() ?? CONFIG.teamModel;
+  return sessionOverrides.team_model?.trim() ?? "team-default";
+}
+
+export function getWorkspaceDir(): string {
+  return CONFIG.workspaceDir;
 }
 
 export function getWorkerUrlsForTeam(

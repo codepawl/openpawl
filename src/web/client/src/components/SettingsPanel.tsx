@@ -179,7 +179,7 @@ export function SettingsPanel() {
             type="text"
             value={workerUrl}
             onChange={(e) => setWorkerUrl(e.target.value)}
-            placeholder="http://localhost:8001 — leave empty for Ollama (local dev)"
+            placeholder="http://localhost:8001"
             className="w-full rounded border border-gray-300 dark:border-gray-500 bg-white dark:bg-gray-700 px-3 py-2 text-sm text-gray-800 dark:text-gray-200"
           />
         </div>

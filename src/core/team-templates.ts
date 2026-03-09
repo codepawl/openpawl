@@ -4,7 +4,13 @@
 
 import { z } from "zod";
 import type { BotDefinition } from "./bot-definitions.js";
-import { getRoleTemplate } from "./bot-definitions.js";
+import { getRoleTemplate, matchRoleIdFromLabel } from "./bot-definitions.js";
+
+export type RosterEntry = {
+  role: string;
+  count: number;
+  description: string;
+};
 
 export const RoleSlotSchema = z.object({
   role_id: z.string(),
@@ -86,6 +92,52 @@ export function buildTeamFromTemplate(
         name: displayName,
         role_id: slot.role_id,
         traits: slotTraits,
+        worker_url: null,
+      });
+      idx++;
+    }
+  }
+
+  return bots;
+}
+
+function slugify(s: string): string {
+  return s
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 40);
+}
+
+export function buildTeamFromRoster(
+  roster: RosterEntry[],
+  prefix = "bot"
+): BotDefinition[] {
+  const bots: BotDefinition[] = [];
+  let idx = 0;
+
+  for (const entry of roster) {
+    const roleLabel = entry.role.trim();
+    const count = Math.max(1, Math.floor(entry.count));
+    const desc = entry.description?.trim?.() ? String(entry.description).trim() : "";
+
+    const knownRoleId = matchRoleIdFromLabel(roleLabel);
+    const roleId = knownRoleId ?? `custom_${slugify(roleLabel) || "role"}`;
+    const rt = getRoleTemplate(roleId);
+    const baseName = roleLabel || rt?.name || roleId;
+
+    for (let i = 0; i < count; i++) {
+      const botId = `${prefix}_${idx}`;
+      const displayName = count > 1 ? `${baseName} ${i + 1}` : baseName;
+      bots.push({
+        id: botId,
+        name: displayName,
+        role_id: roleId,
+        traits: {
+          role_label: roleLabel || baseName,
+          role_description: desc,
+        },
         worker_url: null,
       });
       idx++;
