@@ -106,7 +106,8 @@ async function main(): Promise<void> {
     if (cmd === "work") {
         const commandArgs = args.slice(1);
         const hasWebFlag = commandArgs.includes("--web");
-        const workArgs = commandArgs.filter((a) => a !== "--web");
+        const hasNoDashboardFlag = commandArgs.includes("--no-dashboard");
+        const workArgs = commandArgs.filter((a) => a !== "--web" && a !== "--no-dashboard");
         const parsed = parseGoalArg(workArgs);
         const canRenderSpinner = Boolean(
             process.stdout.isTTY && process.stderr.isTTY,
@@ -139,7 +140,7 @@ async function main(): Promise<void> {
         }
 
         const { runWork } = await import("./work-runner.js");
-        await runWork({ args: parsed.rest, goal: parsed.goal });
+        await runWork({ args: parsed.rest, goal: parsed.goal, openDashboard: !hasNoDashboardFlag });
         if (canRenderSpinner) {
             outro("Work session finished.");
         }

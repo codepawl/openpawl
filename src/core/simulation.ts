@@ -42,17 +42,18 @@ export class TeamOrchestration {
     teamTemplateId?: string;
     workerUrls?: Record<string, string>;
     approvalProvider?: ApprovalProvider | null;
+    workspacePath?: string;
   } = {}) {
-    const { team, teamTemplateId = "game_dev", workerUrls = {}, approvalProvider = null } = options;
+    const { team, teamTemplateId = "game_dev", workerUrls = {}, approvalProvider = null, workspacePath } = options;
     this.team = team ?? buildTeamFromTemplate(teamTemplateId);
-    this.workerBots = createWorkerBots(this.team, workerUrls);
+    this.workerBots = createWorkerBots(this.team, workerUrls, workspacePath);
     const sharedLlmAdapter =
       Object.values(this.workerBots)[0]?.adapter ??
       new UniversalOpenClawAdapter({
         workerUrl: CONFIG.openclawWorkerUrl,
         authToken: CONFIG.openclawToken,
       });
-    this.coordinator = new CoordinatorAgent({ llmAdapter: sharedLlmAdapter });
+    this.coordinator = new CoordinatorAgent({ llmAdapter: sharedLlmAdapter, workspacePath });
 
     const workerNode = createWorkerExecuteNode(this.workerBots);
     const approvalNode = createApprovalNode(approvalProvider);
@@ -173,6 +174,7 @@ export function createTeamOrchestration(options: {
   teamTemplateId?: string;
   workerUrls?: Record<string, string>;
   approvalProvider?: ApprovalProvider | null;
+  workspacePath?: string;
 } = {}): TeamOrchestration {
   return new TeamOrchestration(options);
 }

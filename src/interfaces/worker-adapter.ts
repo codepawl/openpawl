@@ -76,15 +76,17 @@ export class UniversalOpenClawAdapter implements WorkerAdapter {
   private baseUrl: string;
   private authToken: string | null;
   private timeout: number;
+  private workspacePath: string;
   tasksProcessed = 0;
 
-  constructor(options: { workerUrl?: string; authToken?: string | null; timeout?: number } = {}) {
+  constructor(options: { workerUrl?: string; authToken?: string | null; timeout?: number; workspacePath?: string } = {}) {
     let url = (options.workerUrl ?? CONFIG.openclawWorkerUrl ?? "").trim() || "http://127.0.0.1:18789";
     url = url.replace(/^ws:/i, "http:").replace(/^wss:/i, "https:").replace(/\/$/, "");
     this.baseUrl = url;
     this.authToken = options.authToken ?? (CONFIG.openclawToken || null);
     this.timeout = options.timeout ?? DEFAULT_TIMEOUT_MS;
-    log(`UniversalOpenClawAdapter (HTTP) → ${this.baseUrl}/v1/chat/completions`);
+    this.workspacePath = options.workspacePath ?? process.cwd();
+    log(`UniversalOpenClawAdapter (HTTP) → ${this.baseUrl}/v1/chat/completions (workspace: ${this.workspacePath})`);
   }
 
   private async chatComplete(messages: { role: string; content: string }[]): Promise<string> {
@@ -139,10 +141,15 @@ export class UniversalOpenClawAdapter implements WorkerAdapter {
 
   async executeTask(task: TaskRequest): Promise<TaskResult> {
     try {
+      const systemPrompt = `You are a helpful AI assistant. Execute the given task and return the result.
+You are confined to a strict workspace directory. Treat this workspace as your root directory.
+WORKSPACE PATH: ${this.workspacePath}
+All file operations (read, write, create, edit) MUST be performed within this directory.
+Do not attempt to read or write files outside of it.`;
       const messages = [
         {
           role: "system",
-          content: "You are a helpful AI assistant. Execute the given task and return the result.",
+          content: systemPrompt,
         },
         {
           role: "user",
@@ -190,16 +197,18 @@ export const OpenClawAdapter = UniversalOpenClawAdapter;
 
 export function createWorkerAdapter(
   bot: { id: string; name?: string; role_id?: string; worker_url?: string | null; traits?: Record<string, unknown> },
-  workerUrls: Record<string, string> = {}
+  workerUrls: Record<string, string> = {},
+  workspacePath?: string
 ): WorkerAdapter {
   const url = resolveTargetUrl(bot, workerUrls, CONFIG.openclawWorkerUrl);
-  return new UniversalOpenClawAdapter({ workerUrl: url, authToken: CONFIG.openclawToken });
+  return new UniversalOpenClawAdapter({ workerUrl: url, authToken: CONFIG.openclawToken, workspacePath });
 }
 
 export function createRoutingAdapters(
   bot: { id: string; worker_url?: string | null },
-  workerUrls: Record<string, string> = {}
+  workerUrls: Record<string, string> = {},
+  workspacePath?: string
 ): { light: WorkerAdapter; heavy: WorkerAdapter | null } {
-  const universal = createWorkerAdapter(bot, workerUrls);
+  const universal = createWorkerAdapter(bot, workerUrls, workspacePath);
   return { light: universal, heavy: universal };
 }

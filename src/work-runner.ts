@@ -22,6 +22,7 @@ import {
     validateStartup,
 } from "./core/startup-validation.js";
 import { appendFile } from "node:fs/promises";
+import path from "node:path";
 import {
     clearSessionWarnings,
     getSessionWarnings,
@@ -30,19 +31,27 @@ import { logger } from "./core/logger.js";
 import { ensureWorkspaceDir } from "./core/workspace-fs.js";
 import type { MemoryBackend } from "./core/config.js";
 import type { GraphState } from "./core/graph-state.js";
+import type { BotDefinition } from "./core/bot-definitions.js";
 import { log as clackLog, note, spinner } from "@clack/prompts";
 import { runGatewayHealthCheck } from "./core/health.js";
+import open from "open";
 
-const LOG_FILE_PATH = "/tmp/teamclaw.log";
+let DEBUG_LOG_PATH = "";
+
+function getBotName(botId: string, team: BotDefinition[]): string {
+    const bot = team.find((b) => b.id === botId);
+    return bot?.name ?? botId;
+}
 
 function log(level: "info" | "warn" | "error", msg: string): void {
     const levelUp = level.toUpperCase() as "INFO" | "WARN" | "ERROR";
     if (level === "info") logger.info(msg);
     else if (level === "warn") logger.warn(msg);
     else logger.error(msg);
-    appendFile("work_history.log", logger.plainLine(levelUp, msg) + "\n").catch(
-        () => {},
-    );
+    appendFile(
+        path.join(CONFIG.workspaceDir, "work_history.log"),
+        logger.plainLine(levelUp, msg) + "\n",
+    ).catch(() => {});
 }
 
 async function withConsoleRedirect<T>(fn: () => Promise<T> | T): Promise<T> {
@@ -51,8 +60,12 @@ async function withConsoleRedirect<T>(fn: () => Promise<T> | T): Promise<T> {
     const originalError = console.error;
 
     const write = (level: string, args: unknown[]): void => {
-        const line = `[${new Date().toISOString()}] ${level}: ${args.map((a) => String(a)).join(" ")}\n`;
-        appendFile(LOG_FILE_PATH, line).catch(() => {});
+        const line = `[${new Date().toISOString()}] ${level}: ${args
+            .map((a) => String(a))
+            .join(" ")}\n`;
+        if (DEBUG_LOG_PATH) {
+            appendFile(DEBUG_LOG_PATH, line).catch(() => {});
+        }
     };
 
     console.log = (...args: unknown[]) => write("INFO", args);
@@ -89,6 +102,7 @@ function printSingleRunSummary(
     goal: string,
     finalState: Record<string, unknown>,
     warnings: string[],
+    team: BotDefinition[],
 ): void {
     const taskQueue = (finalState.task_queue ?? []) as Record<
         string,
@@ -118,22 +132,24 @@ function printSingleRunSummary(
                 60,
             );
             const status = (t.status as string) ?? "?";
-            const assignedTo = (t.assigned_to as string) ?? "?";
+            const botId = (t.assigned_to as string) ?? "?";
+            const botName = getBotName(botId, team);
             const result = t.result;
-            const resultPreview =
+            const rawOutput =
                 result != null &&
                 typeof result === "object" &&
                 "output" in result
-                    ? String(
-                          (result as Record<string, unknown>).output ?? "",
-                      ).slice(0, 80)
+                    ? String((result as Record<string, unknown>).output ?? "")
                     : result != null
-                      ? String(result).slice(0, 80)
+                      ? String(result)
                       : null;
-            lines.push(`  • ${id} [${status}] ${assignedTo}: ${desc}`);
-            if (resultPreview)
+            const resultPreview = rawOutput
+                ? rawOutput.slice(0, 200).replace(/\n/g, " ")
+                : null;
+            lines.push(`  • ${id} [${status}] ${botName}: ${desc}`);
+            if (resultPreview && rawOutput)
                 lines.push(
-                    `    Output: ${resultPreview}${resultPreview.length >= 80 ? "…" : ""}`,
+                    `    Output: ${resultPreview}${rawOutput.length > 200 ? "…" : ""}`,
                 );
         }
     }
@@ -197,10 +213,11 @@ Prior run wisdom:
 }
 
 export async function runWork(
-    input: string[] | { args?: string[]; goal?: string } = [],
+    input: string[] | { args?: string[]; goal?: string; openDashboard?: boolean } = [],
 ): Promise<void> {
     const args = Array.isArray(input) ? input : (input.args ?? []);
     const goalOverride = Array.isArray(input) ? undefined : input.goal?.trim();
+    const shouldOpenDashboard = !Array.isArray(input) && input.openDashboard !== false;
     let maxRuns = 1;
     let clearLegacy = false;
     let forceDiscover = false;
@@ -274,6 +291,7 @@ export async function runWork(
     }
 
     await ensureWorkspaceDir(CONFIG.workspaceDir);
+    DEBUG_LOG_PATH = path.join(CONFIG.workspaceDir, "teamclaw-debug.log");
 
     const memoryConfig = await loadTeamConfig();
     const selectedMemoryBackend: MemoryBackend =
@@ -428,7 +446,16 @@ export async function runWork(
                     );
                 }
             }
-            const orchestration = createTeamOrchestration({ team, workerUrls });
+            const orchestration = createTeamOrchestration({ team, workerUrls, workspacePath: process.cwd() });
+
+            if (shouldOpenDashboard && runId === 1) {
+                const dashboardUrl = "http://127.0.0.1:18789/__openclaw__/canvas/";
+                try {
+                    await open(dashboardUrl);
+                } catch {
+                    logger.info(`Dashboard available at ${dashboardUrl}`);
+                }
+            }
 
             let finalState: Record<string, unknown>;
             if (canRenderSpinner) {
@@ -465,21 +492,22 @@ export async function runWork(
 
                 for (const t of taskQueue) {
                     const id = (t.task_id as string) ?? "?";
-                    const assignedTo = (t.assigned_to as string) ?? "?";
+                    const botId = (t.assigned_to as string) ?? "?";
+                    const botName = getBotName(botId, team);
                     const desc = String(
                         t.description ?? "(no description)",
                     ).slice(0, 60);
-                    const status = (t.status as string) ?? "pending";
+                    const taskStatus = (t.status as string) ?? "pending";
+
+                    clackLog.step(
+                        `▶ [${botName}] Started: ${id} — ${desc}...`,
+                    );
 
                     const sTask = spinner();
-                    sTask.start(
-                        `🤖 [${assignedTo}] Executing Task: ${desc}...`,
-                    );
-                    if (status === "completed") {
-                        sTask.stop(
-                            `✅ [${assignedTo}] Completed: ${id} — ${desc}`,
-                        );
-                    } else if (status === "failed") {
+                    sTask.start(`Executing: ${id}...`);
+                    if (taskStatus === "completed") {
+                        sTask.stop(`✅ [${botName}] Completed: ${id}`);
+                    } else if (taskStatus === "failed") {
                         const result = (t.result ?? null) as Record<
                             string,
                             unknown
@@ -491,15 +519,13 @@ export async function runWork(
                         const oneLineReason = rawReason.replace(/\s+/g, " ");
                         const shortReason = oneLineReason.slice(0, 120);
                         sTask.stop(
-                            `❌ [${assignedTo}] Failed: ${id} — ${desc} | Reason: ${shortReason}${oneLineReason.length > 120 ? "…" : ""}`,
+                            `❌ [${botName}] Failed: ${id} | Reason: ${shortReason}${oneLineReason.length > 120 ? "…" : ""}`,
                         );
                         if (oneLineReason.length > 120) {
                             clackLog.error(oneLineReason);
                         }
                     } else {
-                        sTask.stop(
-                            `⚪ [${assignedTo}] Status: ${status} — ${id} — ${desc}`,
-                        );
+                        sTask.stop(`⚪ [${botName}] ${taskStatus}: ${id}`);
                     }
                 }
             } else {
@@ -579,6 +605,7 @@ export async function runWork(
                         goal,
                         finalState as Record<string, unknown>,
                         allWarnings,
+                        team,
                     );
                 }
                 log("info", "");

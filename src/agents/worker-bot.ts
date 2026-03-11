@@ -101,11 +101,12 @@ export class WorkerBot {
 
 export function createWorkerBots(
   team: BotDefinition[],
-  workerUrls: Record<string, string> = {}
+  workerUrls: Record<string, string> = {},
+  workspacePath?: string
 ): Record<string, WorkerBot> {
   const bots: Record<string, WorkerBot> = {};
   for (const bot of team) {
-    const { light, heavy } = createRoutingAdapters(bot, workerUrls);
+    const { light, heavy } = createRoutingAdapters(bot, workerUrls, workspacePath);
     bots[bot.id] = new WorkerBot(bot, light, heavy);
   }
   return bots;
