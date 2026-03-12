@@ -15,13 +15,20 @@ import {
 import { loadTeamConfig } from "./core/team-config.js";
 import { VectorMemory } from "./core/knowledge-base.js";
 import { PostMortemAnalyst } from "./agents/analyst.js";
-import { CONFIG, validateOrPromptConfig } from "./core/config.js";
+import {
+    CONFIG,
+    setOpenClawWorkerUrl,
+    setOpenClawHttpUrl,
+    setOpenClawToken,
+    setOpenClawChatEndpoint,
+    setOpenClawModel,
+} from "./core/config.js";
 import { provisionOpenClaw } from "./core/provisioning.js";
 import {
-    LLM_UNAVAILABLE_MSG,
     validateStartup,
 } from "./core/startup-validation.js";
 import { appendFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import {
     clearSessionWarnings,
@@ -32,9 +39,12 @@ import { ensureWorkspaceDir } from "./core/workspace-fs.js";
 import type { MemoryBackend } from "./core/config.js";
 import type { GraphState } from "./core/graph-state.js";
 import type { BotDefinition } from "./core/bot-definitions.js";
-import { log as clackLog, note, spinner, select, text } from "@clack/prompts";
+import { log as clackLog, note, spinner, select, text, cancel, isCancel } from "@clack/prompts";
+import pc from "picocolors";
 import { runGatewayHealthCheck } from "./core/health.js";
-import open from "open";
+import { isPortInUse } from "./commands/run-openclaw.js";
+import { readGlobalConfig, readGlobalConfigWithDefaults } from "./core/global-config.js";
+import { rotateAndCreateSessionLog } from "./utils/log-rotation.js";
 
 let DEBUG_LOG_PATH = "";
 
@@ -86,16 +96,12 @@ function printRunBanner(
     lessonsCount: number,
     totalRuns: number,
 ): void {
-    const banner = `
-╔═══════════════════════════════════════════════════════════════════╗
-║                                                                   ║
-║                    START WORKING! - RUN ${String(runId).padStart(2)}/${totalRuns}                      ║
-║                                                                   ║
-║          Prior run lessons: ${String(lessonsCount).padStart(2)}                                      ║
-║                                                                   ║
-╚═══════════════════════════════════════════════════════════════════╝
-`;
-    logger.plain(banner);
+    logger.plain(
+        [
+            pc.cyan(`▶ START WORKING — RUN ${String(runId).padStart(2)}/${totalRuns}`),
+            `• Prior run lessons: ${String(lessonsCount).padStart(2)}`,
+        ].join("\n"),
+    );
 }
 
 function formatDuration(ms: number): string {
@@ -106,6 +112,74 @@ function formatDuration(ms: number): string {
         return `${minutes}m ${seconds}s`;
     }
     return `${seconds}s`;
+}
+
+function formatFlatError(title: string, lines: string[]): string {
+    return [
+        pc.red(`❌ ${title}`),
+        ...lines.map((line) => pc.dim(`• ${line}`)),
+        "",
+    ].join("\n");
+}
+
+async function waitForManagedGatewayReady(
+    gatewayPort: number,
+    token: string,
+): Promise<boolean> {
+    const apiPort = gatewayPort + 2;
+    const modelsUrl = `http://127.0.0.1:${apiPort}/v1/models`;
+    const headers: Record<string, string> = {};
+    if (token.trim()) {
+        headers.Authorization = `Bearer ${token.trim()}`;
+    }
+
+    let attempts = 0;
+    while (attempts < 10) {
+        attempts += 1;
+        try {
+            const res = await fetch(modelsUrl, {
+                method: "GET",
+                headers,
+                signal: AbortSignal.timeout(1000),
+            });
+            if (res.status >= 100) {
+                return true;
+            }
+        } catch {
+            // continue polling until timeout
+        }
+        await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+
+    return false;
+}
+
+async function waitForGatewayWithUi(
+    canRenderSpinner: boolean,
+    gatewayPort: number,
+    token: string,
+): Promise<void> {
+    const readinessSpinner = canRenderSpinner ? spinner() : null;
+    if (readinessSpinner) readinessSpinner.start("◌ Waiting for Gateway to initialize...");
+    else log("info", "◌ Waiting for Gateway to initialize...");
+
+    const gatewayReady = await waitForManagedGatewayReady(gatewayPort, token);
+    if (!gatewayReady) {
+        if (readinessSpinner) {
+            readinessSpinner.stop("❌ Gateway did not become ready within 5 seconds.");
+        }
+        logger.plain(
+            formatFlatError("GATEWAY STARTUP TIMEOUT", [
+                `Gateway did not respond at http://127.0.0.1:${gatewayPort + 2}/v1/models within 5 seconds.`,
+                `Suggestion: Verify OpenClaw startup logs and confirm WS/API ports (${gatewayPort} / ${gatewayPort + 2}).`,
+                "Suggestion: Run `teamclaw run openclaw` to verify the gateway starts cleanly.",
+            ]),
+        );
+        process.exit(1);
+    }
+
+    if (readinessSpinner) readinessSpinner.stop("✅ Gateway initialization complete.");
+    else log("info", "Gateway initialization complete.");
 }
 
 function printSingleRunSummary(
@@ -164,25 +238,20 @@ function printSingleRunSummary(
 
     const lines: string[] = [
         "",
-        "╔═══════════════════════════════════════════════════════════════════════╗",
-        "║                         RUN SUMMARY                                    ║",
-        "╠═══════════════════════════════════════════════════════════════════════╣",
-        `║  📁 Workspace: ${workspacePath.slice(0, 56).padEnd(56)}║`,
-        `║  ⏱️  Duration:  ${formatDuration(duration).padEnd(56)}║`,
-        `║  🎯 Cycles:    ${String(cycleCount).padEnd(56)}║`,
-        "╠═══════════════════════════════════════════════════════════════════════╣",
-        `║  📊 Review Statistics                                                  ║`,
-        `║     Tasks Completed: ${String(completedTasks).padEnd(43)}║`,
-        `║     Tasks Failed:    ${String(failedTasks).padEnd(43)}║`,
-        `║     Total Reworks:   ${String(totalReworks).padEnd(43)}║`,
-        `║     Approval Rate:   ${String(approvalRate + "%").padEnd(43)}║`,
-        "╠═══════════════════════════════════════════════════════════════════════╣",
-        "║  👥 Individual Contributions                                         ║",
-        ...contributions.map((c) => c.padEnd(68) + "║"),
-        "╠═══════════════════════════════════════════════════════════════════════╣",
-        `║  💡 Performance Verdict                                             ║`,
-        ...performanceVerdict.match(/.{1,56}/g)?.map((chunk) => `║     ${chunk.padEnd(56)}║`) ?? [],
-        "╚═══════════════════════════════════════════════════════════════════════╝",
+        pc.cyan("RUN SUMMARY"),
+        `• Workspace: ${workspacePath}`,
+        `• Duration: ${formatDuration(duration)}`,
+        `• Cycles: ${cycleCount}`,
+        "• Review Statistics:",
+        `  - Tasks Completed: ${completedTasks}`,
+        `  - Tasks Failed: ${failedTasks}`,
+        `  - Total Reworks: ${totalReworks}`,
+        `  - Approval Rate: ${approvalRate}%`,
+        "• Individual Contributions:",
+        ...contributions
+            .filter((c) => c.trim().length > 0)
+            .map((c) => `  - ${c.trim()}`),
+        `• Performance Verdict: ${performanceVerdict}`,
     ];
 
     if (warnings.length > 0) {
@@ -206,50 +275,45 @@ function printWorkSummary(
 ): void {
     const oldest = lessons[0] ?? "(none)";
     const newest = lessons[lessons.length - 1] ?? "(none)";
-    const banner = `
-╔═══════════════════════════════════════════════════════════════════╗
-║                                                                   ║
-║                      WORK SESSIONS COMPLETE                       ║
-║                                                                   ║
-╚═══════════════════════════════════════════════════════════════════╝
-
-Run Statistics:
-  • Completed: ${stats.runs_completed}
-  • Failures: ${stats.failures}
-  • Successful: ${stats.runs_completed - stats.failures}
-
-Performance:
-  • Longest run: ${stats.longest_run_cycles} cycles
-  • Total tasks completed: ${stats.total_tasks_completed}
-  • Lessons learned: ${stats.total_lessons_learned}
-
-Prior run wisdom:
-  • Total lessons: ${lessons.length}
-  • Oldest: "${oldest}"
-  • Newest: "${newest}"
-
-╔═══════════════════════════════════════════════════════════════════╗
-║                    LESSONS ACCUMULATED                            ║
-╚═══════════════════════════════════════════════════════════════════╝
-`;
-    logger.plain(banner);
+    logger.plain(
+        [
+            pc.cyan("WORK SESSIONS COMPLETE"),
+            `• Completed: ${stats.runs_completed}`,
+            `• Failures: ${stats.failures}`,
+            `• Successful: ${stats.runs_completed - stats.failures}`,
+            `• Longest run: ${stats.longest_run_cycles} cycles`,
+            `• Total tasks completed: ${stats.total_tasks_completed}`,
+            `• Lessons learned: ${stats.total_lessons_learned}`,
+            `• Total lessons: ${lessons.length}`,
+            `• Oldest: "${oldest}"`,
+            `• Newest: "${newest}"`,
+            "",
+            pc.cyan("LESSONS ACCUMULATED"),
+        ].join("\n"),
+    );
     lessons.forEach((l, i) => logger.plain(`  ${i + 1}. ${l}`));
-    logger.plain("\n" + "=".repeat(70));
-    logger.plain("History saved to:");
-    logger.plain("   • work_history.log");
-    logger.plain("   • data/vector_store/");
-    logger.plain("=".repeat(70) + "\n");
+    logger.plain([
+        "",
+        "History saved to:",
+        "• work_history.log",
+        "• data/vector_store/",
+        "",
+    ].join("\n"));
 }
 
 export async function runWork(
-    input: string[] | { args?: string[]; goal?: string; openDashboard?: boolean } = [],
+    input: string[] | { args?: string[]; goal?: string; openDashboard?: boolean; noWeb?: boolean } = [],
 ): Promise<void> {
     const args = Array.isArray(input) ? input : (input.args ?? []);
     const goalOverride = Array.isArray(input) ? undefined : input.goal?.trim();
-    const shouldOpenDashboard = !Array.isArray(input) && input.openDashboard !== false;
+    // Pillar 4: --no-web flag suppresses the TeamClaw Web Dashboard auto-start
+    const noWebFromInput = !Array.isArray(input) && input.noWeb === true;
     let maxRuns = 1;
     let clearLegacy = false;
-    let forceDiscover = false;
+    let autoApprove = false;
+    // Pillar 4: parsed from CLI flags
+    let noWebFlag = noWebFromInput;
+    let warnedInfraFlag = false;
 
     for (let i = 0; i < args.length; i++) {
         if (args[i] === "--runs" && args[i + 1]) {
@@ -260,58 +324,277 @@ export async function runWork(
             i++;
         } else if (args[i] === "--clear-legacy") {
             clearLegacy = true;
-        } else if (args[i] === "--discover") {
-            // Force the Auto-Discovery Scanner even when config already has a URL+token.
-            forceDiscover = true;
-        }
-    }
-
-    await validateOrPromptConfig({ forceDiscover });
-
-    const health = await runGatewayHealthCheck();
-    const pingCheck = health.checks.find((c) => c.name === "ping");
-    const authCheck = health.checks.find((c) => c.name === "auth");
-    const modelCheck = health.checks.find((c) => c.name === "model");
-    const pingPass = pingCheck?.level === "pass";
-    const authPass = authCheck?.level === "pass";
-    const wsModelUnverified =
-        health.protocol === "ws" &&
-        health.status === "degraded" &&
-        modelCheck?.level === "warn";
-    const fatalConnectivityIssue =
-        !pingPass || (!authPass && health.authStatus === "invalid");
-
-    if (fatalConnectivityIssue) {
-        log("error", `Pre-flight health check failed (${health.status}).`);
-        for (const check of health.checks) {
-            if (check.level === "fail") {
-                log("error", `${check.name}: ${check.message}`);
+        } else if (args[i] === "--auto-approve") {
+            autoApprove = true;
+        } else if (args[i] === "--no-web") {
+            // Pillar 4: opt-out of automatic web dashboard
+            noWebFlag = true;
+        } else if (
+            args[i] === "--discover" ||
+            args[i] === "--no-managed-gateway" ||
+            args[i] === "--port" ||
+            args[i] === "-p" ||
+            args[i]?.startsWith("--port=")
+        ) {
+            if (!warnedInfraFlag) {
+                logger.warn(
+                    "Ignoring infrastructure override flags for `teamclaw work` (Pillar 2 zero-config). Run `teamclaw setup` or `teamclaw config` instead.",
+                );
+                warnedInfraFlag = true;
             }
+            if ((args[i] === "--port" || args[i] === "-p") && args[i + 1]) i++;
         }
-        if (health.tip) {
-            log("warn", health.tip);
-        } else {
-            log(
-                "warn",
-                "Tip: Run `teamclaw config` and verify your OpenClaw gateway settings.",
-            );
-        }
-        process.exit(1);
-    }
-    if (wsModelUnverified && pingPass && authPass) {
-        log(
-            "warn",
-            "⚠️ Proceeding with unverified model state (WebSocket mode)",
-        );
-    }
-
-    if (maxRuns > CONFIG.maxRuns) {
-        maxRuns = CONFIG.maxRuns;
     }
 
     const canRenderSpinner = Boolean(
         process.stdout.isTTY && process.stderr.isTTY,
     );
+
+    // Pillar 2: `teamclaw work` reads runtime infrastructure exclusively from setup config.
+    const persistedGlobalConfig = readGlobalConfig();
+    const setupConfig = persistedGlobalConfig ?? readGlobalConfigWithDefaults();
+    if (!persistedGlobalConfig) {
+        logger.warn(
+            "No setup config found at ~/.teamclaw/config.json. Using strict defaults (ws://127.0.0.1:8001, http://127.0.0.1:8003). Run `teamclaw setup` to persist your environment.",
+        );
+    }
+
+    const gatewayPort = setupConfig.gatewayPort;
+    const gatewayPortStr = String(gatewayPort);
+    const gatewayUrl = setupConfig.gatewayUrl;
+    const apiUrl = setupConfig.apiUrl;
+
+    setOpenClawWorkerUrl(gatewayUrl);
+    setOpenClawHttpUrl(apiUrl);
+    setOpenClawToken(setupConfig.token);
+    setOpenClawChatEndpoint(setupConfig.chatEndpoint || "/v1/chat/completions");
+    if (setupConfig.model) {
+        setOpenClawModel(setupConfig.model);
+    }
+
+    // Pillar 2: ONLY prompt allowed in `work` normal flow.
+    let effectiveGoal = goalOverride;
+    if (!effectiveGoal && canRenderSpinner) {
+        const goalInput = await text({
+            message: "What is your goal?",
+            placeholder: "Build a landing page with authentication",
+        });
+        if (isCancel(goalInput)) {
+            cancel("Work session cancelled.");
+            process.exit(0);
+        }
+        effectiveGoal = String(goalInput).trim() || undefined;
+    }
+
+    // ---------------------------------------------------------------------------
+    // Pillar 4: Auto-start TeamClaw Web Dashboard in the background (port 9001)
+    // ---------------------------------------------------------------------------
+    if (!noWebFlag) {
+        const { start: startDaemon } = await import("./daemon/manager.js");
+        const webPort = Number(process.env["WEB_PORT"]) || setupConfig.dashboardPort || 9001;
+        const daemonResult = startDaemon({ web: true, gateway: false, webPort });
+        if (!daemonResult.error || daemonResult.error.includes("already running")) {
+            logger.success(`🌐 Dashboard running at: http://localhost:${webPort}`);
+        } else {
+            logger.warn(`Dashboard auto-start skipped: ${daemonResult.error}`);
+        }
+    }
+
+    const gatewayAlreadyRunning = await isPortInUse(gatewayPort);
+
+    if (setupConfig.managedGateway && gatewayAlreadyRunning) {
+        log("info", `Gateway already running on port ${gatewayPort}. Attaching...`);
+        await waitForGatewayWithUi(canRenderSpinner, gatewayPort, setupConfig.token);
+    }
+
+    if (!gatewayAlreadyRunning) {
+        if (setupConfig.managedGateway) {
+            const { startManagedGateway, setupGatewayCleanupHandlers: setupCleanup } =
+                await import("./commands/run-openclaw.js");
+
+            setupCleanup();
+            const gatewayState = await startManagedGateway(gatewayPortStr, { useSpinner: canRenderSpinner });
+
+            if (!gatewayState.wasAlreadyRunning) {
+                log("info", `Managed gateway started (PID: ${gatewayState.pid})`);
+            }
+            await waitForGatewayWithUi(canRenderSpinner, gatewayPort, setupConfig.token);
+        } else {
+            logger.plain(
+                formatFlatError("EXTERNAL GATEWAY UNREACHABLE", [
+                    `Cause: Connection refused at ${gatewayUrl}`,
+                    "Suggestion: Run `teamclaw setup` to reconfigure your environment.",
+                    "Suggestion: Run `teamclaw config` to edit gateway settings.",
+                    "Suggestion: Run `teamclaw run openclaw` to start the gateway manually.",
+                ]),
+            );
+
+            if (canRenderSpinner) {
+                const recovery = await select({
+                    message: "How would you like to recover?",
+                    options: [
+                        {
+                            label: "🔄 Auto-Fix: Start OpenClaw gateway on configured port",
+                            value: "start_gateway",
+                        },
+                        {
+                            label: "⚙️  Reconfigure: Run `teamclaw setup` wizard",
+                            value: "setup",
+                        },
+                        {
+                            label: "🚪 Exit",
+                            value: "exit",
+                        },
+                    ],
+                });
+
+                if (!isCancel(recovery)) {
+                    if (recovery === "start_gateway") {
+                        const { startOpenclawGateway } = await import("./commands/run-openclaw.js");
+                        await startOpenclawGateway({ port: gatewayPortStr, skipPrompt: true });
+                        log("warn", "Gateway started. Please retry `teamclaw work`.");
+                    } else if (recovery === "setup") {
+                        const { runSetup } = await import("./commands/setup.js");
+                        await runSetup();
+                        return;
+                    }
+                }
+            }
+            process.exit(1);
+        }
+    }
+
+    const health = await runGatewayHealthCheck();
+    const pingCheck = health.checks.find((c) => c.name === "ping");
+    const authCheck = health.checks.find((c) => c.name === "auth");
+    const pingPass = pingCheck?.level === "pass";
+    const authPass = authCheck?.level === "pass";
+    const fatalConnectivityIssue =
+        !pingPass || (!authPass && health.authStatus === "invalid");
+
+    if (fatalConnectivityIssue) {
+        // -----------------------------------------------------------------------
+        // Pillar 3: Smart Error Recovery — structured diagnostic output
+        // -----------------------------------------------------------------------
+        const authFailed = health.authStatus === "invalid";
+        const pingFailure = health.checks.find(
+            (c) => c.name === "ping" && c.level === "fail",
+        );
+        const modelFailed = health.checks.find(
+            (c) => c.name === "model" && c.level === "fail",
+        );
+
+        const diagLines: string[] = [];
+        if (authFailed) {
+            diagLines.push(
+                "Cause: Gateway returned HTTP 401 or 403.",
+                "Suggestion: Verify OPENCLAW_TOKEN or run `teamclaw setup`.",
+            );
+        } else if (pingFailure) {
+            diagLines.push(
+                `Cause: Connection refused at ${health.gatewayUrl}.`,
+                `Detail: ${pingFailure.message}`,
+                "Suggestion: Ensure the gateway process is running and reachable.",
+            );
+        }
+
+        if (modelFailed && !authFailed && !pingFailure) {
+            diagLines.push(
+                `Detail: ${modelFailed.message}`,
+                "Suggestion: Verify OPENCLAW_MODEL against the gateway model list.",
+            );
+        }
+
+        diagLines.push(
+            "Suggestion: Run `teamclaw setup` to reconfigure your environment.",
+            "Suggestion: Run `teamclaw config` to edit individual settings.",
+            "Suggestion: Run `teamclaw run openclaw` to start/restart the gateway.",
+        );
+
+        logger.plain(formatFlatError("GATEWAY CONNECTION FAILED", diagLines));
+
+        if (health.tip) {
+            log("warn", health.tip);
+        }
+
+        if (canRenderSpinner) {
+            const recoveryOptions = gatewayAlreadyRunning
+                ? [
+                      {
+                          label: "🔍 Re-detect Gateway (run setup)",
+                          value: "redetect",
+                      },
+                      {
+                          label: "⚙️  Check Config",
+                          value: "check_config",
+                      },
+                      {
+                          label: "🚪 Exit",
+                          value: "exit",
+                      },
+                  ]
+                : [
+                      {
+                          label: "🔄 Auto-Fix: Start the OpenClaw gateway now",
+                          value: "start_gateway",
+                      },
+                      {
+                          label: "⚙️  Reconfigure: Run `teamclaw setup` wizard",
+                          value: "setup",
+                      },
+                      {
+                          label: "🚪 Exit",
+                          value: "exit",
+                      },
+                  ];
+
+            const recovery = await select({
+                message: "How would you like to recover?",
+                options: recoveryOptions,
+            });
+
+            if (!isCancel(recovery)) {
+                if (recovery === "start_gateway") {
+                    const portInUse = await isPortInUse(gatewayPort);
+                    if (portInUse) {
+                        log("info", `Gateway already running on port ${gatewayPort}. Attaching...`);
+                        await waitForGatewayWithUi(
+                            canRenderSpinner,
+                            gatewayPort,
+                            setupConfig.token,
+                        );
+                    } else {
+                        const { startOpenclawGateway } = await import("./commands/run-openclaw.js");
+                        await startOpenclawGateway({ port: gatewayPortStr, skipPrompt: false });
+                        log("warn", "Gateway started. Please retry `teamclaw work`.");
+                    }
+                } else if (recovery === "redetect") {
+                    const { runSetup } = await import("./commands/setup.js");
+                    await runSetup();
+                    return;
+                } else if (recovery === "check_config") {
+                    logger.plain(
+                        formatFlatError("CURRENT GATEWAY CONFIG", [
+                            `Gateway URL: ${gatewayUrl}`,
+                            `API URL: ${apiUrl}`,
+                            `Gateway Port: ${gatewayPort}`,
+                            `Expected API Port: ${gatewayPort + 2}`,
+                            `Managed Gateway: ${setupConfig.managedGateway ? "yes" : "no"}`,
+                        ]),
+                    );
+                } else if (recovery === "setup") {
+                    const { runSetup } = await import("./commands/setup.js");
+                    await runSetup();
+                    return;
+                }
+            }
+        }
+        process.exit(1);
+    }
+
+    if (maxRuns > CONFIG.maxRuns) {
+        maxRuns = CONFIG.maxRuns;
+    }
 
     if (!canRenderSpinner) {
         log("info", "Start working!");
@@ -320,7 +603,15 @@ export async function runWork(
     }
 
     await ensureWorkspaceDir(CONFIG.workspaceDir);
-    DEBUG_LOG_PATH = path.join(CONFIG.workspaceDir, "teamclaw-debug.log");
+    try {
+        DEBUG_LOG_PATH = await rotateAndCreateSessionLog({
+            logDir: path.join(os.homedir(), ".teamclaw", "logs"),
+            prefix: "work-session",
+            maxFiles: 10,
+        });
+    } catch {
+        DEBUG_LOG_PATH = path.join(CONFIG.workspaceDir, "teamclaw-debug.log");
+    }
 
     const memoryConfig = await loadTeamConfig();
     const selectedMemoryBackend: MemoryBackend =
@@ -369,28 +660,33 @@ export async function runWork(
         maxRuns,
     });
     if (!result.ok) {
-        if (
-            wsModelUnverified &&
-            pingPass &&
-            authPass &&
-            result.message === LLM_UNAVAILABLE_MSG
-        ) {
-            log(
-                "warn",
-                "⚠️ Startup HTTP model probe failed; continuing in WebSocket mode",
-            );
-        } else {
-            log("error", result.message);
-            process.exit(1);
-        }
+        log("error", result.message);
+        process.exit(1);
     }
 
     for (let runId = 1; runId <= maxRuns; runId++) {
         try {
             const teamConfig = await loadTeamConfig();
             const goal =
-                goalOverride || teamConfig?.goal?.trim() || defaultGoal;
+                effectiveGoal || teamConfig?.goal?.trim() || defaultGoal;
             const priorLessons = await vectorMemory.getCumulativeLessons();
+
+            if (canRenderSpinner && runId === 1) {
+                logger.info("🧠 Searching long-term memory for past project context...");
+            }
+            const projectContext = await vectorMemory.retrieveRelevantMemories(goal, 2);
+            let projectContextStr = "";
+            if (projectContext.length > 0) {
+                if (canRenderSpinner) {
+                    logger.success("📚 Found past context. Injecting into team instructions.");
+                }
+                projectContextStr = `\n\nContext from past projects: ${projectContext.join("; ")}. Please align your architectural decisions and coding style with these established preferences unless the current goal explicitly states otherwise.`;
+            } else {
+                if (canRenderSpinner && runId === 1) {
+                    logger.info("🧠 No past project context found.");
+                }
+            }
+
             const runWarnings: string[] = [];
             clearSessionWarnings();
             if (!vectorMemory.enabled) {
@@ -423,87 +719,7 @@ export async function runWork(
                     ? buildTeamFromRoster(teamConfig.roster)
                     : buildTeamFromTemplate(template);
 
-            let workspacePath = process.cwd();
-            if (canRenderSpinner && runId === 1) {
-                const { isCancel } = await import("@clack/prompts");
-                const { mkdirSync, existsSync } = await import("node:fs");
-
-                const PROTECTED_DIRS = ["/", "/home", "/home/nxank4", "/root", "/etc", "/usr"];
-                let validSelection = false;
-                while (!validSelection) {
-                    const folderChoice = await select({
-                        message: "Where should the team work?",
-                        options: [
-                            { label: "Current Folder (./)", value: "current" },
-                            { label: "Relative Path (e.g. ./output or my-project)", value: "relative" },
-                            { label: "Specific Absolute Path", value: "absolute" },
-                        ],
-                    });
-
-                    if (isCancel(folderChoice)) {
-                        clackLog.info("Cancelled.");
-                        process.exit(0);
-                    }
-
-                    if (folderChoice === "current") {
-                        workspacePath = process.cwd();
-                        validSelection = true;
-                    } else if (folderChoice === "relative") {
-                        const relPath = await text({
-                            message: "Enter relative path:",
-                            placeholder: "my-project or ./output",
-                        });
-                        if (isCancel(relPath)) {
-                            clackLog.info("Cancelled.");
-                            process.exit(0);
-                        }
-                        if (relPath && typeof relPath === "string" && relPath.trim().length > 0) {
-                            const userInput = relPath.trim();
-                            if (userInput.includes("..")) {
-                                clackLog.warn("Path cannot contain '..'");
-                                continue;
-                            }
-                            workspacePath = path.resolve(process.cwd(), userInput);
-
-                            if (!existsSync(workspacePath)) {
-                                mkdirSync(workspacePath, { recursive: true });
-                                clackLog.info(`Created directory: ${workspacePath}`);
-                            }
-                            validSelection = true;
-                        }
-                    } else if (folderChoice === "absolute") {
-                        const absPath = await text({
-                            message: "Enter absolute path:",
-                            placeholder: "/home/user/projects/workspace",
-                        });
-                        if (isCancel(absPath)) {
-                            clackLog.info("Cancelled.");
-                            process.exit(0);
-                        }
-                        if (absPath && typeof absPath === "string") {
-                            const trimmed = absPath.trim();
-                            if (trimmed.includes("..")) {
-                                clackLog.warn("Path cannot contain '..'");
-                                continue;
-                            }
-                            const isProtected = PROTECTED_DIRS.some((p) => trimmed === p || trimmed.startsWith(p + "/"));
-                            if (isProtected) {
-                                clackLog.warn("Cannot work in protected system directory");
-                                continue;
-                            }
-                            if (!existsSync(trimmed)) {
-                                mkdirSync(trimmed, { recursive: true });
-                                clackLog.info(`Created directory: ${trimmed}`);
-                            }
-                            workspacePath = trimmed;
-                            validSelection = true;
-                        }
-                    }
-                }
-                clackLog.info(`📁 Working directory: ${workspacePath}`);
-            } else {
-                workspacePath = process.cwd();
-            }
+            const workspacePath = process.cwd();
 
             const workerUrls = getWorkerUrlsForTeam(
                 team.map((b) => b.id),
@@ -540,17 +756,6 @@ export async function runWork(
                         await new Promise((res) => setTimeout(res, 2000));
                 }
                 if (!provisioned) {
-                    if (wsModelUnverified && pingPass && authPass) {
-                        log(
-                            "warn",
-                            `⚠️ OpenClaw HTTP model precheck failed; continuing in WebSocket mode${
-                                lastError ? ` (${lastError})` : ""
-                            }`,
-                        );
-                        provisioned = true;
-                    }
-                }
-                if (!provisioned) {
                     throw new Error(
                         `❌ OpenClaw Gateway not found. TeamClaw requires OpenClaw to function.${
                             lastError ? ` Details: ${lastError}` : ""
@@ -558,15 +763,24 @@ export async function runWork(
                     );
                 }
             }
-            const orchestration = createTeamOrchestration({ team, workerUrls, workspacePath });
+            const orchestration = createTeamOrchestration({ team, workerUrls, workspacePath, autoApprove });
             const runStartTime = Date.now();
 
-            if (shouldOpenDashboard && runId === 1) {
-                const dashboardUrl = "http://127.0.0.1:18789/__openclaw__/canvas/";
+            // Telemetry init only — no OpenClaw canvas URL box.
+            // The TeamClaw Dashboard URL is already printed once at session start (Pillar 4).
+
+            if (runId === 1) {
                 try {
-                    await open(dashboardUrl);
-                } catch {
-                    logger.info(`Dashboard available at ${dashboardUrl}`);
+                    const { initCanvasTelemetry, getCanvasTelemetry } = await import("./core/canvas-telemetry.js");
+                    const telemetryConnected = await initCanvasTelemetry();
+                    if (telemetryConnected) {
+                        getCanvasTelemetry().sendSessionStart(goal);
+                        logger.success("📡 Telemetry synced with Web Dashboard");
+                    } else {
+                        logger.warn("📡 Telemetry: Could not connect to Canvas (continuing without telemetry)");
+                    }
+                } catch (telemetryErr) {
+                    logger.warn(`📡 Telemetry setup failed: ${telemetryErr instanceof Error ? telemetryErr.message : String(telemetryErr)} (continuing anyway)`);
                 }
             }
 
@@ -579,19 +793,34 @@ export async function runWork(
                         ? orchestration.run({
                               userGoal: goal,
                               ancestralLessons: priorLessons,
+                              projectContext: projectContextStr,
                           })
                         : withConsoleRedirect(() =>
                               orchestration.run({
                                   userGoal: goal,
                                   ancestralLessons: priorLessons,
+                                  projectContext: projectContextStr,
                               }),
                           ))) as Record<string, unknown>;
                 } catch (error) {
                     const message =
                         error instanceof Error ? error.message : String(error);
                     sPlan.stop(
-                        `❌ Coordinator failed to connect to OpenClaw: ${message}`,
+                        `❌ Coordinator failed to decompose goal: ${message}`,
                     );
+                    // Fast-fail on HTTP/network errors — skip summary UI and exit immediately.
+                    const isFatal =
+                        /HTTP [45]\d\d|ECONNREFUSED|ENOTFOUND|404|Not Found|fetch failed/i.test(message);
+                    if (isFatal) {
+                        // Pillar 3: structured diagnostic on coordinator failure
+                        cancel(
+                            `Fatal Error: Coordinator failed — ${message.split("\n")[0]}.\n` +
+                            `  • Gateway: ${gatewayUrl}\n` +
+                            `  • Run \`teamclaw setup\` to reconfigure, or \`teamclaw run openclaw\` to restart.`,
+                        );
+                        clearSessionConfig();
+                        process.exit(1);
+                    }
                     throw error;
                 }
 
@@ -735,16 +964,114 @@ export async function runWork(
                         runStartTime,
                     );
                 }
+
+                if (canRenderSpinner) {
+                    logger.info("💾 Post-Mortem Analyst is saving session experience to LanceDB...");
+                }
+                const projectMemory = await analyst.extractProjectMemory(
+                    finalState as GraphState,
+                    workspacePath,
+                );
+                if (projectMemory) {
+                    if (canRenderSpinner) {
+                        logger.success(`📚 Saved project memory: "${projectMemory.slice(0, 50)}..."`);
+                    }
+                }
+
                 log("info", "");
                 if (maxRuns === 1) break;
             }
         } catch (err) {
             if ((err as NodeJS.ErrnoException).code === "SIGINT") {
                 log("warn", "\nWork session interrupted by user");
-            } else {
-                log("error", `Fatal error in run ${runId}: ${err}`);
-                logger.error(String(err));
+                break;
             }
+            const errMsg = err instanceof Error ? err.message : String(err);
+            const isFatal =
+                /HTTP [45]\d\d|ECONNREFUSED|ENOTFOUND|ETIMEDOUT|WebSocket closed|timeout/i.test(errMsg);
+
+            if (isFatal) {
+                // -----------------------------------------------------------------
+                // Pillar 3: Smart Error Recovery during an active run
+                // -----------------------------------------------------------------
+                const isAuthError = /HTTP 401|HTTP 403|Unauthorized/i.test(errMsg);
+                const isGatewayDown =
+                    !isAuthError && /ECONNREFUSED|ENOTFOUND|ETIMEDOUT|WebSocket closed|fetch failed|timeout/i.test(errMsg);
+                const isModelError =
+                    !isGatewayDown && !isAuthError && /HTTP 404|Not Found|model/i.test(errMsg);
+
+                const diagLines: string[] = [];
+                if (isGatewayDown) {
+                    diagLines.push(
+                        `Cause: Connection refused at ${gatewayUrl}.`,
+                        `Detail: ${errMsg.split("\n")[0] ?? errMsg}`,
+                        "Suggestion: Check gateway process health and port availability.",
+                    );
+                } else if (isAuthError) {
+                    diagLines.push(
+                        "Cause: Gateway returned HTTP 401 or 403 mid-session.",
+                        "Suggestion: Verify OPENCLAW_TOKEN in your environment.",
+                    );
+                } else if (isModelError) {
+                    diagLines.push(
+                        "Cause: Model not found (404) — possible model mismatch.",
+                        "Suggestion: Verify OPENCLAW_MODEL in your environment.",
+                    );
+                } else {
+                    diagLines.push(
+                        `Cause: ${errMsg.split("\n")[0] ?? errMsg}`,
+                    );
+                }
+                diagLines.push(
+                    "Suggestion: Run `teamclaw setup` to reconfigure your environment.",
+                    "Suggestion: Run `teamclaw config` to edit individual settings.",
+                    "Suggestion: Run `teamclaw run openclaw` to restart the gateway.",
+                );
+                logger.plain(
+                    formatFlatError(
+                        "RUNTIME GATEWAY ERROR — WORK SESSION INTERRUPTED",
+                        diagLines,
+                    ),
+                );
+
+                if (canRenderSpinner) {
+                    const recovery = await select({
+                        message: "How would you like to recover?",
+                        options: [
+                            {
+                                label: "🔄 Auto-Fix: Restart the OpenClaw gateway",
+                                value: "restart_gateway",
+                            },
+                            {
+                                label: "⚙️  Reconfigure: Run `teamclaw setup` wizard",
+                                value: "setup",
+                            },
+                            {
+                                label: "🚪 Exit",
+                                value: "exit",
+                            },
+                        ],
+                    });
+
+                    if (!isCancel(recovery)) {
+                        if (recovery === "restart_gateway") {
+                            const { startOpenclawGateway } = await import("./commands/run-openclaw.js");
+                            await startOpenclawGateway({ skipPrompt: false });
+                            log("warn", "Gateway restarted. Please retry `teamclaw work`.");
+                        } else if (recovery === "setup") {
+                            clearSessionConfig();
+                            const { runSetup } = await import("./commands/setup.js");
+                            await runSetup();
+                            return;
+                        }
+                    }
+                }
+
+                clearSessionConfig();
+                process.exit(1);
+            }
+            log("error", `Fatal error in run ${runId}: ${err}`);
+            logger.error(String(err));
             break;
         }
     }

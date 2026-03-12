@@ -16,7 +16,7 @@ import { buildTeamFromTemplate } from "./team-templates.js";
 import type { BotDefinition } from "./bot-definitions.js";
 import { CoordinatorAgent } from "../agents/coordinator.js";
 import { createWorkerBots, createWorkerExecuteNode } from "../agents/worker-bot.js";
-import { getFirstTaskNeedingApproval, createApprovalNode } from "../agents/approval.js";
+import { getFirstTaskNeedingApproval, createApprovalNode, createHumanApprovalNode } from "../agents/approval.js";
 import type { ApprovalProvider } from "../agents/approval.js";
 import { UniversalOpenClawAdapter } from "../interfaces/worker-adapter.js";
 import { logger } from "./logger.js";
@@ -43,8 +43,9 @@ export class TeamOrchestration {
     workerUrls?: Record<string, string>;
     approvalProvider?: ApprovalProvider | null;
     workspacePath?: string;
+    autoApprove?: boolean;
   } = {}) {
-    const { team, teamTemplateId = "game_dev", workerUrls = {}, approvalProvider = null, workspacePath } = options;
+    const { team, teamTemplateId = "game_dev", workerUrls = {}, approvalProvider = null, workspacePath, autoApprove = false } = options;
     this.team = team ?? buildTeamFromTemplate(teamTemplateId);
     this.workerBots = createWorkerBots(this.team, workerUrls, workspacePath);
     const sharedLlmAdapter =
@@ -57,11 +58,13 @@ export class TeamOrchestration {
 
     const workerNode = createWorkerExecuteNode(this.workerBots, this.team);
     const approvalNode = createApprovalNode(approvalProvider);
+    const humanApprovalNode = createHumanApprovalNode(autoApprove);
 
     const workflow = new StateGraph(GameStateAnnotation)
       .addNode("coordinator", (s) => this.coordinator.coordinateNode(s))
       .addNode("approval", approvalNode)
       .addNode("worker_execute", workerNode)
+      .addNode("human_approval", humanApprovalNode)
       .addNode("increment_cycle", (s): Partial<GraphState> => ({
         cycle_count: (s.cycle_count ?? 0) + 1,
         __node__: "increment_cycle",
@@ -86,7 +89,8 @@ export class TeamOrchestration {
         },
         { coordinator: "coordinator", worker_execute: "worker_execute" }
       )
-      .addEdge("worker_execute", "increment_cycle")
+      .addEdge("worker_execute", "human_approval")
+      .addEdge("human_approval", "increment_cycle")
       .addConditionalEdges(
         "increment_cycle",
         (s) => {
@@ -94,7 +98,7 @@ export class TeamOrchestration {
           if (cycle >= CONFIG.maxCycles) return "__end__";
           const taskQueue = s.task_queue ?? [];
           const active = taskQueue.filter((t) => 
-            t.status === "pending" || t.status === "reviewing" || t.status === "needs_rework" || t.status === "in_progress"
+            t.status === "pending" || t.status === "reviewing" || t.status === "needs_rework" || t.status === "in_progress" || t.status === "waiting_for_human"
           );
           if (active.length > 0 || s.user_goal) return "continue";
           return "__end__";
@@ -112,8 +116,10 @@ export class TeamOrchestration {
     userGoal?: string | null;
     initialTasks?: Array<{ assigned_to?: string; description?: string; priority?: string }>;
     ancestralLessons?: string[];
+    projectContext?: string;
   } = {}): GraphState {
     const lessons = options.ancestralLessons ?? [];
+    const projectContext = options.projectContext ?? "";
     const base = initializeGameState(1, lessons) as Record<string, unknown>;
     const teamData = this.team.map((b) => ({
       id: b.id,
@@ -144,6 +150,7 @@ export class TeamOrchestration {
 
     (base.messages as string[]).push("Work session started");
     if (options.userGoal) base.user_goal = options.userGoal;
+    if (projectContext) base.project_context = projectContext;
 
     return base as unknown as GraphState;
   }
@@ -152,6 +159,7 @@ export class TeamOrchestration {
     userGoal?: string | null;
     initialTasks?: Array<{ assigned_to?: string; description?: string; priority?: string }>;
     ancestralLessons?: string[];
+    projectContext?: string;
   } = {}): Promise<GraphState> {
     const state = this.getInitialState(options);
     const config = { configurable: { thread_id: randomUUID() } };
@@ -162,6 +170,7 @@ export class TeamOrchestration {
   async *stream(options: {
     userGoal?: string | null;
     initialTasks?: Array<{ assigned_to?: string; description?: string; priority?: string }>;
+    projectContext?: string;
   } = {}): AsyncGenerator<Record<string, GraphState>> {
     const state = this.getInitialState(options);
     const config = { streamMode: "values" as const, configurable: { thread_id: randomUUID() } };
@@ -177,6 +186,7 @@ export function createTeamOrchestration(options: {
   workerUrls?: Record<string, string>;
   approvalProvider?: ApprovalProvider | null;
   workspacePath?: string;
+  autoApprove?: boolean;
 } = {}): TeamOrchestration {
   return new TeamOrchestration(options);
 }

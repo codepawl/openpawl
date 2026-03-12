@@ -373,8 +373,8 @@ export function createWorkerExecuteNode(
 
       if (rec.previousStatus === "reviewing" && rec.reviewVerdict) {
         if (rec.reviewVerdict.approved) {
-          newStatus = "completed";
-          uiMessages.push(`✅ [${rec.workerName}] approved ${id}!`);
+          newStatus = "waiting_for_human";
+          uiMessages.push(`✅ [${rec.workerName}] approved ${id} - awaiting human final approval`);
         } else {
           newRetryCount = currentRetry + 1;
           if (newRetryCount > maxRetries) {

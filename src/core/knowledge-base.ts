@@ -10,6 +10,7 @@ import { CONFIG, type MemoryBackend } from "./config.js";
 import { logger } from "./logger.js";
 
 const LESSONS_TABLE = "lessons";
+const PROJECT_MEMORIES_TABLE = "project_memories";
 const EMBEDDING_MODEL = "nomic-embed-text";
 const DEFAULT_EMBEDDING_BASE = "http://localhost:11434";
 
@@ -82,6 +83,7 @@ export class VectorMemory {
   readonly backend: MemoryBackend;
   private db: lancedb.Connection | null = null;
   private lessonsTable: lancedb.Table | null = null;
+  private projectMemoriesTable: lancedb.Table | null = null;
   private embedder: HttpEmbeddingFunction | null = null;
   private fallbackPath: string;
 
@@ -115,6 +117,9 @@ export class VectorMemory {
       const tableNames = await this.db.tableNames();
       if (tableNames.includes(LESSONS_TABLE)) {
         this.lessonsTable = await this.db.openTable(LESSONS_TABLE);
+      }
+      if (tableNames.includes(PROJECT_MEMORIES_TABLE)) {
+        this.projectMemoriesTable = await this.db.openTable(PROJECT_MEMORIES_TABLE);
       }
 
       this.enabled = true;
@@ -235,6 +240,92 @@ export class VectorMemory {
       }
     }
     return merged;
+  }
+
+  async addProjectMemory(
+    summary: string,
+    metadata: Record<string, unknown> = {}
+  ): Promise<boolean> {
+    if (this.enabled && this.db && this.embedder) {
+      try {
+        const vector = (await this.embedder.generate([summary]))[0] ?? [];
+        if (!Array.isArray(vector) || vector.length === 0) {
+          throw new Error("empty embedding vector");
+        }
+        const id = `memory_${Date.now()}`;
+        const row = {
+          id,
+          text: summary,
+          vector,
+          metadata_json: JSON.stringify(metadata),
+          timestamp: Date.now() / 1000,
+          workspace_path: (metadata.workspace_path as string) ?? "",
+        };
+        if (!this.projectMemoriesTable) {
+          this.projectMemoriesTable = await this.db.createTable(PROJECT_MEMORIES_TABLE, [row]);
+        } else {
+          await this.projectMemoriesTable.add([row]);
+        }
+        log(`📚 Stored project memory: "${summary.slice(0, 50)}..."`);
+        return true;
+      } catch (err) {
+        log(`❌ Failed to store project memory: ${err}`);
+        return await this._fallbackAddProjectMemory(summary);
+      }
+    }
+    return await this._fallbackAddProjectMemory(summary);
+  }
+
+  private async _fallbackAddProjectMemory(summary: string): Promise<boolean> {
+    try {
+      await this._ensureFallbackDir();
+      const fallbackPath = path.join(this.persistDirectory, "project_memories_fallback.json");
+      let memories: string[] = [];
+      try {
+        const raw = await readFile(fallbackPath, "utf-8");
+        memories = JSON.parse(raw) as string[];
+      } catch {
+        // file missing or invalid
+      }
+      memories.push(summary);
+      await writeFile(fallbackPath, JSON.stringify(memories, null, 2));
+      log(`📚 Stored project memory (fallback): "${summary.slice(0, 50)}..."`);
+      return true;
+    } catch (err) {
+      log(`❌ Fallback store failed: ${err}`);
+      return false;
+    }
+  }
+
+  async retrieveRelevantMemories(query: string, nResults = 2): Promise<string[]> {
+    if (this.enabled && this.projectMemoriesTable && this.embedder) {
+      try {
+        const count = await this.projectMemoriesTable.countRows();
+        if (count === 0) return [];
+        const vector = (await this.embedder.generate([query]))[0] ?? [];
+        if (!Array.isArray(vector) || vector.length === 0) return [];
+        const results = (await this.projectMemoriesTable
+          .vectorSearch(vector)
+          .limit(Math.min(nResults, count))
+          .toArray()) as Array<Record<string, unknown>>;
+        return results
+          .map((row) => (typeof row["text"] === "string" ? row["text"] : ""))
+          .filter((doc): doc is string => doc.length > 0);
+      } catch (err) {
+        log(`❌ Memory retrieval failed: ${err}`);
+      }
+    }
+    return await this._fallbackGetProjectMemories();
+  }
+
+  private async _fallbackGetProjectMemories(): Promise<string[]> {
+    try {
+      const fallbackPath = path.join(this.persistDirectory, "project_memories_fallback.json");
+      const raw = await readFile(fallbackPath, "utf-8");
+      return JSON.parse(raw) as string[];
+    } catch {
+      return [];
+    }
   }
 
   private async _getAllLessonsFromLanceDb(): Promise<string[]> {

@@ -37,6 +37,7 @@ import { logger } from "../core/logger.js";
 import { ensureWorkspaceDir } from "../core/workspace-fs.js";
 import { log, note, spinner } from "@clack/prompts";
 import { findAvailablePort } from "../core/port.js";
+import { WsEventSchema } from "../interfaces/ws-events.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -257,6 +258,49 @@ function getBotActions(nodeName: string, data: Record<string, unknown>): unknown
   return [];
 }
 
+function buildWsValidationError(
+  detail: string,
+  issues: unknown = null,
+): { type: "system"; payload: Record<string, unknown> } {
+  return {
+    type: "system",
+    payload: {
+      error: true,
+      code: "INVALID_WS_PAYLOAD",
+      message: detail,
+      issues,
+      timestamp: new Date().toISOString(),
+    },
+  };
+}
+
+function normalizeIncomingWsMessage(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+
+  const raw = value as Record<string, unknown>;
+  const eventType = typeof raw.type === "string" ? raw.type : "";
+  const alreadyEnvelope =
+    ["telemetry", "terminal_out", "worker_status", "system"].includes(eventType) &&
+    Object.prototype.hasOwnProperty.call(raw, "payload");
+  if (alreadyEnvelope) return value;
+
+  if (typeof raw.command === "string") {
+    return {
+      type: "system",
+      payload: raw,
+    };
+  }
+
+  if (raw.type === "UPDATE_TASK") {
+    return {
+      type: "worker_status",
+      payload: raw,
+    };
+  }
+
+  return value;
+}
+
 export async function runWeb(args: string[]): Promise<void> {
   const canRenderSpinner = Boolean(process.stdout.isTTY && process.stderr.isTTY);
   const s = canRenderSpinner ? spinner() : null;
@@ -375,12 +419,41 @@ export async function runWeb(args: string[]): Promise<void> {
 
     socket.on("message", async (raw: Buffer | string) => {
       const data = Buffer.isBuffer(raw) ? raw.toString() : String(raw);
-      let msg: Record<string, unknown>;
+      let parsedJson: unknown;
       try {
-        msg = JSON.parse(data) as Record<string, unknown>;
+        parsedJson = JSON.parse(data) as unknown;
       } catch {
+        socket.send(
+          JSON.stringify(buildWsValidationError("Incoming WS payload must be valid JSON.")),
+        );
         return;
       }
+
+      const normalized = normalizeIncomingWsMessage(parsedJson);
+      const parsedEvent = WsEventSchema.safeParse(normalized);
+      if (!parsedEvent.success) {
+        socket.send(
+          JSON.stringify(
+            buildWsValidationError(
+              "Incoming WS payload failed schema validation.",
+              parsedEvent.error.issues,
+            ),
+          ),
+        );
+        return;
+      }
+
+      const payload = parsedEvent.data.payload;
+      if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+        socket.send(
+          JSON.stringify(
+            buildWsValidationError("Incoming WS payload must be an object."),
+          ),
+        );
+        return;
+      }
+
+      const msg = payload as Record<string, unknown>;
 
       const cmd = msg.command;
       if (cmd === "pause") ctrl.paused = true;

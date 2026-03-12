@@ -1,11 +1,13 @@
 /**
- * WorkerAdapter - OpenClaw HTTP REST worker interface for TeamClaw.
- * Uses OpenAI-compatible HTTP API endpoint.
+ * WorkerAdapter - OpenClaw WebSocket worker interface for TeamClaw.
+ * Uses WebSocket with Challenge-Response authentication for LLM completions.
  */
 
 import type { TaskRequest, TaskResult } from "../core/state.js";
 import { CONFIG } from "../core/config.js";
 import { logger } from "../core/logger.js";
+import WebSocket from "ws";
+import pc from "picocolors";
 
 export type WorkerAdapterType = "openclaw";
 
@@ -69,64 +71,338 @@ function log(msg: string): void {
   }
 }
 
+function formatAdapterError(title: string, details: string[]): string {
+  return [
+    pc.red(`❌ ${title}`),
+    ...details.map((detail) => pc.dim(`• ${detail}`)),
+  ].join("\n");
+}
+
 const DEFAULT_TIMEOUT_MS = 120_000;
+const GATEWAY_DEFAULT_MODEL = "github-copilot/gpt-4o";
 
 export class UniversalOpenClawAdapter implements WorkerAdapter {
   readonly adapterType: WorkerAdapterType = "openclaw";
-  private baseUrl: string;
-  private authToken: string | null;
+  private wsUrl: string;
   private timeout: number;
   private workspacePath: string;
+  private configuredModel: string;
+  private authToken: string;
   tasksProcessed = 0;
 
-  constructor(options: { workerUrl?: string; authToken?: string | null; timeout?: number; workspacePath?: string } = {}) {
-    let url = (options.workerUrl ?? CONFIG.openclawWorkerUrl ?? "").trim() || "http://127.0.0.1:18789";
-    url = url.replace(/^ws:/i, "http:").replace(/^wss:/i, "https:").replace(/\/$/, "");
-    this.baseUrl = url;
-    this.authToken = options.authToken ?? (CONFIG.openclawToken || null);
+  constructor(options: { workerUrl?: string; authToken?: string | null; timeout?: number; workspacePath?: string; model?: string } = {}) {
+    let baseWsUrl = (options.workerUrl ?? CONFIG.openclawWorkerUrl ?? "").trim();
+    if (!baseWsUrl) {
+      throw new Error("OPENCLAW_WORKER_URL is not configured. Run `teamclaw setup`.");
+    }
+    const token = (options.authToken ?? CONFIG.openclawToken ?? "").trim();
+    // Normalize WebSocket URL - handle ws://, wss://, http://, https://
+    if (baseWsUrl.startsWith("wss://")) {
+      this.wsUrl = baseWsUrl; // Already correct
+    } else if (baseWsUrl.startsWith("ws://")) {
+      this.wsUrl = baseWsUrl; // Already correct
+    } else if (baseWsUrl.startsWith("https://")) {
+      this.wsUrl = baseWsUrl.replace(/^https:\/\//, "wss://");
+    } else if (baseWsUrl.startsWith("http://")) {
+      this.wsUrl = baseWsUrl.replace(/^http:\/\//, "ws://");
+    } else {
+      // Bare hostname - assume ws
+      this.wsUrl = `ws://${baseWsUrl.replace(/\/$/, "")}`;
+    }
+    this.authToken = token;
     this.timeout = options.timeout ?? DEFAULT_TIMEOUT_MS;
     this.workspacePath = options.workspacePath ?? process.cwd();
-    log(`UniversalOpenClawAdapter (HTTP) → ${this.baseUrl}/v1/chat/completions (workspace: ${this.workspacePath})`);
+    this.configuredModel = (options.model ?? CONFIG.openclawModel ?? "").trim();
+    log(`UniversalOpenClawAdapter (WS) → ${this.wsUrl} model=${this.configuredModel || "default"} (workspace: ${this.workspacePath})`);
   }
 
-  private async chatComplete(messages: { role: string; content: string }[]): Promise<string> {
-    const model = CONFIG.openclawModel?.trim() || "github-copilot/gpt-5-mini";
-    const url = `${this.baseUrl}/v1/chat/completions`;
+    private async chatComplete(messages: { role: string; content: string }[]): Promise<string> {
+        const model = this.configuredModel || GATEWAY_DEFAULT_MODEL;
+        const timeoutMs = this.timeout;
+        const token = this.authToken;
+        const requestId = "teamclaw-" + Date.now();
 
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
-    if (this.authToken) {
-      headers["Authorization"] = `Bearer ${this.authToken}`;
+        log(`[Debug] WS → ${this.wsUrl} model=${model} msgCount=${messages.length}`);
+
+        // Use OpenClaw's chat.send method with proper session handling
+        const requestPayload = {
+            type: "req",
+            id: requestId,
+            method: "chat.send",
+            params: {
+                sessionKey: "main",
+                message: messages[messages.length - 1].content,
+                idempotencyKey: requestId
+            }
+        };
+
+        log(`[Debug] Payload: ${JSON.stringify(requestPayload).slice(0, 200)}`);
+
+        return new Promise((resolve, reject) => {
+            let ws: WebSocket | null = null;
+            let resolved = false;
+            let rawMessages = "";
+            let challengeNonce = "";
+            let challengeTs: number | null = null;
+
+            const cleanup = () => {
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.close();
+                }
+            };
+
+            const timeoutId = setTimeout(() => {
+                if (!resolved) {
+                    resolved = true;
+                    cleanup();
+                    log(`[Debug] WS Timeout. Raw messages: ${rawMessages.slice(0, 500)}`);
+                    reject(new Error(formatAdapterError("TIMEOUT", [
+                        `WebSocket timeout after ${timeoutMs}ms`,
+                        `Raw: ${rawMessages.slice(0, 200)}`,
+                    ])));
+                }
+            }, timeoutMs);
+
+            try {
+                ws = new WebSocket(this.wsUrl);
+
+                ws.on("open", () => {
+                    log("[Debug] WS Connected, awaiting challenge...");
+                });
+
+                ws.on("message", (data) => {
+                    const msg = data.toString();
+                    rawMessages += msg + "\n";
+                    log(`[Debug] WS Message: ${msg.slice(0, 500)}`);
+
+                    try {
+                        const parsed = JSON.parse(msg) as Record<string, unknown>;
+                        const event = String(parsed.event ?? parsed.type ?? "").toLowerCase();
+
+                        // Step 2: Handle connect.challenge - send connect request with nonce in auth
+                        if (event === "connect.challenge") {
+                            const payload = parsed.payload as Record<string, unknown> | undefined;
+                            challengeNonce = String(payload?.nonce ?? "");
+                            const tsRaw = payload?.ts;
+                            challengeTs = typeof tsRaw === "number" ? tsRaw : null;
+
+                            log(`[Debug] Received challenge: nonce=${challengeNonce} ts=${challengeTs}`);
+
+                            // Send connect request - the nonce isn't needed in auth, 
+                            // just sending the token after the challenge is enough
+                            const connectRequest = {
+                                type: "req",
+                                id: "connect-" + Date.now(),
+                                method: "connect",
+                                params: {
+                                    minProtocol: 3,
+                                    maxProtocol: 3,
+                                    client: {
+                                        id: "cli",
+                                        version: "1.0.0",
+                                        platform: "nodejs",
+                                        mode: "cli"
+                                    },
+                                    role: "operator",
+                                    scopes: ["operator.read", "operator.write", "operator.admin"],
+                                    auth: { token: token },
+                                    locale: "en-US"
+                                }
+                            };
+                            
+                            log(`[Debug] Sending connect request: ${JSON.stringify(connectRequest).slice(0, 200)}`);
+                            ws?.send(JSON.stringify(connectRequest));
+                            return;
+                        }
+
+                        // Step 3: Handle connect.success - now we can send the request
+                        // Can be either event=connect.success or type=res with ok=true
+                        const isConnectSuccess = event === "connect.success" || event === "connect.ok";
+                        const isConnectResponse = parsed.type === "res" && String(parsed.id).startsWith("connect-") && parsed.ok === true;
+                        if (isConnectSuccess || isConnectResponse) {
+                            log("[Debug] Auth successful, sending chat request...");
+                            ws?.send(JSON.stringify(requestPayload));
+                            return;
+                        }
+
+                        // Handle auth failure
+                        if (event === "connect.error" || event === "connect.fail" || parsed.status === "unauthorized" || parsed.status === "forbidden") {
+                            if (!resolved) {
+                                resolved = true;
+                                clearTimeout(timeoutId);
+                                cleanup();
+                                const errMsg = String(parsed.error ?? parsed.message ?? "Authentication failed");
+                                reject(new Error(formatAdapterError("AUTH ERROR", [
+                                    `Gateway rejected the authentication`,
+                                    `Detail: ${errMsg}`,
+                                ])));
+                            }
+                            return;
+                        }
+
+                        // Step 4: Handle the chat completion response - must match our request id
+                        // OR capture the runId from the initial response for async processing
+                        const responseId = parsed.id;
+                        const requestIdVal = requestPayload.id;
+                        
+                        if ((parsed.type === "res" || parsed.type === "resp") && responseId === requestIdVal) {
+                            // Check for immediate response content
+                            const text = this.extractWsResponse(parsed);
+                            if (text && text.length > 10 && !text.includes('"type"')) {
+                                // Has actual content, resolve immediately
+                                if (!resolved) {
+                                    resolved = true;
+                                    clearTimeout(timeoutId);
+                                    cleanup();
+                                    resolve(text);
+                                }
+                                return;
+                            }
+                            
+                            // No immediate content - wait for async events
+                            return;
+                        }
+
+                        // Handle chat events (for async responses) - don't filter by runId
+                        // because the gateway uses different runIds for request vs agent events
+                        if (event === "chat" || event === "agent") {
+                            
+                            // For chat events
+                            if (event === "chat") {
+                                const chatPayload = parsed.payload as Record<string, unknown> | undefined;
+                                const state = chatPayload?.state;
+                                const message = chatPayload?.message as Record<string, unknown> | undefined;
+                                const messageContent = message?.content;
+                                
+                                // Handle state=final with message content only (not delta)
+                                if (state === "final") {
+                                    // Check message.content which can be an array or string
+                                    if (Array.isArray(messageContent)) {
+                                        // Content is array of {type, text} objects
+                                        const textParts = messageContent
+                                            .filter((c): c is { type: string; text: string } => typeof c?.text === "string")
+                                            .map((c) => c.text)
+                                            .join("");
+                                        if (textParts && !resolved) {
+                                            resolved = true;
+                                            clearTimeout(timeoutId);
+                                            cleanup();
+                                            resolve(textParts);
+                                            return;
+                                        }
+                                    } else if (typeof messageContent === "string" && messageContent) {
+                                        if (!resolved) {
+                                            resolved = true;
+                                            clearTimeout(timeoutId);
+                                            cleanup();
+                                            resolve(messageContent);
+                                            return;
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            // For agent events - wait for complete response
+                            if (event === "agent") {
+                                const agentPayload = parsed.payload as Record<string, unknown> | undefined;
+                                const stream = agentPayload?.stream;
+                                const data = agentPayload?.data as Record<string, unknown> | undefined;
+                                const phase = data?.phase;
+                                
+                                // Only resolve on lifecycle end/complete - wait for full response
+                                if (stream === "lifecycle" && (phase === "complete" || phase === "done" || phase === "end")) {
+                                    const output = data?.message ?? data?.output ?? data?.content ?? data?.response;
+                                    if (output && !resolved) {
+                                        resolved = true;
+                                        clearTimeout(timeoutId);
+                                        cleanup();
+                                        resolve(String(output));
+                                        return;
+                                    }
+                                }
+                                
+                                // Handle error phase
+                                if (stream === "lifecycle" && phase === "error") {
+                                    const errorMsg = data?.error ?? data?.message;
+                                    if (errorMsg && !resolved) {
+                                        resolved = true;
+                                        clearTimeout(timeoutId);
+                                        cleanup();
+                                        reject(new Error(formatAdapterError("AGENT ERROR", [String(errorMsg)])));
+                                        return;
+                                    }
+                                }
+                            }
+                            return;
+                        }
+
+                        // Handle error responses
+                        if (parsed.type === "error" || event.includes("error")) {
+                            if (!resolved) {
+                                resolved = true;
+                                clearTimeout(timeoutId);
+                                cleanup();
+                                const errMsg = String(parsed.message ?? parsed.error ?? JSON.stringify(parsed));
+                                reject(new Error(formatAdapterError("WS ERROR", [
+                                    `Error from Gateway: ${errMsg}`,
+                                ])));
+                            }
+                        }
+                    } catch {
+                        // Ignore parse errors
+                    }
+                });
+
+                ws.on("error", (err) => {
+                    if (!resolved) {
+                        resolved = true;
+                        clearTimeout(timeoutId);
+                        reject(new Error(formatAdapterError("WS ERROR", [
+                            `WebSocket error: ${err.message}`,
+                        ])));
+                    }
+                });
+
+                ws.on("close", (code, reason) => {
+                    if (!resolved) {
+                        resolved = true;
+                        clearTimeout(timeoutId);
+                        const reasonStr = reason.toString();
+                        log(`[Debug] WS Closed: code=${code} reason=${reasonStr.slice(0, 100)}`);
+                        reject(new Error(formatAdapterError("WS CLOSED", [
+                            `Connection closed (code ${code})`,
+                            reasonStr ? `Reason: ${reasonStr}` : "",
+                        ])));
+                    }
+                });
+            } catch (err) {
+                clearTimeout(timeoutId);
+                reject(err);
+            }
+        });
     }
 
-    const response = await fetch(url, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        model,
-        messages,
-        stream: false,
-      }),
-      signal: AbortSignal.timeout(this.timeout),
-    });
+    private extractWsResponse(data: Record<string, unknown>): string {
+        const result = (data.result ?? data.response ?? data) as Record<string, unknown>;
+        const choices = (result?.choices ?? data.choices) as Array<{ message?: { content?: unknown }; text?: unknown }> | undefined;
+        if (Array.isArray(choices) && choices.length > 0) {
+            const content = choices[0]?.message?.content ?? choices[0]?.text;
+            if (typeof content === "string") return this.stripMarkdown(content.trim());
+        }
 
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`HTTP ${response.status}: ${error}`);
+        const output = result?.output ?? data.output ?? data.result ?? data.content ?? data.text;
+        if (typeof output === "string") return this.stripMarkdown(output.trim());
+
+        return JSON.stringify(data);
     }
 
-    const data = await response.json() as {
-      choices?: Array<{ message?: { content?: string } }>;
-      error?: { message?: string };
-    };
-
-    if (data.error) {
-      throw new Error(data.error.message || "Unknown API error");
+    private stripMarkdown(text: string): string {
+        // Strip markdown code blocks (```json ... ``` or ``` ... ```)
+        let cleaned = text.replace(/^```[\w]*\n?/gm, "").replace(/```$/gm, "");
+        // Also handle inline code
+        cleaned = cleaned.replace(/`/g, "");
+        return cleaned.trim();
     }
-
-    return data.choices?.[0]?.message?.content || "";
-  }
 
   async healthCheck(): Promise<boolean> {
     try {
@@ -149,14 +425,8 @@ Output files directly to the root of the provided workspace path unless the task
 All file operations (read, write, create, edit) MUST be performed within this directory.
 Do not attempt to read or write files outside of it.`;
       const messages = [
-        {
-          role: "system",
-          content: systemPrompt,
-        },
-        {
-          role: "user",
-          content: task.description,
-        },
+        { role: "system", content: systemPrompt },
+        { role: "user", content: task.description },
       ];
 
       const output = await this.chatComplete(messages);
@@ -202,6 +472,8 @@ export function createWorkerAdapter(
   workerUrls: Record<string, string> = {},
   workspacePath?: string
 ): WorkerAdapter {
+  // Always resolve to a WebSocket-compatible URL (WS/WSS or plain host).
+  // The WS gateway URL from CONFIG.openclawWorkerUrl is the correct target.
   const url = resolveTargetUrl(bot, workerUrls, CONFIG.openclawWorkerUrl);
   return new UniversalOpenClawAdapter({ workerUrl: url, authToken: CONFIG.openclawToken, workspacePath });
 }

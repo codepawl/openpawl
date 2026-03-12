@@ -29,6 +29,7 @@ import {
 import { discoverOpenAIApi, readLocalOpenClawConfig } from "./discovery.js";
 
 export type MemoryBackend = "lancedb" | "local_json";
+const GATEWAY_DEFAULT_MODEL = "gateway-default";
 
 function env(key: string, defaultVal: string): string;
 function env(key: string, defaultVal: number): number;
@@ -73,6 +74,7 @@ export const CONFIG = {
     verboseLogging: envBool("VERBOSE_LOGGING", true),
 
     openclawWorkerUrl: env("OPENCLAW_WORKER_URL", "") as string,
+    openclawHttpUrl: env("OPENCLAW_HTTP_URL", "") as string,
     openclawWorkers: (() => {
         const raw = process.env["OPENCLAW_WORKERS"];
         if (!raw?.trim()) return {} as Record<string, string>;
@@ -90,7 +92,9 @@ export const CONFIG = {
     openclawChatEndpoint: (
         process.env["OPENCLAW_CHAT_ENDPOINT"] ?? "/v1/chat/completions"
     ).trim(),
-    openclawModel: (process.env["OPENCLAW_MODEL"] ?? "").trim(),
+    openclawModel: (
+        (process.env["OPENCLAW_MODEL"] ?? "").trim() || GATEWAY_DEFAULT_MODEL
+    ),
     openclawProvisionTimeout: env(
         "OPENCLAW_PROVISION_TIMEOUT",
         30_000,
@@ -103,6 +107,7 @@ export const CONFIG = {
 
 type MutableOpenClawRuntimeConfig = {
     openclawWorkerUrl: string;
+    openclawHttpUrl: string;
     openclawToken: string;
     openclawChatEndpoint: string;
     openclawModel: string;
@@ -115,6 +120,10 @@ function applyRuntimeOpenClawConfig(
     if (typeof update.openclawWorkerUrl === "string") {
         process.env["OPENCLAW_WORKER_URL"] = update.openclawWorkerUrl;
         cfg.openclawWorkerUrl = update.openclawWorkerUrl;
+    }
+    if (typeof update.openclawHttpUrl === "string") {
+        process.env["OPENCLAW_HTTP_URL"] = update.openclawHttpUrl;
+        cfg.openclawHttpUrl = update.openclawHttpUrl;
     }
     if (typeof update.openclawToken === "string") {
         process.env["OPENCLAW_TOKEN"] = update.openclawToken;
@@ -165,6 +174,31 @@ export function getSessionCreativity(): number {
 
 export function clearSessionConfig(): void {
     sessionOverrides = {};
+}
+
+/** Directly update the runtime HTTP API URL used by the LLM adapter. */
+export function setOpenClawHttpUrl(url: string): void {
+    applyRuntimeOpenClawConfig({ openclawHttpUrl: url });
+}
+
+/** Directly update the runtime model used by the LLM adapter. */
+export function setOpenClawModel(model: string): void {
+    applyRuntimeOpenClawConfig({ openclawModel: model });
+}
+
+/** Directly update the runtime token used by the LLM adapter. */
+export function setOpenClawToken(token: string): void {
+    applyRuntimeOpenClawConfig({ openclawToken: token });
+}
+
+/** Directly update the runtime chat endpoint used by the LLM adapter. */
+export function setOpenClawChatEndpoint(endpoint: string): void {
+    applyRuntimeOpenClawConfig({ openclawChatEndpoint: endpoint });
+}
+
+/** Update the runtime WebSocket gateway URL (e.g. after the user selects a port interactively). */
+export function setOpenClawWorkerUrl(url: string): void {
+    applyRuntimeOpenClawConfig({ openclawWorkerUrl: url });
 }
 
 function creativityToTemperature(creativity: number): number {
@@ -292,12 +326,16 @@ export async function validateOrPromptConfig(
     const chatEndpointRaw = getEnvValue("OPENCLAW_CHAT_ENDPOINT", env.lines);
     const modelRaw = getEnvValue("OPENCLAW_MODEL", env.lines);
     const openclawUrl = (urlRaw ?? "").trim();
-    const openclawToken = (tokenRaw ?? "").trim();
+    const openclawToken = 
+        (tokenRaw ?? "").trim() || 
+        (teamCfg?.openclaw_token ?? "").trim();
     const openclawChatEndpoint =
         (chatEndpointRaw ?? "").trim() ||
         (teamCfg?.openclaw_chat_endpoint ?? "").trim();
     const openclawModel =
-        (modelRaw ?? "").trim() || (teamCfg?.openclaw_model ?? "").trim();
+        (modelRaw ?? "").trim() ||
+        (teamCfg?.openclaw_model ?? "").trim() ||
+        GATEWAY_DEFAULT_MODEL;
 
     let effectiveOpenclawUrl = openclawUrl;
     let effectiveOpenclawToken = openclawToken;
@@ -341,6 +379,13 @@ export async function validateOrPromptConfig(
                     envLines,
                 );
             }
+            // Always sync the HTTP API URL from local config (separate port from WS gateway)
+            envLines = setEnvValue(
+                "OPENCLAW_HTTP_URL",
+                earlyLocalCfg.httpUrl,
+                envLines,
+            );
+            applyRuntimeOpenClawConfig({ openclawHttpUrl: earlyLocalCfg.httpUrl });
             if (!effectiveOpenclawToken) {
                 effectiveOpenclawToken = earlyLocalCfg.token;
                 envLines = setEnvValue(
@@ -357,7 +402,8 @@ export async function validateOrPromptConfig(
                     envLines,
                 );
             }
-            if (!effectiveOpenclawModel && earlyLocalCfg.model) {
+            // Always prefer the model from local OpenClaw config when available
+            if (earlyLocalCfg.model) {
                 effectiveOpenclawModel = earlyLocalCfg.model;
                 envLines = setEnvValue(
                     "OPENCLAW_MODEL",
@@ -452,6 +498,12 @@ export async function validateOrPromptConfig(
                 effectiveOpenclawToken,
                 envLines,
             );
+            // Always sync the HTTP API URL from local config (separate port from WS gateway)
+            envLines = setEnvValue(
+                "OPENCLAW_HTTP_URL",
+                localCfg.httpUrl,
+                envLines,
+            );
             if (effectiveOpenclawModel) {
                 envLines = setEnvValue(
                     "OPENCLAW_MODEL",
@@ -469,6 +521,7 @@ export async function validateOrPromptConfig(
 
             applyRuntimeOpenClawConfig({
                 openclawWorkerUrl: effectiveOpenclawUrl,
+                openclawHttpUrl: localCfg.httpUrl,
                 openclawToken: effectiveOpenclawToken,
                 openclawChatEndpoint: effectiveOpenclawChatEndpoint,
                 openclawModel: effectiveOpenclawModel,
@@ -631,51 +684,18 @@ export async function validateOrPromptConfig(
     }
 
     if (!effectiveOpenclawModel) {
-        if (discoveredModels.length > 0) {
-            const selected = handleInlineCancel(
-                await select({
-                    message: "Select an available model:",
-                    options: discoveredModels.map((m) => ({
-                        value: m,
-                        label: m,
-                    })),
-                    initialValue: discoveredModels[0],
-                }),
-            ) as string;
-            const value = selected.trim();
-            if (value) {
-                envLines = setEnvValue("OPENCLAW_MODEL", value, envLines);
-                effectiveOpenclawModel = value;
-                applyRuntimeOpenClawConfig({ openclawModel: value });
-            }
-        } else {
-            const discovered = effectiveOpenclawUrl
+        const discovered = discoveredModels.length > 0
+            ? discoveredModels[0] ?? null
+            : effectiveOpenclawUrl
                 ? await discoverOpenClawModel(
                       effectiveOpenclawUrl,
                       effectiveOpenclawToken,
                   )
                 : null;
-            const promptMessage = discovered
-                ? `Missing OpenClaw model (OPENCLAW_MODEL). Discovered "${discovered}". Press Enter to accept or override:`
-                : "Missing OpenClaw model (OPENCLAW_MODEL). Please enter it:";
-            const model = handleInlineCancel(
-                await text({
-                    message: promptMessage,
-                    initialValue: discovered ?? "",
-                    placeholder: "gpt-4o-mini",
-                    validate: (v) =>
-                        (v ?? "").trim().length > 0
-                            ? undefined
-                            : "Model cannot be empty",
-                }),
-            ) as string;
-            const value = model.trim();
-            if (value) {
-                envLines = setEnvValue("OPENCLAW_MODEL", value, envLines);
-                effectiveOpenclawModel = value;
-                applyRuntimeOpenClawConfig({ openclawModel: value });
-            }
-        }
+        const value = (discovered ?? GATEWAY_DEFAULT_MODEL).trim();
+        envLines = setEnvValue("OPENCLAW_MODEL", value, envLines);
+        effectiveOpenclawModel = value;
+        applyRuntimeOpenClawConfig({ openclawModel: value });
     }
 
     if (envLines !== env.lines) {

@@ -17,14 +17,22 @@ export interface OpenAIApiDiscovery {
  * When present these are authoritative — no network probe or token prompt needed.
  */
 export interface LocalOpenClawConfig {
-    /** Numeric port from gateway.port */
+    /** Numeric port from gateway.port (WebSocket gateway port) */
     port: number;
+    /** HTTP API port from gateway.http.port (defaults to 18789) */
+    httpPort: number;
     /** Auth token from gateway.auth.token */
     token: string;
     /** Primary model from agents.defaults.model.primary (may be empty) */
     model: string;
+    /** Fallback models from agents.defaults.model.fallbacks */
+    fallbackModels: string[];
+    /** All available models (primary + fallbacks + any defined in models) */
+    availableModels: string[];
     /** Ready-to-use WebSocket URL: ws://127.0.0.1:<port> */
     url: string;
+    /** Ready-to-use HTTP API URL: http://127.0.0.1:<httpPort> */
+    httpUrl: string;
     /** Absolute path to the config file that was read (for display only) */
     configPath: string;
     /** Whether authentication is required. False if gateway.auth.mode === "none" */
@@ -40,11 +48,16 @@ interface RawOpenClawConfig {
             mode?: unknown;
             token?: unknown;
         };
+        http?: {
+            port?: unknown;
+        };
     };
     agents?: {
         defaults?: {
             model?: {
                 primary?: unknown;
+                fallbacks?: unknown[];
+                models?: Record<string, { alias?: string }>;
             };
         };
     };
@@ -126,15 +139,47 @@ export function readLocalOpenClawConfig(): LocalOpenClawConfig | null {
             // If auth is disabled, we don't need a token. Otherwise token is required.
             if (!isAuthDisabled && !token) continue;
 
+            // --- http port (optional, defaults to 18789) ---
+            const httpPortRaw = data.gateway?.http?.port;
+            const httpPortParsed =
+                typeof httpPortRaw === "number"
+                    ? httpPortRaw
+                    : Number.parseInt(String(httpPortRaw ?? ""), 10);
+            const httpPort =
+                Number.isInteger(httpPortParsed) && httpPortParsed > 0 && httpPortParsed <= 65535
+                    ? httpPortParsed
+                    : 18789;
+
             // --- model (optional) ---
             const modelRaw = data.agents?.defaults?.model?.primary;
             const model = (typeof modelRaw === "string" ? modelRaw : "").trim();
 
+            // --- fallback models (optional) ---
+            const fallbacksRaw = data.agents?.defaults?.model?.fallbacks;
+            const fallbackModels: string[] = Array.isArray(fallbacksRaw)
+                ? fallbacksRaw.filter((f): f is string => typeof f === "string").map((f) => f.trim()).filter(Boolean)
+                : [];
+
+            // --- all available models (primary + fallbacks + defined models) ---
+            const modelsDef = data.agents?.defaults?.model?.models;
+            const definedModels: string[] = modelsDef && typeof modelsDef === "object"
+                ? Object.keys(modelsDef).filter((k) => k.trim())
+                : [];
+            
+            // Primary, fallbacks, and any models defined in the config
+            const allModels = [model, ...fallbackModels, ...definedModels]
+                .filter((m, i, arr) => m && arr.indexOf(m) === i);
+            const availableModels: string[] = allModels.filter(Boolean);
+
             return {
                 port,
+                httpPort,
                 token,
                 model,
+                fallbackModels,
+                availableModels,
                 url: `ws://127.0.0.1:${port}`,
+                httpUrl: `http://127.0.0.1:${httpPort}`,
                 configPath,
                 authRequired: !isAuthDisabled,
             };
@@ -227,23 +272,6 @@ async function probeHttpModels(
     };
 }
 
-async function probeHtmlSignature(
-    workerUrl: string,
-    timeoutMs: number,
-): Promise<string | null> {
-    const res = await fetch(workerUrl, {
-        method: "GET",
-        signal: AbortSignal.timeout(timeoutMs),
-    });
-    if (!res.ok) return null;
-    const contentType = (res.headers.get("content-type") ?? "").toLowerCase();
-    const text = await res.text();
-    const isHtml =
-        contentType.includes("text/html") || /^\s*<!doctype html/i.test(text);
-    if (!isHtml) return null;
-    return text.slice(0, 4000);
-}
-
 async function probeWebSocket(
     wsUrl: string,
     timeoutMs: number,
@@ -273,12 +301,12 @@ async function probeWebSocket(
             // when ws emits during transitional states.
             ws.on("error", () => {});
             try {
-                if (
-                    ws.readyState === WebSocket.OPEN ||
-                    ws.readyState === WebSocket.CONNECTING
-                ) {
-                    ws.close();
-                }
+                ws.close();
+            } catch {
+                // ignore
+            }
+            try {
+                ws.terminate();
             } catch {
                 // ignore
             }
@@ -327,6 +355,35 @@ async function probeWebSocket(
     });
 }
 
+async function probeHttpReachability(
+    workerUrl: string,
+    timeoutMs: number,
+): Promise<{ reachable: boolean; htmlSignature: string }> {
+    const endpoints = ["/health", "/"];
+    let htmlSignature = "";
+
+    for (const endpoint of endpoints) {
+        try {
+            const res = await fetch(`${workerUrl}${endpoint}`, {
+                method: "GET",
+                signal: AbortSignal.timeout(timeoutMs),
+            });
+
+            const contentType = (res.headers.get("content-type") ?? "").toLowerCase();
+            if (endpoint === "/" && contentType.includes("text/html")) {
+                const html = await res.text();
+                htmlSignature = html.slice(0, 4000);
+            }
+
+            return { reachable: true, htmlSignature };
+        } catch {
+            // try next endpoint
+        }
+    }
+
+    return { reachable: false, htmlSignature: "" };
+}
+
 export async function discoverOpenAIApi(
     baseHost = "http://localhost",
     options: OpenAIApiDiscoveryOptions = {},
@@ -362,18 +419,32 @@ export async function discoverOpenAIApi(
             // continue probing
         }
 
-        // Probe B + C: HTML signature + WS handshake
+        // Probe B: lightweight HTTP reachability check
+        let httpReachable = false;
         let htmlSig = "";
         try {
-            htmlSig = (await probeHtmlSignature(workerUrl, timeoutMs)) ?? "";
+            const reachability = await probeHttpReachability(workerUrl, timeoutMs);
+            httpReachable = reachability.reachable;
+            htmlSig = reachability.htmlSignature;
         } catch {
             // ignore
         }
-        const ws = await probeWebSocket(wsUrl, timeoutMs).catch(
-            () => ({ opened: false, isWebSocket: false }) as const,
-        );
+
         const looksOpenClawHtml = htmlSig.toLowerCase().includes("openclaw");
-        const shouldAddWs = ws.opened || ws.isWebSocket || looksOpenClawHtml;
+
+        // Probe C (fallback): WebSocket handshake only when HTTP checks did not
+        // conclusively confirm a live service.
+        let wsOpened = false;
+        let wsCapable = false;
+        if (!httpReachable && results.length === 0) {
+            const ws = await probeWebSocket(wsUrl, timeoutMs).catch(
+                () => ({ opened: false, isWebSocket: false }) as const,
+            );
+            wsOpened = ws.opened;
+            wsCapable = ws.isWebSocket;
+        }
+
+        const shouldAddWs = wsOpened || wsCapable || (!httpReachable && looksOpenClawHtml);
         if (shouldAddWs) {
             results.push({
                 baseUrl: wsUrl,

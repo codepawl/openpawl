@@ -41,7 +41,8 @@ export class CoordinatorAgent {
   private async decomposeGoalWithLlm(
     goal: string,
     team: Record<string, unknown>[],
-    ancestralLessons: string[] = []
+    ancestralLessons: string[] = [],
+    projectContext: string = ""
   ): Promise<Array<{ description: string; assigned_to: string; worker_tier: "light" | "heavy" }>> {
     const roleSummary: string[] = [];
     const rosterAgg = new Map<string, { count: number; descriptions: Set<string> }>();
@@ -85,6 +86,10 @@ ${ancestralLessons.map((l, i) => `  ${i + 1}. ${l}`).join("\n")}
 `
         : "";
 
+    const projectContextBlock = projectContext
+        ? `\n${projectContext}`
+        : "";
+
     const prompt = `You are a team coordinator. Break this goal into 3-6 concrete subtasks.
 Assign each subtask to ONE team member based on their role and skills.
 You MUST decompose the goal into multiple smaller, actionable tasks.
@@ -97,7 +102,7 @@ IMPORTANT: Do NOT create arbitrary subdirectories unless explicitly specified in
 Output files directly to the root of the provided workspace path unless the task explicitly requires a specific structure (like 'assets/' or 'src/components/').
 All file operations (read, write, create, edit) MUST be performed within this directory.
 Do not attempt to read or write files outside of it.
-${lessonsBlock}
+${lessonsBlock}${projectContextBlock}
 
 Goal: ${goal}
 
@@ -203,11 +208,12 @@ Example:
   async coordinateNode(state: GraphState): Promise<Partial<GraphState>> {
     const team = state.team ?? [];
     const userGoal = state.user_goal;
+    const projectContext = (state.project_context as string) ?? "";
     const taskQueue = [...(state.task_queue ?? [])];
 
     if (userGoal) {
       const lessons = (state.ancestral_lessons ?? []) as string[];
-      const decomposed = await this.decomposeGoalWithLlm(userGoal, team, lessons);
+      const decomposed = await this.decomposeGoalWithLlm(userGoal, team, lessons, projectContext);
       for (const item of decomposed) {
         taskQueue.push({
           task_id: this.nextTaskId(),

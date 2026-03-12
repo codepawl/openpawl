@@ -203,15 +203,11 @@ async function openClawMenu(state: DashboardState): Promise<void> {
     while (!back) {
         const choice = handleCancel(
             await select({
-                message: "OpenClaw & LLM Settings",
+                message: "OpenClaw Gateway Settings",
                 options: [
                     {
                         value: "url",
                         label: `Edit OpenClaw Gateway URL (Current: ${state.openclawWorkerUrl || "(not set)"})`,
-                    },
-                    {
-                        value: "model",
-                        label: `Edit Default Model (Current: ${state.openclawModel || "(not set)"})`,
                     },
                     {
                         value: "token",
@@ -225,7 +221,7 @@ async function openClawMenu(state: DashboardState): Promise<void> {
                     { value: "back", label: "Back to Main Menu" },
                 ],
             }),
-        ) as "url" | "model" | "token" | "endpoint" | "discover" | "back";
+        ) as "url" | "token" | "endpoint" | "discover" | "back";
 
         if (choice === "back") {
             back = true;
@@ -237,8 +233,8 @@ async function openClawMenu(state: DashboardState): Promise<void> {
                 await text({
                     message: "OpenClaw Gateway URL",
                     initialValue:
-                        state.openclawWorkerUrl || "http://localhost:8001",
-                    placeholder: "http://localhost:8001",
+                        state.openclawWorkerUrl || "ws://localhost:18789",
+                    placeholder: "ws://localhost:18789",
                     validate: (v) =>
                         isHttpOrWsUrl(v ?? "")
                             ? undefined
@@ -246,22 +242,6 @@ async function openClawMenu(state: DashboardState): Promise<void> {
                 }),
             ) as string;
             state.openclawWorkerUrl = value.trim();
-            continue;
-        }
-
-        if (choice === "model") {
-            const value = handleCancel(
-                await text({
-                    message: "Default OpenClaw Model",
-                    initialValue: state.openclawModel,
-                    placeholder: "gpt-4o-mini",
-                    validate: (v) =>
-                        (v ?? "").trim().length > 0
-                            ? undefined
-                            : "Model cannot be empty",
-                }),
-            ) as string;
-            state.openclawModel = value.trim();
             continue;
         }
 

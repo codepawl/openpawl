@@ -26,6 +26,7 @@ export const GameStateAnnotation = Annotation.Root({
     lastValue<Record<string, unknown>[]>(() => [])
   ),
   user_goal: Annotation<string | null>(lastValue<string | null>(() => null)),
+  project_context: Annotation<string>(lastValue<string>(() => "")),
   task_queue: Annotation<Record<string, unknown>[]>(
     lastValue<Record<string, unknown>[]>(() => [])
   ),

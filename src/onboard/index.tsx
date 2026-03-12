@@ -45,7 +45,7 @@ export async function runOnboard(options?: RunOnboardOptions): Promise<void> {
         goal: string;
     }
     const DEFAULT_WORKER_URL =
-        process.env["OPENCLAW_WORKER_URL"] ?? "http://localhost:8001";
+        process.env["OPENCLAW_WORKER_URL"] ?? "ws://localhost:18789";
     const DEFAULT_TOKEN = process.env["OPENCLAW_TOKEN"] ?? "";
     const DEFAULT_GOAL =
         "Build a small 2D game with sprite assets and sound effects";
@@ -270,11 +270,7 @@ export async function runOnboard(options?: RunOnboardOptions): Promise<void> {
                 );
                 const token = handleCancel(
                     await password({
-                        message: "OpenClaw Gateway Token (OPENCLAW_TOKEN)",
-                        validate: (v) =>
-                            (v ?? "").trim().length > 0
-                                ? undefined
-                                : "Token cannot be empty",
+                        message: "OpenClaw Gateway Token (Press Enter to leave blank if auth is disabled)",
                     }),
                 ) as string;
                 state.authToken = token.trim();

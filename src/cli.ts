@@ -1,11 +1,18 @@
 #!/usr/bin/env node
 /**
  * TeamClaw CLI entry point.
- * Commands: work, web, check, onboard, start, stop, status, config, lessons
+ *
+ * 4-Pillar Architecture:
+ *   Pillar 1 — `teamclaw setup` / `teamclaw init`  : Dedicated setup phase
+ *   Pillar 2 — `teamclaw work`                     : Zero-config execution
+ *   Pillar 3 — Smart error recovery (inside work)  : Structured diagnostics
+ *   Pillar 4 — Web Dashboard auto-start on `work`  : Background dashboard
+ *
+ * Other commands: web, check, onboard, start, stop, status, config, lessons, run
  */
 
 import pc from "picocolors";
-import { intro, note, outro } from "@clack/prompts";
+import { intro, outro } from "@clack/prompts";
 import { logger } from "./core/logger.js";
 
 function parseGoalArg(args: string[]): { goal?: string; rest: string[] } {
@@ -44,48 +51,63 @@ function printHelp(): void {
         "",
         title,
         "",
+        section("4-Pillar Architecture:"),
+        "  " +
+            pc.bold("Pillar 1") +
+            " — " +
+            cmd("setup") +
+            " / " +
+            cmd("init") +
+            "  " +
+            desc("Guided setup wizard — configure gateway, save config"),
+        "  " +
+            pc.bold("Pillar 2") +
+            " — " +
+            cmd("work") +
+            "            " +
+            desc("Zero-config execution — reads saved config, no infrastructure prompts"),
+        "  " +
+            pc.bold("Pillar 3") +
+            " — " +
+            desc("(auto, inside work) Smart connection error recovery with actionable steps"),
+        "  " +
+            pc.bold("Pillar 4") +
+            " — " +
+            desc("(auto, inside work) Web Dashboard starts in background — use --no-web to disable"),
+        "",
         section("Usage:") + " teamclaw " + desc("<command> [options]"),
         "",
-        section("Commands:"),
-        "  " +
-            cmd("work") +
-            "       " +
-            desc(
-                "Run work session (use --web for dashboard, --discover to re-run service scanner)",
-            ),
-        "  " +
-            cmd("web") +
-            "        " +
-            desc("Start Web UI (http://localhost:8000)"),
-        "  " +
-            cmd("check") +
-            "      " +
-            desc("Check connectivity (OpenClaw workers)"),
-        "  " +
-            cmd("onboard") +
-            "    " +
-            desc(
-                "Interactive setup wizard (--install-daemon to start services in background)",
-            ),
+        section("Setup & Configuration:"),
+        "  " + cmd("setup") + "      " + desc("Run the interactive setup wizard (saves gateway config)"),
+        "  " + cmd("init") + "       " + desc("Alias for setup"),
+        "  " + cmd("onboard") + "    " + desc("Full interactive onboarding (team roster, templates, daemon)"),
+        "  " + cmd("config") + "     " + desc("Manage config (.env + teamclaw.config.json) safely"),
+        "",
+        section("Work Session:"),
+        "  " + cmd("work") + "       " + desc("Run a work session (reads config, auto-starts web dashboard)"),
+        "  " + cmd("web") + "        " + desc("Start Web UI manually (http://localhost:8000)"),
+        "  " + cmd("check") + "      " + desc("Check connectivity (OpenClaw workers)"),
+        "",
+        section("Background Services:"),
         "  " + cmd("start") + "      " + desc("Start Web in background"),
         "  " + cmd("stop") + "       " + desc("Stop background Web"),
-        "  " +
-            cmd("status") +
-            "     " +
-            desc("Show status of background services"),
-        "  " +
-            cmd("config") +
-            "     " +
-            desc("Manage config (.env + teamclaw.config.json) safely"),
+        "  " + cmd("status") + "     " + desc("Show status of background services"),
+        "",
+        section("Utilities:"),
         "  " + cmd("lessons") + "    " + desc("Export lessons"),
+        "  " + cmd("run") + "        " + desc("Run OpenClaw gateway (run openclaw --port 8001)"),
+        "",
+        section("work flags:"),
+        "  " + pc.green("--goal") + " " + desc('"Your goal"     Set work goal without prompting'),
+        "  " + pc.green("--no-web") + "            " + desc("Disable automatic web dashboard startup"),
+        "  " + pc.green("--runs") + " " + desc("<N>            Number of work sessions to run sequentially"),
+        "  " + pc.dim("(infra flags like --port/--discover are setup-time concerns; use `teamclaw setup`)"),
         "",
         section("Examples:"),
-        "  " +
-            exCmd("teamclaw work") +
-            " " +
-            desc('--goal "Build a landing page"'),
-        "  " + exCmd("teamclaw work") + " " + desc("--web"),
-        "  " + exCmd("teamclaw onboard") + " " + desc("--install-daemon"),
+        "  " + exCmd("teamclaw setup"),
+        "  " + exCmd("teamclaw work"),
+        "  " + exCmd("teamclaw work") + " " + desc('--goal "Build a landing page"'),
+        "  " + exCmd("teamclaw work") + " " + desc("--no-web"),
         "  " + exCmd("teamclaw config"),
         "  " + exCmd("teamclaw config get OPENCLAW_TOKEN"),
         "  " + exCmd("teamclaw web"),
@@ -103,47 +125,46 @@ async function main(): Promise<void> {
     }
     const cmd = args[0];
 
-    if (cmd === "work") {
+    // -------------------------------------------------------------------------
+    // Pillar 1: teamclaw setup
+    // -------------------------------------------------------------------------
+    if (cmd === "setup" || cmd === "init") {
+        const { runSetup } = await import("./commands/setup.js");
+        await runSetup();
+
+    // -------------------------------------------------------------------------
+    // Pillar 2 + 3 + 4: teamclaw work — zero-config, auto-web, smart recovery
+    // -------------------------------------------------------------------------
+    } else if (cmd === "work") {
         const commandArgs = args.slice(1);
-        const hasWebFlag = commandArgs.includes("--web");
-        const hasNoDashboardFlag = commandArgs.includes("--no-dashboard");
-        const workArgs = commandArgs.filter((a) => a !== "--web" && a !== "--no-dashboard");
+        // Pillar 4: --no-web flag
+        const hasNoWebFlag = commandArgs.includes("--no-web");
+        // Strip legacy --web / --no-dashboard flags (kept for compat, no longer meaningful)
+        const workArgs = commandArgs.filter(
+            (a) => a !== "--web" && a !== "--no-dashboard",
+        );
         const parsed = parseGoalArg(workArgs);
         const canRenderSpinner = Boolean(
             process.stdout.isTTY && process.stderr.isTTY,
         );
 
-        if (hasWebFlag) {
-            const { start } = await import("./daemon/manager.js");
-            const result = start({ web: true, gateway: false });
-            const webPort = result.error
-                ? Number(process.env["WEB_PORT"]) || 8000
-                : Number(process.env["WEB_PORT"]) || 8000;
-            if (canRenderSpinner) {
-                intro("TeamClaw Work Session (Web UI)");
-                note(
-                    [
-                        "Web dashboard is booting in the background.",
-                        `It will be available at http://localhost:${webPort} shortly.`,
-                        "",
-                        "You can also manage it via:",
-                        "  teamclaw status   # check web status",
-                        "  teamclaw stop     # stop background web server",
-                    ].join("\n"),
-                    "Web dashboard starting",
-                );
-            } else if (result.error) {
-                logger.warn(result.error);
-            }
-        } else if (canRenderSpinner) {
+        if (canRenderSpinner) {
             intro("TeamClaw Work Session");
         }
 
         const { runWork } = await import("./work-runner.js");
-        await runWork({ args: parsed.rest, goal: parsed.goal, openDashboard: !hasNoDashboardFlag });
+        // Pillar 2: pass noWeb flag so work-runner never prompts for infrastructure
+        await runWork({
+            args: parsed.rest,
+            goal: parsed.goal,
+            openDashboard: !hasNoWebFlag,
+            noWeb: hasNoWebFlag,
+        });
+
         if (canRenderSpinner) {
             outro("Work session finished.");
         }
+
     } else if (cmd === "web") {
         const canRenderSpinner = Boolean(
             process.stdout.isTTY && process.stderr.isTTY,
@@ -156,13 +177,16 @@ async function main(): Promise<void> {
         if (canRenderSpinner) {
             outro("Web server ready.");
         }
+
     } else if (cmd === "check") {
         const { runCheck } = await import("./check.js");
         await runCheck(args.slice(1));
+
     } else if (cmd === "onboard") {
         const installDaemon = args.includes("--install-daemon");
         const { runOnboard } = await import("./onboard/index.js");
         await runOnboard({ installDaemon });
+
     } else if (cmd === "config") {
         const sub = args[1];
         if (!sub) {
@@ -228,6 +252,7 @@ async function main(): Promise<void> {
             "Usage: teamclaw config | config get <KEY> [--raw] | config set <KEY> <VALUE> | config unset <KEY>",
         );
         process.exit(1);
+
     } else if (cmd === "start") {
         const { start } = await import("./daemon/manager.js");
         const result = start({ web: true, gateway: false });
@@ -236,20 +261,50 @@ async function main(): Promise<void> {
             process.exit(1);
         }
         logger.success("Web started in background.");
+
     } else if (cmd === "stop") {
         const { stop } = await import("./daemon/manager.js");
         stop();
         logger.success("Stopped web.");
+
     } else if (cmd === "status") {
         const { runStatusCommand } = await import("./commands/status.js");
         await runStatusCommand();
+
     } else if (cmd === "lessons") {
         const { runLessonsExport } = await import("./lessons-export.js");
         await runLessonsExport(args.slice(1));
+
+    } else if (cmd === "run") {
+        const runArgs = args.slice(1);
+        if (!runArgs[0] || runArgs[0] === "--help" || runArgs[0] === "-h") {
+            logger.plain("Usage: teamclaw run openclaw [--port PORT]");
+            logger.plain("");
+            logger.plain("Start the OpenClaw gateway.");
+            logger.plain("");
+            logger.plain("Examples:");
+            logger.plain("  teamclaw run openclaw            # interactive (auto-detect port)");
+            logger.plain("  teamclaw run openclaw --port 9000");
+            return;
+        }
+        if (runArgs[0] === "openclaw" || runArgs[0] === "gateway") {
+            const portIndex = runArgs.indexOf("--port");
+            const explicitPort =
+                portIndex !== -1 && runArgs[portIndex + 1]
+                    ? runArgs[portIndex + 1]
+                    : undefined;
+            const { startOpenclawGateway } = await import("./commands/run-openclaw.js");
+            await startOpenclawGateway({ port: explicitPort });
+        } else {
+            logger.error(`Unknown run target: ${runArgs[0]}`);
+            logger.error("Usage: teamclaw run openclaw [--port PORT]");
+            process.exit(1);
+        }
+
     } else {
         logger.error(`Unknown command: ${cmd}`);
         logger.error(
-            "Usage: teamclaw work | web | check | onboard | start | stop | status | config | lessons",
+            "Run `teamclaw --help` for usage. Key commands: setup, work, config, web, check, status.",
         );
         process.exit(1);
     }

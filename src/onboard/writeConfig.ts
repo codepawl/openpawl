@@ -52,5 +52,6 @@ export function writeConfig(cfg: PersistConfig): void {
     config.workers = cfg.workers;
   }
   if (cfg.goal) config.goal = cfg.goal;
+  if (cfg.authToken) config.openclaw_token = cfg.authToken;
   writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n", "utf-8");
 }

@@ -20,6 +20,7 @@ export interface TeamConfig {
   memory_backend?: "lancedb" | "local_json";
   openclaw_chat_endpoint?: string;
   openclaw_model?: string;
+  openclaw_token?: string;
   webhooks?: {
     on_task_complete?: string;
     on_cycle_end?: string;

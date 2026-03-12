@@ -161,6 +161,96 @@ Generate ONLY the lesson text (max 15 words), nothing else:`;
     return "Break complex goals into smaller subtasks";
   }
 
+  async extractProjectMemory(
+    state: GraphState,
+    workspacePath: string
+  ): Promise<string | null> {
+    const botStats = state.bot_stats ?? {};
+    let tasksCompleted: number;
+    let tasksFailed: number;
+    if (Object.keys(botStats).length > 0) {
+      tasksCompleted = Object.values(botStats).reduce(
+        (sum, s) => sum + ((s?.tasks_completed as number) ?? 0),
+        0
+      );
+      tasksFailed = Object.values(botStats).reduce(
+        (sum, s) => sum + ((s?.tasks_failed as number) ?? 0),
+        0
+      );
+    } else {
+      tasksCompleted = 0;
+      tasksFailed = 0;
+    }
+
+    if (tasksCompleted === 0 && tasksFailed === 0) {
+      return null;
+    }
+
+    const taskQueue = state.task_queue ?? [];
+    const completedTasks = taskQueue
+      .filter((t) => t.status === "completed")
+      .map((t) => `- ${t.description}`)
+      .join("\n");
+
+    const humanFeedback = taskQueue
+      .filter((t) => t.reviewer_feedback)
+      .map((t) => `Human feedback: ${t.reviewer_feedback}`)
+      .join("; ");
+
+    const context = `
+Completed Tasks:
+${completedTasks || "No tasks completed"}
+
+${humanFeedback ? `Human Feedback: ${humanFeedback}` : ""}
+
+Tasks Completed: ${tasksCompleted}
+Tasks Failed: ${tasksFailed}
+`;
+
+    try {
+      const { generate } = await import("../core/llm-client.js");
+      const prompt = `You are a team analyst extracting key technical decisions from a completed project session.
+
+${context}
+
+Analyze the completed tasks and extract a summary of technical decisions, coding style preferences, and architectural choices that should be remembered for future projects.
+
+Your summary must be:
+1. Concise (maximum 30 words)
+2. Include specific technologies, frameworks, or patterns used
+3. Include user preferences if mentioned
+4. Actionable for future sessions
+
+Examples:
+- "Used React with Tailwind CSS, dark wood theme for UI, HTML/CSS/JS for landing page"
+- "Preferred vanilla CSS over Tailwind, used localStorage for persistence"
+- "User wants minimal JavaScript, pure HTML/CSS solutions"
+
+Generate ONLY the summary text (max 30 words), nothing else:`;
+
+      const summary = (await generate(prompt, { temperature: 0.3 })).trim();
+      const words = summary.split(/\s+/);
+      let finalSummary = summary;
+      if (words.length > 30) {
+        finalSummary = words.slice(0, 30).join(" ");
+        log("⚠️ Project memory truncated to 30 words");
+      }
+
+      if (this.vectorMemory) {
+        await this.vectorMemory.addProjectMemory(finalSummary, {
+          workspace_path: workspacePath,
+          tasks_completed: tasksCompleted,
+          tasks_failed: tasksFailed,
+        });
+      }
+
+      return finalSummary;
+    } catch (err) {
+      log(`⚠️ LLM project memory extraction failed: ${err}`);
+      return null;
+    }
+  }
+
   generatePostMortemReport(state: GraphState, lesson: string): string {
     const botStats = state.bot_stats ?? {};
     let tasksCompleted: number;
@@ -181,27 +271,17 @@ Generate ONLY the lesson text (max 15 words), nothing else:`;
     const total = tasksCompleted + tasksFailed;
     const successRate = total > 0 ? (tasksCompleted / total) * 100 : 0;
 
-    return `
-╔════════════════════════════════════════════════════════════════╗
-║                    POST-MORTEM ANALYSIS                        ║
-╚════════════════════════════════════════════════════════════════╝
-
-Generation: ${state.generation_id ?? "Unknown"}
-Cycles: ${state.cycle_count ?? 0}
-
-Operational Metrics:
-  Tasks Completed: ${tasksCompleted}
-  Tasks Failed: ${tasksFailed}
-  Success Rate: ${successRate.toFixed(1)}%
-  Final Quality: ${state.last_quality_score ?? 0}/100
-
-Cause of Failure:
-  ${state.death_reason ?? "Unknown"}
-
-📚 LESSON FOR FUTURE GENERATIONS:
-  "${lesson}"
-
-╚════════════════════════════════════════════════════════════════╝
-`;
+    return [
+      "POST-MORTEM ANALYSIS",
+      `• Generation: ${state.generation_id ?? "Unknown"}`,
+      `• Cycles: ${state.cycle_count ?? 0}`,
+      "• Operational Metrics:",
+      `  - Tasks Completed: ${tasksCompleted}`,
+      `  - Tasks Failed: ${tasksFailed}`,
+      `  - Success Rate: ${successRate.toFixed(1)}%`,
+      `  - Final Quality: ${state.last_quality_score ?? 0}/100`,
+      `• Cause of Failure: ${state.death_reason ?? "Unknown"}`,
+      `• Lesson for future generations: "${lesson}"`,
+    ].join("\n");
   }
 }
