@@ -1,97 +1,87 @@
-# Repository Guidelines
+# Guidelines
 
-- Repo: TeamClaw (this repository)
-- In chat replies, file references must be repo-root relative only (e.g. `src/core/simulation.ts:49`); never absolute paths or `~/...`.
-- GitHub issues/comments/PR comments: use literal multiline strings or `-F - <<'EOF'` (or `$'...'`) for real newlines; never embed `"\\n"`.
-- GitHub comment footgun: never use `gh issue/pr comment -b "..."` when body contains backticks or shell chars. Always use single-quoted heredoc (`-F - <<'EOF'`) so no command substitution/escaping corruption.
-- GitHub linking footgun: don't wrap issue/PR refs like `#123` in backticks when you want auto-linking. Use plain `#123` (optionally add full URL).
-- When working on a GitHub Issue or PR, print the full URL at the end of the task.
-- When answering questions, respond with high-confidence answers only: verify in code; do not guess.
+- File references: repo-root relative only (e.g. `src/core/simulation.ts:49`).
+- GitHub CLI: use `-F - <<'EOF'` for multiline bodies; never `\"\\n\"` or `-b "..."` with backticks/shell chars.
+- GitHub linking: plain `#123` for auto-links (no backticks). Print full URL at end of issue/PR tasks.
+- Verify answers in code; do not guess.
 
 ## Project Overview
 
-TeamClaw is a team orchestration application. Users define goals and teams (e.g. Game Dev: programmers, artist, SFX), and AI agents collaborate via LangGraph. Optional multi-run mode learns from failed runs via RAG (ChromaDB or JSON fallback). No economics—pure team coordination.
+TeamClaw orchestrates AI agent teams via LangGraph. Users define goals and teams; agents collaborate to complete them. Multi-run mode learns from failed runs via RAG (LanceDB). Pure team coordination, no economics.
 
-## Project Structure & Module Organization
+## Structure
 
-- Source code: `src/` (CLI in `src/cli.ts`, orchestration in `src/core`, agents in `src/agents`, web in `src/web`, onboarding in `src/onboard`).
-- Tests: `tests/` (Vitest). Built output in `dist/`.
-- Docs: `docs/`.
-- Key modules:
-  - **src/core/** — State, config, LangGraph simulation, knowledge-base, team templates
-  - **src/agents/** — Coordinator (goal decomposition), WorkerBot (task execution), Analyst (postmortem)
-  - **src/interfaces/** — Sparki SDK (RealSparki / MockSparki)
-  - **src/web/** — Fastify + WebSocket; streams workflow to `static/terminal.html`
-  - **src/work-runner.ts** — Work session logic
-  - **src/check.ts** — Connectivity check CLI
+- `src/cli.ts` — CLI entry point
+- `src/core/` — State, config, LangGraph simulation, knowledge-base, team templates, LLM client, workspace/session management
+- `src/agents/` — Coordinator, WorkerBot, Analyst, Approval, Planning, Retrospective, RFC, SystemDesign, MemoryRetrieval
+- `src/commands/` — CLI subcommands (config, setup, status, run-openclaw)
+- `src/config/` — Config UI
+- `src/interfaces/` — Worker adapter, WebSocket events
+- `src/web/` — Fastify + WebSocket server; `static/` + `client/` for web UI
+- `src/daemon/` — Background process manager
+- `src/onboard/` — Interactive onboarding
+- `src/utils/` — JSON extraction, log rotation, path autocomplete
+- `src/work-runner.ts` — Work session logic
+- `src/check.ts` — Connectivity check
+- `tests/` — Vitest tests
+- `docs/`, `dist/` — Documentation, build output
 
 ### Agent Pattern
 
-Each LangGraph node receives `GraphState` and returns `Partial<GraphState>` (only changed keys). Nodes include `__node__` for streaming identification.
+Each LangGraph node receives `GraphState`, returns `Partial<GraphState>` (changed keys only). Nodes include `__node__` for streaming identification.
 
 ### RAG & LLM
 
-- `VectorMemory`: ChromaDB or `data/vector_store/lessons_fallback.json`.
-- TeamClaw routes LLM requests through OpenClaw using `OPENCLAW_WORKER_URL` and `OPENCLAW_TOKEN`.
+- Vector memory via embedded LanceDB.
+- LLM requests route through OpenClaw (`OPENCLAW_WORKER_URL`, `OPENCLAW_TOKEN`).
 
-## Build, Test, and Development Commands
+## Commands
 
-- Runtime: Node **>= 20**. Package manager: **pnpm**.
-- Install: `pnpm install`
-- If deps missing (`node_modules` empty, `vitest not found`), run `pnpm install`, then retry the command.
-- Type-check: `pnpm run typecheck`
-- Build: `pnpm run build`
-- Lint: `pnpm run lint`
-- Tests: `pnpm run test` (Vitest)
-- Watch mode: `pnpm run test:watch`, `pnpm run dev`
-- Web UI: `pnpm run web` (http://localhost:8000)
-- Work sessions: `pnpm run work` (or `teamclaw work --runs 5`)
+- Runtime: Node **>= 20**, **pnpm**.
+- `pnpm install` — install deps (run if `node_modules` missing or `vitest not found`)
+- `pnpm run build` — build (via tsup)
+- `pnpm run typecheck` — type-check
+- `pnpm run test` / `pnpm run test:watch` — tests (Vitest)
+- `pnpm run lint` — lint
+- `pnpm run dev` — watch mode
+- `pnpm run web` — web UI (http://localhost:8000)
+- `pnpm run work` — work sessions with web dashboard
 - Makefile: `make install`, `make check` (typecheck + test), `make lint`, `make web`, `make work`, `make clean`
 
-## Coding Style & Naming Conventions
+## Code Style
 
-- Language: TypeScript (ESM). Prefer strict typing; avoid `any`.
-- Never add `@ts-nocheck` or disable `no-explicit-any`; fix root causes.
-- Add brief comments for tricky or non-obvious logic.
-- Keep files concise; extract helpers instead of duplicating. Aim under ~700 LOC when feasible.
-- Naming: **TeamClaw** for product/docs headings; `teamclaw` for CLI command and package.
+- TypeScript (ESM, built with tsup). Strict typing; no `any`, no `@ts-nocheck`.
+- Brief comments for non-obvious logic only.
+- Keep files under ~700 LOC; extract helpers over duplicating.
+- Naming: **TeamClaw** in docs/headings; `teamclaw` for CLI/package.
 
-## Testing Guidelines
+## Testing
 
-- Framework: Vitest.
-- Naming: match source with `*.test.ts`; e.g. `tests/state.test.ts`.
+- Vitest. Test files: `tests/*.test.ts` matching source names.
 - Run `pnpm run test` before pushing when touching logic.
-- Do not set test workers above 16 if memory pressure occurs.
 
-## Commit & Pull Request Guidelines
+## Commits & PRs
 
-- Follow concise, action-oriented commit messages (e.g. `fix: add reducer to graph-state Annotation`).
-- Group related changes; avoid bundling unrelated refactors.
-- Issue templates: `.github/ISSUE_TEMPLATE/`
-- PR template: add `.github/pull_request_template.md` if desired.
+- Concise action-oriented messages (e.g. `fix: add reducer to graph-state Annotation`).
+- Group related changes; don't bundle unrelated refactors.
 
 ## Git Notes
 
-- If `git branch -d/-D` is policy-blocked, delete ref directly: `git update-ref -d refs/heads/<branch>`.
-- Bulk PR close/reopen: if action would affect more than 5 PRs, ask for explicit confirmation with exact count and scope.
+- Branch delete blocked? Use `git update-ref -d refs/heads/<branch>`.
+- Bulk PR operations (>5): ask for explicit confirmation with count and scope.
 
-## Security & Configuration Tips
+## Security
 
-- Never commit or publish real credentials, tokens, or live config. Use placeholders in docs, tests, and examples.
-- `.env` from `.env.example`; OpenClaw and ChromaDB settings are configurable.
+- Never commit real credentials/tokens. Use `.env` from `.env.example`.
 
 ## Agent-Specific Notes
 
-- Never edit `node_modules`. Updates overwrite.
-- **Multi-agent safety:** do not create/apply/drop `git stash` unless explicitly requested. Assume other agents may be working.
-- **Multi-agent safety:** when the user says "push", you may `git pull --rebase` to integrate latest. When "commit", scope to your changes only.
-- **Multi-agent safety:** do not switch branches unless explicitly requested.
-- **Multi-agent safety:** focus reports on your edits; avoid guard-rail disclaimers unless blocked.
-- Lint/format churn: if diffs are formatting-only, auto-resolve without asking. Only ask when changes are semantic.
-- Bug investigations: read source of relevant dependencies and local code before concluding; aim for high-confidence root cause.
-- Dependency changes: avoid patching (pnpm patches, overrides) unless explicitly approved.
-- Version bump: do not change versions without explicit consent.
+- Never edit `node_modules`.
+- **Multi-agent safety:** no stash create/apply/drop unless requested. No branch switching unless requested. Scope commits to your changes only. On push, `git pull --rebase` to integrate. Focus reports on your edits.
+- Formatting-only diffs: auto-resolve without asking. Only ask on semantic changes.
+- Bug investigations: read source before concluding; aim for high-confidence root cause.
+- No dependency patching or version bumps without explicit approval.
 
 ## Tech Stack
 
-LangGraph.js, Zod, Fastify + WebSocket, ChromaDB (optional), OpenClaw Gateway. No Python.
+LangGraph.js, Zod, Fastify + WebSocket, LanceDB, OpenClaw Gateway, tsup. No Python.
