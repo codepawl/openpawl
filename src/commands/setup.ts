@@ -28,7 +28,6 @@ import {
     cancel,
 } from "@clack/prompts";
 import pc from "picocolors";
-import { readEnvFile, writeEnvFile, setEnvValue } from "../core/envManager.js";
 import {
     readTeamclawConfig,
     writeTeamclawConfig,
@@ -40,11 +39,12 @@ import {
     setOpenClawToken,
     setOpenClawChatEndpoint,
 } from "../core/config.js";
-import { logger } from "../core/logger.js";
+import { logger, setDebugMode } from "../core/logger.js";
 import {
     writeGlobalConfig,
     type TeamClawGlobalConfig,
 } from "../core/global-config.js";
+import { readLocalOpenClawConfig } from "../core/discovery.js";
 
 /** Default port when TeamClaw manages the gateway automatically. */
 const MANAGED_GATEWAY_PORT = "8001";
@@ -176,26 +176,28 @@ function isLocalHost(host: string): boolean {
  */
 function persistConfig(result: SetupResult): void {
     const wsUrl = `ws://${result.gatewayIp}:${result.gatewayPort}`;
-    // API port is gateway WS port + 2 (e.g. 8001 → 8003)
     const httpUrl = `http://${result.gatewayIp}:${result.apiPort}`;
 
-    const envFile = readEnvFile();
-    let lines = envFile.lines;
-    lines = setEnvValue("OPENCLAW_WORKER_URL", wsUrl, lines);
-    lines = setEnvValue("OPENCLAW_HTTP_URL", httpUrl, lines);
-    lines = setEnvValue("OPENCLAW_TOKEN", result.token, lines);
-    lines = setEnvValue("OPENCLAW_CHAT_ENDPOINT", "/v1/chat/completions", lines);
-    if (result.model) lines = setEnvValue("OPENCLAW_MODEL", result.model, lines);
-    writeEnvFile(envFile.path, lines);
+    const globalConfig: TeamClawGlobalConfig = {
+        version: 1,
+        managedGateway: result.managed,
+        gatewayHost: result.gatewayIp,
+        gatewayPort: Number(result.gatewayPort),
+        apiPort: result.apiPort,
+        gatewayUrl: wsUrl,
+        apiUrl: httpUrl,
+        token: result.token,
+        model: result.model || GATEWAY_DEFAULT_MODEL,
+        chatEndpoint: "/v1/chat/completions",
+        dashboardPort: 9001,
+        debugMode: false,
+    };
+    writeGlobalConfig(globalConfig);
 
     const tc = readTeamclawConfig();
     const data: Record<string, unknown> = {
         ...tc.data,
-        worker_url: wsUrl,
-        openclaw_http_url: httpUrl,
-        openclaw_chat_endpoint: "/v1/chat/completions",
     };
-    if (result.model) data.openclaw_model = result.model;
     if (!Array.isArray((data as Record<string, unknown>).roster)) {
         (data as Record<string, unknown>).roster = [
             {
@@ -248,21 +250,26 @@ export async function runSetup(): Promise<void> {
 
     const managed = managedChoice as boolean;
 
-    let gatewayPort = MANAGED_GATEWAY_PORT;
+    const openclawConfig = readLocalOpenClawConfig();
+
+    let gatewayPort = openclawConfig?.port?.toString() ?? MANAGED_GATEWAY_PORT;
     let gatewayIp = MANAGED_GATEWAY_IP;
-    let token = "";
+    let token = openclawConfig?.token ?? "";
 
     if (managed) {
         // -----------------------------------------------------------------------
         // Step 2a: Auto-configure
         // -----------------------------------------------------------------------
+        const sourceNote = openclawConfig
+            ? pc.dim(`(loaded from ${openclawConfig.configPath})`)
+            : "";
         note(
             [
                 `TeamClaw will spawn OpenClaw on ${pc.cyan(`${gatewayIp}:${gatewayPort}`)} when you run ${pc.green("teamclaw work")}.`,
                 "",
                 "You can change these defaults later by re-running `teamclaw setup`.",
             ].join("\n"),
-            "Auto-Managed Gateway",
+            "Auto-Managed Gateway" + (openclawConfig ? ` ${sourceNote}` : ""),
         );
     } else {
         // -----------------------------------------------------------------------
@@ -270,8 +277,8 @@ export async function runSetup(): Promise<void> {
         // -----------------------------------------------------------------------
         const portInput = await text({
             message: "Gateway Port:",
-            initialValue: MANAGED_GATEWAY_PORT,
-            placeholder: MANAGED_GATEWAY_PORT,
+            initialValue: gatewayPort,
+            placeholder: gatewayPort,
             validate: (v) => {
                 const n = Number(v?.trim());
                 return Number.isInteger(n) && n > 0 && n <= 65535
@@ -283,12 +290,12 @@ export async function runSetup(): Promise<void> {
             cancel("Setup cancelled.");
             process.exit(0);
         }
-        gatewayPort = (portInput as string).trim() || MANAGED_GATEWAY_PORT;
+        gatewayPort = (portInput as string).trim() || gatewayPort;
 
         const ipInput = await text({
             message: "Gateway IP / Hostname:",
-            initialValue: MANAGED_GATEWAY_IP,
-            placeholder: MANAGED_GATEWAY_IP,
+            initialValue: gatewayIp,
+            placeholder: gatewayIp,
             validate: (v) =>
                 (v ?? "").trim().length > 0 ? undefined : "IP cannot be empty",
         });
@@ -296,17 +303,20 @@ export async function runSetup(): Promise<void> {
             cancel("Setup cancelled.");
             process.exit(0);
         }
-        gatewayIp = (ipInput as string).trim() || MANAGED_GATEWAY_IP;
+        gatewayIp = (ipInput as string).trim() || gatewayIp;
 
+        const tokenMsg = openclawConfig?.token
+            ? "Gateway Auth Token (press Enter to keep loaded value, or type to change):"
+            : "Gateway Auth Token (press Enter to skip if auth is disabled):";
         const tokenInput = await password({
-            message:
-                "Gateway Auth Token (press Enter to skip if auth is disabled):",
+            message: tokenMsg,
         });
         if (isCancel(tokenInput)) {
             cancel("Setup cancelled.");
             process.exit(0);
         }
-        token = (tokenInput as string).trim();
+        const newToken = (tokenInput ?? "").trim();
+        token = newToken || token;
     }
 
     // -------------------------------------------------------------------------
@@ -317,7 +327,7 @@ export async function runSetup(): Promise<void> {
 
     const pingResult = await pingGateway(gatewayIp, gatewayPort, token);
 
-    const detectedModel = pingResult.model?.trim() || GATEWAY_DEFAULT_MODEL;
+    const detectedModel = pingResult.model?.trim() || openclawConfig?.model || GATEWAY_DEFAULT_MODEL;
 
     if (pingResult.reachable) {
         s.stop("✅ Gateway is reachable! (Model handling delegated to Gateway)");
@@ -327,13 +337,16 @@ export async function runSetup(): Promise<void> {
                 `⚠️  Could not reach gateway at ${gatewayIp}:${gatewayPort}. Settings will be saved anyway.`,
             ),
         );
+        const configSource = openclawConfig
+            ? pc.dim(`\n(Config loaded from ${openclawConfig.configPath})`)
+            : "";
         note(
             [
                 "The gateway may not be running yet — that's okay!",
                 managed
                     ? `TeamClaw will start it automatically when you run ${pc.green("teamclaw work")}.`
                     : `Start it manually and then run ${pc.green("teamclaw work")}.`,
-            ].join("\n"),
+            ].join("\n") + configSource,
             "Gateway not reachable",
         );
     }
@@ -342,6 +355,18 @@ export async function runSetup(): Promise<void> {
     // Step 4: Save config
     // -------------------------------------------------------------------------
     const apiPort = pingResult.apiPort;
+
+    const debugModeChoice = await confirm({
+        message: "Enable debug mode for verbose logging?",
+        initialValue: openclawConfig?.model ? false : false,
+    });
+
+    if (isCancel(debugModeChoice)) {
+        cancel("Setup cancelled.");
+        process.exit(0);
+    }
+
+    const debugMode = debugModeChoice as boolean;
 
     const globalConfig: TeamClawGlobalConfig = {
         version: 1,
@@ -355,6 +380,7 @@ export async function runSetup(): Promise<void> {
         model: detectedModel,
         chatEndpoint: "/v1/chat/completions",
         dashboardPort: 9001,
+        debugMode,
     };
     const globalConfigPath = writeGlobalConfig(globalConfig);
 
@@ -367,6 +393,8 @@ export async function runSetup(): Promise<void> {
         managed,
     });
 
+    setDebugMode(debugMode);
+
     note(
         [
             `${pc.green("✓")} WS Gateway   : ${pc.cyan(`ws://${gatewayIp}:${gatewayPort}`)}`,
@@ -374,6 +402,7 @@ export async function runSetup(): Promise<void> {
             `${pc.green("✓")} Token        : ${token ? pc.dim("saved (masked)") : pc.dim("none (auth disabled)")}`,
             `${pc.green("✓")} Model        : ${detectedModel ? pc.cyan(detectedModel) : pc.dim("(set later)")}`,
             `${pc.green("✓")} Managed      : ${managed ? pc.green("yes — auto-spawn on `teamclaw work`") : pc.dim("no (external gateway)")}`,
+            `${pc.green("✓")} Debug Mode   : ${debugMode ? pc.yellow("enabled — verbose logging") : pc.dim("disabled")}`,
             `${pc.green("✓")} Global Config: ${pc.cyan(globalConfigPath)}`,
             "",
             "Config saved to ~/.teamclaw/config.json (+ mirrored to .env/teamclaw.config.json)",

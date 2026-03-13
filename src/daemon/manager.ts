@@ -10,7 +10,7 @@ import path from "node:path";
 const DAEMON_DIR = ".teamclaw";
 const STATE_FILE = "daemon.json";
 const WEB_LOG = "web.log";
-const DEFAULT_WEB_PORT = 8000;
+const DEFAULT_WEB_PORT = 9001;
 
 export interface DaemonState {
   web?: { pid: number; port: number; startedAt?: string };

@@ -31,7 +31,9 @@ function statusToColumnId(status: string): string {
 
 export function KanbanBoard() {
   const task_queue = useWsStore((s) => s.task_queue);
+  const connectionStatus = useWsStore((s) => s.connectionStatus);
   const sendMessage = useWsStore((s) => s.sendMessage);
+  const isLoading = connectionStatus === "connecting" || connectionStatus === "reconnecting";
 
   const tasksByColumn = COLUMNS.map((col) => ({
     ...col,
@@ -40,6 +42,28 @@ export function KanbanBoard() {
       return col.statuses.includes(s);
     }),
   }));
+
+  if (isLoading && task_queue.length === 0) {
+    return (
+      <div className="flex flex-col gap-4">
+        <h2 className="text-lg font-semibold text-gray-700 dark:text-gray-200">Task Queue</h2>
+        <div className="flex gap-4 overflow-x-auto pb-4">
+          {COLUMNS.map((col) => (
+            <div
+              key={col.id}
+              className="flex-shrink-0 w-64 bg-gray-100 dark:bg-gray-700 rounded-lg p-3 animate-pulse"
+            >
+              <div className="h-5 w-24 bg-gray-300 dark:bg-gray-600 rounded mb-3"></div>
+              <div className="space-y-2">
+                <div className="h-16 bg-gray-200 dark:bg-gray-600 rounded"></div>
+                <div className="h-16 bg-gray-200 dark:bg-gray-600 rounded"></div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event;

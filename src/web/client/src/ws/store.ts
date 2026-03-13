@@ -2,6 +2,18 @@ import { create } from "zustand";
 
 export type ConnectionStatus = "connecting" | "open" | "closed" | "reconnecting" | "error";
 
+type TerminalDataCallback = (data: string) => void;
+const terminalSubscribers: Set<TerminalDataCallback> = new Set();
+
+export function subscribeToTerminalOutput(callback: TerminalDataCallback): () => void {
+  terminalSubscribers.add(callback);
+  return () => terminalSubscribers.delete(callback);
+}
+
+export function pushTerminalOutput(data: string): void {
+  terminalSubscribers.forEach((cb) => cb(data));
+}
+
 export interface NodeEventState {
   task_queue?: Record<string, unknown>[];
   bot_stats?: Record<string, Record<string, unknown>>;
@@ -18,6 +30,14 @@ export interface AlertItem {
   created_at: string;
 }
 
+export interface TokenUsage {
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalCachedInputTokens: number;
+  lastUpdate: number;
+  model: string;
+}
+
 interface WsStore {
   connectionStatus: ConnectionStatus;
   task_queue: Record<string, unknown>[];
@@ -27,6 +47,9 @@ interface WsStore {
   lastError: string | null;
   alerts: AlertItem[];
   pendingApproval: Record<string, unknown> | null;
+  activeNode: string | null;
+  completedNodes: string[];
+  tokenUsage: TokenUsage;
   sendMessage: (payload: object) => void;
   setConnectionStatus: (status: ConnectionStatus) => void;
   setFromNodeEvent: (state: NodeEventState) => void;
@@ -37,6 +60,11 @@ interface WsStore {
   removeAlert: (id: string) => void;
   clearAlerts: () => void;
   setPendingApproval: (pending: Record<string, unknown> | null) => void;
+  setActiveNode: (node: string | null) => void;
+  addCompletedNode: (node: string) => void;
+  resetNodeState: () => void;
+  addTokenUsage: (input: number, output: number, cached: number) => void;
+  setModel: (model: string) => void;
 }
 
 function noopSendMessage(_payload: object): void {}
@@ -50,6 +78,9 @@ export const useWsStore = create<WsStore>((set) => ({
   lastError: null,
   alerts: [],
   pendingApproval: null,
+  activeNode: null,
+  completedNodes: [],
+  tokenUsage: { totalInputTokens: 0, totalOutputTokens: 0, totalCachedInputTokens: 0, lastUpdate: 0, model: "gpt-4o-mini" },
   sendMessage: noopSendMessage,
   setConnectionStatus: (status) => set({ connectionStatus: status }),
   setFromNodeEvent: (state) =>
@@ -73,4 +104,29 @@ export const useWsStore = create<WsStore>((set) => ({
     })),
   clearAlerts: () => set({ alerts: [] }),
   setPendingApproval: (pending) => set({ pendingApproval: pending }),
+  setActiveNode: (node) => set({ activeNode: node }),
+  addCompletedNode: (node) =>
+    set((prev) => ({
+      completedNodes: prev.completedNodes.includes(node)
+        ? prev.completedNodes
+        : [...prev.completedNodes, node],
+    })),
+  resetNodeState: () => set({ activeNode: null, completedNodes: [] }),
+  addTokenUsage: (input, output, cached) =>
+    set((prev) => ({
+      tokenUsage: {
+        totalInputTokens: prev.tokenUsage.totalInputTokens + input,
+        totalOutputTokens: prev.tokenUsage.totalOutputTokens + output,
+        totalCachedInputTokens: prev.tokenUsage.totalCachedInputTokens + cached,
+        lastUpdate: Date.now(),
+        model: prev.tokenUsage.model,
+      },
+    })),
+  setModel: (model) =>
+    set((prev) => ({
+      tokenUsage: {
+        ...prev.tokenUsage,
+        model,
+      },
+    })),
 }));

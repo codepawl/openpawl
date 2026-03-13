@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { useWsStore } from "./store";
+import { useWsStore, pushTerminalOutput } from "./store";
 
 const INITIAL_RECONNECT_MS = 1500;
 const MAX_RECONNECT_MS = 15000;
@@ -24,6 +24,10 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
   const setSendMessage = useWsStore((s) => s.setSendMessage);
   const pushAlert = useWsStore((s) => s.pushAlert);
   const setPendingApproval = useWsStore((s) => s.setPendingApproval);
+  const setActiveNode = useWsStore((s) => s.setActiveNode);
+  const addCompletedNode = useWsStore((s) => s.addCompletedNode);
+  const addTokenUsage = useWsStore((s) => s.addTokenUsage);
+  const setModel = useWsStore((s) => s.setModel);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -88,6 +92,21 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
               details: pending,
               created_at: new Date().toISOString(),
             });
+          } else if (type === "WAITING_FOR_HUMAN" && payload.task_id) {
+            const taskId = payload.task_id as string;
+            const message = (payload.message as string) || "Task requires human approval";
+            setPendingApproval({
+              task_id: taskId,
+              description: message,
+              waiting: true,
+            });
+            pushAlert({
+              id: `waiting-${Date.now()}`,
+              type: "approval_request",
+              message: message,
+              details: { task_id: taskId },
+              created_at: new Date().toISOString(),
+            });
           } else if (type === "hallucination_warning") {
             pushAlert({
               id: `hallucination-${Date.now()}`,
@@ -108,6 +127,33 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
               details: payload as Record<string, unknown>,
               created_at: new Date().toISOString(),
             });
+          } else if (type === "telemetry" && payload.payload) {
+            const telemetryPayload = payload.payload as Record<string, unknown>;
+            if (telemetryPayload.event === "NODE_ACTIVE") {
+              const nodeName = telemetryPayload.node as string;
+              if (nodeName === "completed") {
+                addCompletedNode("completed");
+                setActiveNode(null);
+              } else if (nodeName) {
+                if (nodeName !== "increment_cycle") {
+                  setActiveNode(nodeName);
+                }
+              }
+            } else if (telemetryPayload.event === "TOKEN_USAGE") {
+              const input = (telemetryPayload.input_tokens as number) || 0;
+              const output = (telemetryPayload.output_tokens as number) || 0;
+              const cached = (telemetryPayload.cached_input_tokens as number) || 0;
+              const model = (telemetryPayload.model as string) || "gpt-4o-mini";
+              if (input > 0 || output > 0 || cached > 0) {
+                addTokenUsage(input, output, cached);
+              }
+              setModel(model);
+            }
+          } else if (type === "terminal_out" && payload.payload) {
+            const terminalPayload = payload.payload as { data?: string };
+            if (terminalPayload.data) {
+              pushTerminalOutput(terminalPayload.data);
+            }
           }
         } catch {
           // ignore parse errors
@@ -159,6 +205,10 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     setSendMessage,
     pushAlert,
     setPendingApproval,
+    setActiveNode,
+    addCompletedNode,
+    addTokenUsage,
+    setModel,
   ]);
 
   return <>{children}</>;

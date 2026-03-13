@@ -18,6 +18,7 @@ import {
 import { logger } from "../core/logger.js";
 import { start } from "../daemon/manager.js";
 import { writeConfig } from "./writeConfig.js";
+import { getDefaultGoal } from "../core/configManager.js";
 
 export interface RunOnboardOptions {
     installDaemon?: boolean;
@@ -47,8 +48,7 @@ export async function runOnboard(options?: RunOnboardOptions): Promise<void> {
     const DEFAULT_WORKER_URL =
         process.env["OPENCLAW_WORKER_URL"] ?? "ws://localhost:18789";
     const DEFAULT_TOKEN = process.env["OPENCLAW_TOKEN"] ?? "";
-    const DEFAULT_GOAL =
-        "Build a small 2D game with sprite assets and sound effects";
+    const DEFAULT_GOAL = getDefaultGoal();
 
     function parseCount(value: string | undefined): number | null {
         const raw = value?.trim() ?? "";

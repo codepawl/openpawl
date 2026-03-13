@@ -3,12 +3,11 @@
  */
 
 import type { GraphState } from "../core/graph-state.js";
-import { CONFIG } from "../core/config.js";
 import type { VectorMemory } from "../core/knowledge-base.js";
-import { logger } from "../core/logger.js";
+import { logger, isDebugMode } from "../core/logger.js";
 
 function log(msg: string): void {
-  if (CONFIG.verboseLogging) {
+  if (isDebugMode()) {
     logger.agent(msg);
   }
 }

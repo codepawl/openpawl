@@ -7,10 +7,11 @@ import * as lancedb from "@lancedb/lancedb";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { CONFIG, type MemoryBackend } from "./config.js";
-import { logger } from "./logger.js";
+import { logger, isDebugMode } from "./logger.js";
 
 const LESSONS_TABLE = "lessons";
 const PROJECT_MEMORIES_TABLE = "project_memories";
+const RETRO_ACTIONS_TABLE = "retro_actions";
 const EMBEDDING_MODEL = "nomic-embed-text";
 const DEFAULT_EMBEDDING_BASE = "http://localhost:11434";
 
@@ -19,10 +20,10 @@ class HttpEmbeddingFunction {
   private readonly model: string;
   private readonly token: string;
 
-  constructor(opts: { baseUrl: string; model: string; token?: string }) {
-    this.baseUrl = opts.baseUrl.replace(/\/+$/, "");
-    this.model = opts.model;
-    this.token = (opts.token ?? "").trim();
+  constructor(baseUrl: string, model: string, token: string) {
+    this.baseUrl = baseUrl;
+    this.model = model;
+    this.token = token;
   }
 
   async generate(texts: string[]): Promise<number[][]> {
@@ -63,7 +64,7 @@ class HttpEmbeddingFunction {
 }
 
 function log(msg: string): void {
-  if (CONFIG.verboseLogging) {
+  if (isDebugMode()) {
     logger.info(msg);
   }
 }
@@ -83,6 +84,7 @@ export class VectorMemory {
   readonly backend: MemoryBackend;
   private db: lancedb.Connection | null = null;
   private lessonsTable: lancedb.Table | null = null;
+  private retroActionsTable: lancedb.Table | null = null;
   private projectMemoriesTable: lancedb.Table | null = null;
   private embedder: HttpEmbeddingFunction | null = null;
   private fallbackPath: string;
@@ -106,11 +108,11 @@ export class VectorMemory {
         process.env["EMBEDDING_BASE_URL"] ??
         process.env["OPENCLAW_WORKER_URL"] ??
         DEFAULT_EMBEDDING_BASE;
-      this.embedder = new HttpEmbeddingFunction({
-        baseUrl: embeddingBase,
-        model: EMBEDDING_MODEL,
-        token: process.env["OPENCLAW_TOKEN"],
-      });
+      this.embedder = new HttpEmbeddingFunction(
+        embeddingBase,
+        EMBEDDING_MODEL,
+        process.env["OPENCLAW_TOKEN"] ?? "",
+      );
       const lanceUri = process.env["LANCEDB_URI"]?.trim() || path.join(this.persistDirectory, "lancedb");
       await mkdir(lanceUri, { recursive: true });
       this.db = await lancedb.connect(lanceUri);
@@ -120,6 +122,9 @@ export class VectorMemory {
       }
       if (tableNames.includes(PROJECT_MEMORIES_TABLE)) {
         this.projectMemoriesTable = await this.db.openTable(PROJECT_MEMORIES_TABLE);
+      }
+      if (tableNames.includes(RETRO_ACTIONS_TABLE)) {
+        this.retroActionsTable = await this.db.openTable(RETRO_ACTIONS_TABLE);
       }
 
       this.enabled = true;
@@ -176,6 +181,37 @@ export class VectorMemory {
     return await this._fallbackAddLesson(text);
   }
 
+  async addRetroActionItem(text: string, metadata: Record<string, unknown> = {}): Promise<boolean> {
+    if (this.enabled && this.db && this.embedder) {
+      try {
+        const vector = (await this.embedder.generate([text]))[0] ?? [];
+        if (!Array.isArray(vector) || vector.length === 0) {
+          throw new Error("empty embedding vector");
+        }
+        const id = `retro_${Date.now()}`;
+        const row = {
+          id,
+          text,
+          vector,
+          metadata_json: JSON.stringify(metadata),
+          timestamp: Date.now() / 1000,
+          type: "retro_action",
+        };
+        if (!this.retroActionsTable) {
+          this.retroActionsTable = await this.db.createTable(RETRO_ACTIONS_TABLE, [row]);
+        } else {
+          await this.retroActionsTable.add([row]);
+        }
+        log(`📋 Stored retro action item: "${text.slice(0, 50)}..."`);
+        return true;
+      } catch (err) {
+        log(`❌ Failed to store retro action item: ${err}`);
+        return false;
+      }
+    }
+    return false;
+  }
+
   private async _fallbackAddLesson(text: string): Promise<boolean> {
     try {
       await this._ensureFallbackDir();
@@ -215,6 +251,33 @@ export class VectorMemory {
       }
     }
     return await this._fallbackGetLessons();
+  }
+
+  async retrieveRelevantRetroActions(
+    query: string,
+    nResults = 5
+  ): Promise<Array<{ text: string; metadata: Record<string, unknown> }>> {
+    if (this.enabled && this.retroActionsTable && this.embedder) {
+      try {
+        const count = await this.retroActionsTable.countRows();
+        if (count === 0) return [];
+        const vector = (await this.embedder.generate([query]))[0] ?? [];
+        if (!Array.isArray(vector) || vector.length === 0) return [];
+        const results = (await this.retroActionsTable
+          .vectorSearch(vector)
+          .limit(Math.min(nResults, count))
+          .toArray()) as Array<Record<string, unknown>>;
+        return results.map((row) => ({
+          text: typeof row["text"] === "string" ? row["text"] : "",
+          metadata: typeof row["metadata_json"] === "string"
+            ? JSON.parse(row["metadata_json"])
+            : {},
+        })).filter((item): item is { text: string; metadata: Record<string, unknown> } => item.text.length > 0);
+      } catch (err) {
+        log(`❌ Retro action retrieval failed: ${err}`);
+      }
+    }
+    return [];
   }
 
   private async _fallbackGetLessons(): Promise<string[]> {

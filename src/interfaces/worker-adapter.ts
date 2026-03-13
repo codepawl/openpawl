@@ -5,7 +5,8 @@
 
 import type { TaskRequest, TaskResult } from "../core/state.js";
 import { CONFIG } from "../core/config.js";
-import { logger } from "../core/logger.js";
+import { logger, isDebugMode } from "../core/logger.js";
+import { getTrafficController } from "../core/traffic-control.js";
 import WebSocket from "ws";
 import pc from "picocolors";
 
@@ -18,6 +19,10 @@ export interface WorkerAdapter {
   reset(): Promise<void>;
   readonly adapterType: WorkerAdapterType;
 }
+
+export type StreamChunkCallback = (chunk: string) => void;
+export type StreamDoneCallback = (error?: { message: string }) => void;
+export type TokenUsageCallback = (inputTokens: number, outputTokens: number, cachedInputTokens: number, model: string) => void;
 
 function normalizeWorkerKey(input: string): string {
   return input.trim().toLowerCase().replace(/[\s_-]+/g, "");
@@ -66,7 +71,7 @@ export function resolveTargetUrl(
 }
 
 function log(msg: string): void {
-  if (CONFIG.verboseLogging) {
+  if (isDebugMode()) {
     logger.agent(msg);
   }
 }
@@ -88,14 +93,19 @@ export class UniversalOpenClawAdapter implements WorkerAdapter {
   private workspacePath: string;
   private configuredModel: string;
   private authToken: string;
+  private botId: string;
   tasksProcessed = 0;
+  onStreamChunk: StreamChunkCallback | undefined;
+  onStreamDone: StreamDoneCallback | undefined;
+  onTokenUsage: TokenUsageCallback | undefined;
 
-  constructor(options: { workerUrl?: string; authToken?: string | null; timeout?: number; workspacePath?: string; model?: string } = {}) {
-    let baseWsUrl = (options.workerUrl ?? CONFIG.openclawWorkerUrl ?? "").trim();
+  constructor(options: { workerUrl?: string; authToken?: string | null; timeout?: number; workspacePath?: string; model?: string; botId?: string; onStreamChunk?: StreamChunkCallback; onStreamDone?: StreamDoneCallback; onTokenUsage?: TokenUsageCallback } = {}) {
+    const baseWsUrl = (options.workerUrl ?? CONFIG.openclawWorkerUrl ?? "").trim();
     if (!baseWsUrl) {
       throw new Error("OPENCLAW_WORKER_URL is not configured. Run `teamclaw setup`.");
     }
     const token = (options.authToken ?? CONFIG.openclawToken ?? "").trim();
+    this.botId = options.botId ?? "worker";
     // Normalize WebSocket URL - handle ws://, wss://, http://, https://
     if (baseWsUrl.startsWith("wss://")) {
       this.wsUrl = baseWsUrl; // Already correct
@@ -113,14 +123,25 @@ export class UniversalOpenClawAdapter implements WorkerAdapter {
     this.timeout = options.timeout ?? DEFAULT_TIMEOUT_MS;
     this.workspacePath = options.workspacePath ?? process.cwd();
     this.configuredModel = (options.model ?? CONFIG.openclawModel ?? "").trim();
+    this.onStreamChunk = options.onStreamChunk;
+    this.onStreamDone = options.onStreamDone;
+    this.onTokenUsage = options.onTokenUsage;
     log(`UniversalOpenClawAdapter (WS) → ${this.wsUrl} model=${this.configuredModel || "default"} (workspace: ${this.workspacePath})`);
   }
 
-    private async chatComplete(messages: { role: string; content: string }[]): Promise<string> {
+    private async chatComplete(
+        messages: { role: string; content: string }[],
+        onChunk?: (chunk: string) => void,
+        onDone?: (error?: { message: string }) => void,
+        onUsage?: (input: number, output: number) => void
+    ): Promise<string> {
         const model = this.configuredModel || GATEWAY_DEFAULT_MODEL;
         const timeoutMs = this.timeout;
         const token = this.authToken;
         const requestId = "teamclaw-" + Date.now();
+        const tokenUsageCb = onUsage ?? this.onTokenUsage;
+        const streamChunk = onChunk ?? this.onStreamChunk;
+        const streamDone = onDone ?? this.onStreamDone;
 
         log(`[Debug] WS → ${this.wsUrl} model=${model} msgCount=${messages.length}`);
 
@@ -156,6 +177,7 @@ export class UniversalOpenClawAdapter implements WorkerAdapter {
                     resolved = true;
                     cleanup();
                     log(`[Debug] WS Timeout. Raw messages: ${rawMessages.slice(0, 500)}`);
+                    if (streamDone) streamDone({ message: `Timeout after ${timeoutMs}ms` });
                     reject(new Error(formatAdapterError("TIMEOUT", [
                         `WebSocket timeout after ${timeoutMs}ms`,
                         `Raw: ${rawMessages.slice(0, 200)}`,
@@ -274,6 +296,23 @@ export class UniversalOpenClawAdapter implements WorkerAdapter {
                                 const message = chatPayload?.message as Record<string, unknown> | undefined;
                                 const messageContent = message?.content;
                                 
+                                // Emit streaming content chunks when available
+                                if (messageContent) {
+                                    let contentText = "";
+                                    if (Array.isArray(messageContent)) {
+                                        contentText = messageContent
+                                            .filter((c): c is { type: string; text: string } => typeof c?.text === "string")
+                                            .map((c) => c.text)
+                                            .join("");
+                                    } else if (typeof messageContent === "string") {
+                                        contentText = messageContent;
+                                    }
+                                    
+                                    if (contentText && streamChunk) {
+                                        streamChunk(contentText);
+                                    }
+                                }
+                                
                                 // Handle state=final with message content only (not delta)
                                 if (state === "final") {
                                     // Check message.content which can be an array or string
@@ -287,6 +326,7 @@ export class UniversalOpenClawAdapter implements WorkerAdapter {
                                             resolved = true;
                                             clearTimeout(timeoutId);
                                             cleanup();
+                                            if (streamDone) streamDone();
                                             resolve(textParts);
                                             return;
                                         }
@@ -295,6 +335,7 @@ export class UniversalOpenClawAdapter implements WorkerAdapter {
                                             resolved = true;
                                             clearTimeout(timeoutId);
                                             cleanup();
+                                            if (streamDone) streamDone();
                                             resolve(messageContent);
                                             return;
                                         }
@@ -302,21 +343,78 @@ export class UniversalOpenClawAdapter implements WorkerAdapter {
                                 }
                             }
                             
-                            // For agent events - wait for complete response
+                            // For agent events - stream content as it arrives
                             if (event === "agent") {
                                 const agentPayload = parsed.payload as Record<string, unknown> | undefined;
                                 const stream = agentPayload?.stream;
                                 const data = agentPayload?.data as Record<string, unknown> | undefined;
                                 const phase = data?.phase;
                                 
+                                // Emit content chunks during agent streaming
+                                const output = data?.message ?? data?.output ?? data?.content ?? data?.response;
+                                if (output && typeof output === "string" && streamChunk) {
+                                    streamChunk(output);
+                                }
+                                
+                                // Extract token usage from agent data (with prompt caching support)
+                                if (stream === "lifecycle" || stream === "content") {
+                                    const usage = data?.usage as Record<string, unknown> | undefined;
+                                    if (usage && tokenUsageCb) {
+                                        // OpenAI format: usage.prompt_tokens_details.cached_tokens
+                                        const promptDetails = usage?.prompt_tokens_details as Record<string, unknown> | undefined;
+                                        const cachedTokensOpenAI = (promptDetails?.cached_tokens ?? 0) as number;
+                                        
+                                        // Anthropic format: usage.cache_read_input_tokens
+                                        const cachedTokensAnthropic = (usage?.cache_read_input_tokens ?? 0) as number;
+                                        
+                                        // Use whichever is available (prefer OpenAI format)
+                                        const cachedInputTokens = Math.max(cachedTokensOpenAI, cachedTokensAnthropic);
+                                        
+                                        const inputTokens = (usage?.input_tokens ?? usage?.prompt_tokens ?? 0) as number;
+                                        const outputTokens = (usage?.completion_tokens ?? usage?.output_tokens ?? 0) as number;
+                                        
+                                        if (inputTokens > 0 || outputTokens > 0 || cachedInputTokens > 0) {
+                                            tokenUsageCb(inputTokens, outputTokens, cachedInputTokens, model);
+                                        }
+                                    }
+                                }
+                                
                                 // Only resolve on lifecycle end/complete - wait for full response
                                 if (stream === "lifecycle" && (phase === "complete" || phase === "done" || phase === "end")) {
-                                    const output = data?.message ?? data?.output ?? data?.content ?? data?.response;
-                                    if (output && !resolved) {
+                                    // Try to extract usage one more time from final data
+                                    const finalData = data;
+                                    const finalUsage = finalData?.usage as Record<string, unknown> | undefined;
+                                    if (finalUsage && tokenUsageCb) {
+                                        // OpenAI format: usage.prompt_tokens_details.cached_tokens
+                                        const promptDetails = finalUsage?.prompt_tokens_details as Record<string, unknown> | undefined;
+                                        const cachedTokensOpenAI = (promptDetails?.cached_tokens ?? 0) as number;
+                                        
+                                        // Anthropic format: usage.cache_read_input_tokens
+                                        const cachedTokensAnthropic = (finalUsage?.cache_read_input_tokens ?? 0) as number;
+                                        
+                                        const cachedInputTokens = Math.max(cachedTokensOpenAI, cachedTokensAnthropic);
+                                        
+                                        const inputTokens = (finalUsage?.input_tokens ?? finalUsage?.prompt_tokens ?? 0) as number;
+                                        const outputTokens = (finalUsage?.completion_tokens ?? finalUsage?.output_tokens ?? 0) as number;
+                                        if (inputTokens > 0 || outputTokens > 0 || cachedInputTokens > 0) {
+                                            tokenUsageCb(inputTokens, outputTokens, cachedInputTokens, model);
+                                        } else if (!finalUsage?.input_tokens && !finalUsage?.completion_tokens) {
+                                            // Fallback: estimate from character count (no cache discount)
+                                            const outputText = finalData?.message ?? finalData?.output ?? finalData?.content ?? finalData?.response;
+                                            if (typeof outputText === "string" && outputText.length > 0) {
+                                                const estimatedOutput = Math.ceil(outputText.length / 4);
+                                                tokenUsageCb(0, estimatedOutput, 0, model);
+                                            }
+                                        }
+                                    }
+                                    
+                                    const finalOutput = data?.message ?? data?.output ?? data?.content ?? data?.response;
+                                    if (finalOutput && !resolved) {
                                         resolved = true;
                                         clearTimeout(timeoutId);
                                         cleanup();
-                                        resolve(String(output));
+                                        if (streamDone) streamDone();
+                                        resolve(String(finalOutput));
                                         return;
                                     }
                                 }
@@ -328,6 +426,7 @@ export class UniversalOpenClawAdapter implements WorkerAdapter {
                                         resolved = true;
                                         clearTimeout(timeoutId);
                                         cleanup();
+                                        if (streamDone) streamDone({ message: String(errorMsg) });
                                         reject(new Error(formatAdapterError("AGENT ERROR", [String(errorMsg)])));
                                         return;
                                     }
@@ -343,6 +442,7 @@ export class UniversalOpenClawAdapter implements WorkerAdapter {
                                 clearTimeout(timeoutId);
                                 cleanup();
                                 const errMsg = String(parsed.message ?? parsed.error ?? JSON.stringify(parsed));
+                                if (streamDone) streamDone({ message: errMsg });
                                 reject(new Error(formatAdapterError("WS ERROR", [
                                     `Error from Gateway: ${errMsg}`,
                                 ])));
@@ -357,6 +457,7 @@ export class UniversalOpenClawAdapter implements WorkerAdapter {
                     if (!resolved) {
                         resolved = true;
                         clearTimeout(timeoutId);
+                        if (streamDone) streamDone({ message: err.message });
                         reject(new Error(formatAdapterError("WS ERROR", [
                             `WebSocket error: ${err.message}`,
                         ])));
@@ -369,6 +470,7 @@ export class UniversalOpenClawAdapter implements WorkerAdapter {
                         clearTimeout(timeoutId);
                         const reasonStr = reason.toString();
                         log(`[Debug] WS Closed: code=${code} reason=${reasonStr.slice(0, 100)}`);
+                        if (streamDone) streamDone({ message: `Connection closed (code ${code})` });
                         reject(new Error(formatAdapterError("WS CLOSED", [
                             `Connection closed (code ${code})`,
                             reasonStr ? `Reason: ${reasonStr}` : "",
@@ -416,10 +518,28 @@ export class UniversalOpenClawAdapter implements WorkerAdapter {
   }
 
   async executeTask(task: TaskRequest): Promise<TaskResult> {
+    const botId = this.botId || "worker";
+    const trafficController = getTrafficController();
+
+    const canProceed = await trafficController.acquire(botId);
+    if (!canProceed) {
+      return {
+        task_id: task.task_id,
+        success: false,
+        output: "Traffic control: Session paused due to safety limit. Please restart the work session.",
+        quality_score: 0,
+      };
+    }
+
     try {
-      const systemPrompt = `You are a helpful AI assistant. Execute the given task and return the result.
+      const systemPrompt = `You are a helpful AI assistant (Maker/Software Engineer). Execute the given task and return the result.
 You are working in a strictly defined workspace. Treat this workspace as your root directory.
 WORKSPACE PATH: ${this.workspacePath}
+
+CRITICAL: Before performing any task, you MUST read docs/ARCHITECTURE.md.
+Your code MUST strictly follow the architecture, folder structure, and tech stack 
+defined by the Tech Lead in docs/ARCHITECTURE.md.
+
 IMPORTANT: Do NOT create arbitrary subdirectories unless explicitly specified in the task.
 Output files directly to the root of the provided workspace path unless the task explicitly requires a specific structure (like 'assets/' or 'src/components/').
 All file operations (read, write, create, edit) MUST be performed within this directory.
@@ -445,6 +565,8 @@ Do not attempt to read or write files outside of it.`;
         output: `Worker error: ${err instanceof Error ? err.message : String(err)}`,
         quality_score: 0,
       };
+    } finally {
+      trafficController.release(botId);
     }
   }
 
@@ -475,7 +597,7 @@ export function createWorkerAdapter(
   // Always resolve to a WebSocket-compatible URL (WS/WSS or plain host).
   // The WS gateway URL from CONFIG.openclawWorkerUrl is the correct target.
   const url = resolveTargetUrl(bot, workerUrls, CONFIG.openclawWorkerUrl);
-  return new UniversalOpenClawAdapter({ workerUrl: url, authToken: CONFIG.openclawToken, workspacePath });
+  return new UniversalOpenClawAdapter({ workerUrl: url, authToken: CONFIG.openclawToken, workspacePath, botId: bot.id });
 }
 
 export function createRoutingAdapters(

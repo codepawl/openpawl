@@ -14,6 +14,7 @@ export interface TeamClawGlobalConfig {
   model: string;
   chatEndpoint: string;
   dashboardPort: number;
+  debugMode: boolean;
 }
 
 const DEFAULT_GATEWAY_HOST = "127.0.0.1";
@@ -91,6 +92,7 @@ export function buildDefaultGlobalConfig(): TeamClawGlobalConfig {
     model: DEFAULT_OPENCLAW_MODEL,
     chatEndpoint: DEFAULT_CHAT_ENDPOINT,
     dashboardPort: DEFAULT_DASHBOARD_PORT,
+    debugMode: false,
   };
 }
 
@@ -121,6 +123,7 @@ export function normalizeGlobalConfig(input: Partial<TeamClawGlobalConfig>): Tea
       ? input.chatEndpoint.trim()
       : DEFAULT_CHAT_ENDPOINT;
   const dashboardPort = toPositiveInt(input.dashboardPort, DEFAULT_DASHBOARD_PORT);
+  const debugMode = typeof input.debugMode === "boolean" ? input.debugMode : false;
 
   return {
     version: 1,
@@ -134,6 +137,7 @@ export function normalizeGlobalConfig(input: Partial<TeamClawGlobalConfig>): Tea
     model: model || DEFAULT_OPENCLAW_MODEL,
     chatEndpoint,
     dashboardPort,
+    debugMode,
   };
 }
 

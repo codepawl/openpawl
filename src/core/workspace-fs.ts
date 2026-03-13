@@ -7,6 +7,11 @@ export async function ensureWorkspaceDir(workspaceDir: string): Promise<void> {
   await mkdir(abs, { recursive: true });
 }
 
+export async function ensureDir(dirPath: string): Promise<void> {
+  const abs = path.resolve(dirPath);
+  await mkdir(abs, { recursive: true });
+}
+
 export async function readTextFile(
   relPath: string,
   options: { workspaceDir: string }

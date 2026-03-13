@@ -40,6 +40,20 @@ export const GameStateAnnotation = Annotation.Root({
     lastValue<Record<string, unknown> | null>(() => null)
   ),
   __node__: Annotation<string | null>(lastValue<string | null>(() => null)),
+  
+  planning_document: Annotation<string | null>(lastValue<string | null>(() => null)),
+  architecture_document: Annotation<string | null>(lastValue<string | null>(() => null)),
+  rfc_document: Annotation<string | null>(lastValue<string | null>(() => null)),
+  deep_work_mode: Annotation<boolean>(lastValue(() => false)),
+  last_pulse_timestamp: Annotation<number>(lastValue(() => 0)),
+  pulse_interval_ms: Annotation<number>(lastValue(() => 30_000)),
+  
+  mid_sprint_reported: Annotation<boolean>(lastValue(() => false)),
+  total_tasks: Annotation<number>(lastValue(() => 0)),
+  completed_tasks: Annotation<number>(lastValue(() => 0)),
+  
+  retrieved_memories: Annotation<string>(lastValue(() => "")),
+  preferences_context: Annotation<string>(lastValue(() => "")),
 });
 
 export type GraphState = typeof GameStateAnnotation.State;

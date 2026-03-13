@@ -7,6 +7,16 @@ import pc from "picocolors";
 
 const SEP = " | ";
 
+let _debugMode = false;
+
+export function setDebugMode(enabled: boolean): void {
+  _debugMode = enabled;
+}
+
+export function isDebugMode(): boolean {
+  return _debugMode;
+}
+
 function timestamp(): string {
   return new Date().toTimeString().slice(0, 8);
 }
@@ -24,6 +34,12 @@ function formatLineWithIcon(
 }
 
 export const logger = {
+  debug(message: string): void {
+    if (_debugMode) {
+      console.log(formatLineWithIcon("🔍", "DEBUG", pc.blue, message));
+    }
+  },
+
   info(message: string): void {
     console.log(formatLineWithIcon("ℹ", "INFO", pc.cyan, message));
   },
@@ -41,7 +57,9 @@ export const logger = {
   },
 
   agent(message: string): void {
-    console.log(formatLineWithIcon("🤖", "BOT", pc.magenta, message));
+    if (_debugMode) {
+      console.log(formatLineWithIcon("🤖", "BOT", pc.magenta, message));
+    }
   },
 
   /** Plain unstyled line (no timestamp). Use for help text or raw output. */
@@ -50,7 +68,7 @@ export const logger = {
   },
 
   /** Returns a plain line (timestamp | LEVEL | message) for appending to log files. */
-  plainLine(level: "INFO" | "WARN" | "ERROR", message: string): string {
+  plainLine(level: "DEBUG" | "INFO" | "WARN" | "ERROR", message: string): string {
     return `${timestamp()}${SEP}${level.padEnd(8)}${SEP}${message}`;
   },
 } as const;

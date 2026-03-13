@@ -12,9 +12,11 @@ import {
     setSessionConfig,
     clearSessionConfig,
 } from "./core/config.js";
+import { getDefaultGoal } from "./core/configManager.js";
 import { loadTeamConfig } from "./core/team-config.js";
 import { VectorMemory } from "./core/knowledge-base.js";
 import { PostMortemAnalyst } from "./agents/analyst.js";
+import { RetrospectiveAgent } from "./agents/retrospective.js";
 import {
     CONFIG,
     setOpenClawWorkerUrl,
@@ -28,13 +30,14 @@ import {
     validateStartup,
 } from "./core/startup-validation.js";
 import { appendFile } from "node:fs/promises";
+import { existsSync, readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
     clearSessionWarnings,
     getSessionWarnings,
 } from "./core/session-warnings.js";
-import { logger } from "./core/logger.js";
+import { logger, setDebugMode, isDebugMode } from "./core/logger.js";
 import { ensureWorkspaceDir } from "./core/workspace-fs.js";
 import type { MemoryBackend } from "./core/config.js";
 import type { GraphState } from "./core/graph-state.js";
@@ -42,9 +45,11 @@ import type { BotDefinition } from "./core/bot-definitions.js";
 import { log as clackLog, note, spinner, select, text, cancel, isCancel } from "@clack/prompts";
 import pc from "picocolors";
 import { runGatewayHealthCheck } from "./core/health.js";
-import { isPortInUse } from "./commands/run-openclaw.js";
+import { isPortInUse, cleanupManagedGateway, setupGatewayCleanupHandlers } from "./commands/run-openclaw.js";
 import { readGlobalConfig, readGlobalConfigWithDefaults } from "./core/global-config.js";
 import { rotateAndCreateSessionLog } from "./utils/log-rotation.js";
+import { getTrafficController } from "./core/traffic-control.js";
+import { promptPath } from "./utils/path-autocomplete.js";
 
 let DEBUG_LOG_PATH = "";
 
@@ -64,6 +69,84 @@ function log(level: "info" | "warn" | "error", msg: string): void {
     ).catch(() => {});
 }
 
+const SUPPORTED_GOAL_EXTENSIONS = [".md", ".mdx", ".txt", ".json", ".yaml", ".yml", ".rst", ".adoc"];
+
+function resolveGoalFromFile(input: string, workspaceDir?: string): string | null {
+    const trimmed = input.trim();
+    if (!trimmed) return null;
+    
+    const hasValidExtension = SUPPORTED_GOAL_EXTENSIONS.some(ext => trimmed.endsWith(ext));
+    if (!hasValidExtension) return null;
+    
+    const searchPaths: string[] = [];
+    
+    if (path.isAbsolute(trimmed)) {
+        searchPaths.push(trimmed);
+    } else {
+        if (workspaceDir) {
+            searchPaths.push(path.resolve(workspaceDir, trimmed));
+        }
+        searchPaths.push(path.resolve(process.cwd(), trimmed));
+    }
+    
+    for (const absolutePath of searchPaths) {
+        if (!existsSync(absolutePath)) continue;
+        
+        try {
+            const content = readFileSync(absolutePath, "utf-8");
+            const filename = path.basename(absolutePath);
+            log("info", `📖 Goal loaded from file: ${filename}`);
+            return content;
+        } catch {
+            continue;
+        }
+    }
+    
+    return null;
+}
+
+async function promptGoalChoice(): Promise<{ mode: "file" | "manual"; value: string }> {
+    const choice = await select({
+        message: "How would you like to input your goal?",
+        options: [
+            { label: "Type goal manually", value: "manual" },
+            { label: "Load from file path", value: "file" },
+        ],
+    });
+
+    if (isCancel(choice)) {
+        cancel("Work session cancelled.");
+        process.exit(0);
+    }
+
+    if (choice === "file") {
+        const { text } = await import("@clack/prompts");
+        const filePath = await text({
+            message: "Enter file path:",
+            placeholder: "goal.md, requirements.txt, etc.",
+        });
+
+        if (isCancel(filePath) || !String(filePath).trim()) {
+            cancel("Work session cancelled: no file path provided.");
+            process.exit(0);
+        }
+
+        return { mode: "file", value: String(filePath).trim() };
+    }
+
+    const goalInput = await text({
+        message: "Enter your goal:",
+        placeholder: "Build a landing page with authentication",
+    });
+
+    if (isCancel(goalInput) || !String(goalInput).trim()) {
+        cancel("Work session cancelled: no goal provided.");
+        process.exit(0);
+    }
+
+    return { mode: "manual", value: String(goalInput).trim() };
+}
+
 async function withConsoleRedirect<T>(fn: () => Promise<T> | T): Promise<T> {
     const originalLog = console.log;
     const originalWarn = console.warn;
@@ -72,9 +155,12 @@ async function withConsoleRedirect<T>(fn: () => Promise<T> | T): Promise<T> {
     const write = (level: string, args: unknown[]): void => {
         const line = `[${new Date().toISOString()}] ${level}: ${args
             .map((a) => String(a))
-            .join(" ")}\n`;
+            .join(" ")}`;
+        // Print to terminal in real-time
+        originalLog(line);
+        // Also write to debug file
         if (DEBUG_LOG_PATH) {
-            appendFile(DEBUG_LOG_PATH, line).catch(() => {});
+            appendFile(DEBUG_LOG_PATH, line + "\n").catch(() => {});
         }
     };
 
@@ -273,6 +359,7 @@ function printWorkSummary(
     },
     lessons: string[],
 ): void {
+    const trafficStats = getTrafficController().getStats();
     const oldest = lessons[0] ?? "(none)";
     const newest = lessons[lessons.length - 1] ?? "(none)";
     logger.plain(
@@ -283,12 +370,17 @@ function printWorkSummary(
             `• Successful: ${stats.runs_completed - stats.failures}`,
             `• Longest run: ${stats.longest_run_cycles} cycles`,
             `• Total tasks completed: ${stats.total_tasks_completed}`,
+            `• API Requests Made: ${trafficStats.totalRequests}`,
             `• Lessons learned: ${stats.total_lessons_learned}`,
             `• Total lessons: ${lessons.length}`,
-            `• Oldest: "${oldest}"`,
-            `• Newest: "${newest}"`,
+            "",
+            pc.cyan("TRAFFIC CONTROL"),
+            `• Max concurrent: ${trafficStats.maxRequests}`,
+            `• Requests used: ${trafficStats.totalRequests}/${trafficStats.maxRequests}`,
             "",
             pc.cyan("LESSONS ACCUMULATED"),
+            `• Oldest: "${oldest}"`,
+            `• Newest: "${newest}"`,
         ].join("\n"),
     );
     lessons.forEach((l, i) => logger.plain(`  ${i + 1}. ${l}`));
@@ -309,11 +401,34 @@ export async function runWork(
     // Pillar 4: --no-web flag suppresses the TeamClaw Web Dashboard auto-start
     const noWebFromInput = !Array.isArray(input) && input.noWeb === true;
     let maxRuns = 1;
+    let timeoutMinutes: number | undefined = undefined;
     let clearLegacy = false;
     let autoApprove = false;
     // Pillar 4: parsed from CLI flags
     let noWebFlag = noWebFromInput;
     let warnedInfraFlag = false;
+
+    const shutdown = () => {
+        log("warn", "Shutting down work session...");
+        cleanupManagedGateway();
+        process.exit(0);
+    };
+    process.on("SIGINT", shutdown);
+    process.on("SIGTERM", shutdown);
+
+    const trafficController = getTrafficController();
+    trafficController.setPauseCallback(async () => {
+        if (!canRenderSpinner) return false;
+        const { select } = await import("@clack/prompts");
+        const choice = await select({
+            message: pc.yellow("⚠️ Safety limit reached! The team has made 50 requests. Continue?"),
+            options: [
+                { label: "Continue (resume work)", value: "continue" },
+                { label: "Stop here", value: "stop" },
+            ],
+        });
+        return choice === "continue";
+    });
 
     for (let i = 0; i < args.length; i++) {
         if (args[i] === "--runs" && args[i + 1]) {
@@ -322,6 +437,12 @@ export async function runWork(
         } else if (args[i] === "--generations" && args[i + 1]) {
             maxRuns = Math.max(1, parseInt(args[i + 1], 10) || 1);
             i++;
+        } else if (args[i] === "--timeout" && args[i + 1]) {
+            timeoutMinutes = Math.max(1, parseInt(args[i + 1], 10) || 30);
+            i++;
+        } else if (args[i]?.startsWith("--timeout=")) {
+            const val = args[i]?.replace("--timeout=", "");
+            timeoutMinutes = Math.max(1, parseInt(val, 10) || 30);
         } else if (args[i] === "--clear-legacy") {
             clearLegacy = true;
         } else if (args[i] === "--auto-approve") {
@@ -372,29 +493,139 @@ export async function runWork(
         setOpenClawModel(setupConfig.model);
     }
 
+    setDebugMode(setupConfig.debugMode ?? CONFIG.debugMode ?? false);
+
     // Pillar 2: ONLY prompt allowed in `work` normal flow.
     let effectiveGoal = goalOverride;
-    if (!effectiveGoal && canRenderSpinner) {
-        const goalInput = await text({
-            message: "What is your goal?",
-            placeholder: "Build a landing page with authentication",
-        });
-        if (isCancel(goalInput)) {
-            cancel("Work session cancelled.");
-            process.exit(0);
+    
+    // Feature 2: Check if goalOverride is a file path
+    if (effectiveGoal) {
+        const fileContent = resolveGoalFromFile(effectiveGoal, CONFIG.workspaceDir);
+        if (fileContent) {
+            effectiveGoal = fileContent;
         }
-        effectiveGoal = String(goalInput).trim() || undefined;
+    }
+    
+    if (!effectiveGoal && canRenderSpinner) {
+        // Feature: Use explicit select prompt (file path vs manual)
+        const goalChoice = await promptGoalChoice();
+        
+        if (goalChoice.mode === "file") {
+            const fileContent = resolveGoalFromFile(goalChoice.value, CONFIG.workspaceDir);
+            if (fileContent) {
+                effectiveGoal = fileContent;
+            } else {
+                cancel(`Work session cancelled: file not found or unsupported format: ${goalChoice.value}`);
+                process.exit(1);
+            }
+        } else {
+            effectiveGoal = goalChoice.value;
+        }
     }
 
     // ---------------------------------------------------------------------------
-    // Pillar 4: Auto-start TeamClaw Web Dashboard in the background (port 9001)
+    // Session Configuration (Runs & Timeout) - Only prompt if not provided via flags
     // ---------------------------------------------------------------------------
+    const DEFAULT_MAX_RUNS = 3;
+    const DEFAULT_TIMEOUT_MINUTES = 30;
+
+    if (canRenderSpinner) {
+        if (!goalOverride && !effectiveGoal) {
+            const runsInput = await select({
+                message: "How many cycles should the team run?",
+                options: [
+                    { label: "1 cycle", value: 1 },
+                    { label: "3 cycles (Recommended)", value: 3 },
+                    { label: "5 cycles", value: 5 },
+                    { label: "10 cycles", value: 10 },
+                    { label: "Unlimited", value: 0 },
+                ],
+            });
+
+            if (!isCancel(runsInput)) {
+                maxRuns = runsInput as number;
+            }
+        }
+
+        if (timeoutMinutes === undefined) {
+            const timeoutInput = await select({
+                message: "How many minutes should the session last?",
+                options: [
+                    { label: "15 minutes", value: 15 },
+                    { label: "30 minutes (Recommended)", value: 30 },
+                    { label: "60 minutes", value: 60 },
+                    { label: "120 minutes", value: 120 },
+                    { label: "No timeout", value: 0 },
+                ],
+            });
+
+            if (!isCancel(timeoutInput)) {
+                timeoutMinutes = timeoutInput as number;
+            }
+        }
+    }
+
+    // Apply defaults if still undefined (non-TTY or user skipped)
+    if (maxRuns === undefined || maxRuns === 1) {
+        maxRuns = DEFAULT_MAX_RUNS;
+    }
+    if (timeoutMinutes === undefined) {
+        timeoutMinutes = DEFAULT_TIMEOUT_MINUTES;
+    }
+
+    logger.plain(pc.gray(`>>> Session: ${maxRuns} runs, ${timeoutMinutes}min timeout`));
+
+    // ---------------------------------------------------------------------------
+    // WORKSPACE SELECTION - Skip if goal provided via CLI (use cwd as default)
+    // ---------------------------------------------------------------------------
+    let workspacePath: string;
+    const skipWorkspacePrompt = !!goalOverride;
+    
+    if (canRenderSpinner && !skipWorkspacePrompt) {
+        const selectedPath = await promptPath({
+            message: "Select workspace directory:",
+            cwd: process.cwd(),
+        });
+
+        if (selectedPath === null) {
+            cancel("Work session cancelled.");
+            process.exit(0);
+        }
+
+        workspacePath = selectedPath;
+    } else {
+        workspacePath = path.resolve(process.cwd());
+    }
+
+    // TypeScript can't prove workspacePath is always assigned due to complex control flow
+    // but all paths either assign or call process.exit(0)
+    workspacePath ||= path.resolve(process.cwd());
+
+
+
+    // ---------------------------------------------------------------------------
+    // Pillar 4: Auto-start TeamClaw Web Dashboard in the background
+    // ---------------------------------------------------------------------------
+    let webPort = 9001;
     if (!noWebFlag) {
-        const { start: startDaemon } = await import("./daemon/manager.js");
-        const webPort = Number(process.env["WEB_PORT"]) || setupConfig.dashboardPort || 9001;
+        const { start: startDaemon, status: daemonStatus } = await import("./daemon/manager.js");
+        webPort = Number(process.env["WEB_PORT"]) || setupConfig.dashboardPort || 9001;
         const daemonResult = startDaemon({ web: true, gateway: false, webPort });
+        const actualStatus = daemonStatus();
+        const actualPort = actualStatus.webPort || webPort;
         if (!daemonResult.error || daemonResult.error.includes("already running")) {
-            logger.success(`🌐 Dashboard running at: http://localhost:${webPort}`);
+            const dashboardUrl = `http://localhost:${actualPort}`;
+            logger.plain("");
+            logger.plain(pc.bold(pc.green(`>>> TeamClaw Dashboard: ${dashboardUrl}`)));
+            logger.plain("");
+            
+            // Auto-open dashboard in browser
+            try {
+                const { default: open } = await import("open");
+                await open(dashboardUrl);
+            } catch {
+                // Ignore - non-critical
+            }
         } else {
             logger.warn(`Dashboard auto-start skipped: ${daemonResult.error}`);
         }
@@ -404,15 +635,15 @@ export async function runWork(
 
     if (setupConfig.managedGateway && gatewayAlreadyRunning) {
         log("info", `Gateway already running on port ${gatewayPort}. Attaching...`);
+        setupGatewayCleanupHandlers();
         await waitForGatewayWithUi(canRenderSpinner, gatewayPort, setupConfig.token);
     }
 
     if (!gatewayAlreadyRunning) {
         if (setupConfig.managedGateway) {
-            const { startManagedGateway, setupGatewayCleanupHandlers: setupCleanup } =
-                await import("./commands/run-openclaw.js");
+            setupGatewayCleanupHandlers();
+            const { startManagedGateway } = await import("./commands/run-openclaw.js");
 
-            setupCleanup();
             const gatewayState = await startManagedGateway(gatewayPortStr, { useSpinner: canRenderSpinner });
 
             if (!gatewayState.wasAlreadyRunning) {
@@ -642,6 +873,8 @@ export async function runWork(
     }
 
     const analyst = new PostMortemAnalyst(vectorMemory);
+    let lastTotalReworks = 0;
+    let lastFinalState: Record<string, unknown> | null = null;
     const workStats = {
         runs_completed: 0,
         total_lessons_learned: 0,
@@ -650,8 +883,7 @@ export async function runWork(
         failures: 0,
     };
 
-    const defaultGoal =
-        "Build a small 2D game with sprite assets and sound effects";
+    const defaultGoal = getDefaultGoal();
 
     const teamConfigForValidation = memoryConfig ?? (await loadTeamConfig());
     const result = await validateStartup({
@@ -663,6 +895,8 @@ export async function runWork(
         log("error", result.message);
         process.exit(1);
     }
+
+    log("info", pc.dim("💡 Tip: Press Ctrl+C to stop the work session. The managed gateway will be stopped automatically."));
 
     for (let runId = 1; runId <= maxRuns; runId++) {
         try {
@@ -719,8 +953,6 @@ export async function runWork(
                     ? buildTeamFromRoster(teamConfig.roster)
                     : buildTeamFromTemplate(template);
 
-            const workspacePath = process.cwd();
-
             const workerUrls = getWorkerUrlsForTeam(
                 team.map((b) => b.id),
                 {
@@ -766,43 +998,55 @@ export async function runWork(
             const orchestration = createTeamOrchestration({ team, workerUrls, workspacePath, autoApprove });
             const runStartTime = Date.now();
 
-            // Telemetry init only — no OpenClaw canvas URL box.
-            // The TeamClaw Dashboard URL is already printed once at session start (Pillar 4).
-
+            // Telemetry init - connection status logged prominently
             if (runId === 1) {
                 try {
                     const { initCanvasTelemetry, getCanvasTelemetry } = await import("./core/canvas-telemetry.js");
                     const telemetryConnected = await initCanvasTelemetry();
                     if (telemetryConnected) {
                         getCanvasTelemetry().sendSessionStart(goal);
-                        logger.success("📡 Telemetry synced with Web Dashboard");
+                        logger.success(">>> WebSocket Telemetry: CONNECTED");
                     } else {
-                        logger.warn("📡 Telemetry: Could not connect to Canvas (continuing without telemetry)");
+                        logger.warn(">>> Telemetry Bridge failed. Dashboard will not update in real-time.");
                     }
-                } catch (telemetryErr) {
-                    logger.warn(`📡 Telemetry setup failed: ${telemetryErr instanceof Error ? telemetryErr.message : String(telemetryErr)} (continuing anyway)`);
+                } catch {
+                    logger.warn(">>> Telemetry Bridge failed. Dashboard will not update in real-time.");
                 }
             }
 
             let finalState: Record<string, unknown>;
             if (canRenderSpinner) {
                 const sPlan = spinner();
+                const startTime = Date.now();
+                let elapsedSeconds = 0;
                 sPlan.start("🧠 Coordinator is decomposing the goal...");
+                
+                // Heartbeat spinner - update every 5 seconds to show we're waiting
+                const heartbeatInterval = setInterval(() => {
+                    elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
+                    sPlan.start(`🧠 Coordinator is decomposing the goal... (${elapsedSeconds}s)`);
+                }, 5000);
+                
                 try {
-                    finalState = (await (CONFIG.verboseLogging
+                    finalState = (await (isDebugMode()
                         ? orchestration.run({
                               userGoal: goal,
                               ancestralLessons: priorLessons,
                               projectContext: projectContextStr,
+                              maxRuns,
+                              timeoutMinutes,
                           })
                         : withConsoleRedirect(() =>
                               orchestration.run({
                                   userGoal: goal,
                                   ancestralLessons: priorLessons,
                                   projectContext: projectContextStr,
+                                  maxRuns,
+                                  timeoutMinutes,
                               }),
                           ))) as Record<string, unknown>;
                 } catch (error) {
+                    clearInterval(heartbeatInterval);
                     const message =
                         error instanceof Error ? error.message : String(error);
                     sPlan.stop(
@@ -823,6 +1067,8 @@ export async function runWork(
                     }
                     throw error;
                 }
+                
+                clearInterval(heartbeatInterval);
 
                 const taskQueue = (finalState.task_queue ?? []) as Record<
                     string,
@@ -886,6 +1132,8 @@ export async function runWork(
                 finalState = (await orchestration.run({
                     userGoal: goal,
                     ancestralLessons: priorLessons,
+                    maxRuns,
+                    timeoutMinutes,
                 })) as Record<string, unknown>;
             }
 
@@ -903,6 +1151,13 @@ export async function runWork(
                       0,
                   )
                 : 0;
+            lastTotalReworks = botStats
+                ? Object.values(botStats).reduce(
+                      (s, x) => s + ((x?.reworks_triggered as number) ?? 0),
+                      0,
+                  )
+                : 0;
+            lastFinalState = finalState;
 
             workStats.runs_completed = runId;
             workStats.longest_run_cycles = Math.max(
@@ -1103,4 +1358,27 @@ export async function runWork(
             log("info", "Work session finished.");
         }
     }
+
+    if (lastTotalReworks > 0 && lastFinalState) {
+        if (canRenderSpinner) {
+            logger.info("🔄 Running Sprint Retrospective (rework detected)...");
+        }
+        
+        const retroAgent = new RetrospectiveAgent(vectorMemory);
+        
+        const retroResult = await retroAgent.analyze(
+            lastFinalState as GraphState,
+            workspacePath,
+        );
+        
+        if (retroResult) {
+            if (canRenderSpinner) {
+                logger.success("📝 Sprint Retrospective complete! Check docs/RETROSPECTIVE.md");
+            } else {
+                log("info", "📝 Sprint Retrospective saved to docs/RETROSPECTIVE.md");
+            }
+        }
+    }
+
+    cleanupManagedGateway();
 }

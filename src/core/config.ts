@@ -1,9 +1,9 @@
 /**
  * Global configuration for TeamClaw.
- * Loads overrides from .env via dotenv.
+ * Loads from Global JSON (~/.teamclaw/config.json) and Workspace JSON (teamclaw.config.json).
+ * Priority: CLI Flags → Global JSON → Workspace JSON → Defaults.
  */
 
-import "dotenv/config";
 import {
     cancel,
     isCancel,
@@ -17,92 +17,73 @@ import pc from "picocolors";
 import type { TeamConfig } from "./team-config.js";
 import { clearTeamConfigCache, loadTeamConfig } from "./team-config.js";
 import {
-    readEnvFile,
-    writeEnvFile,
-    getEnvValue,
-    setEnvValue,
-} from "./envManager.js";
-import {
     readTeamclawConfig,
     writeTeamclawConfig,
 } from "./jsonConfigManager.js";
 import { discoverOpenAIApi, readLocalOpenClawConfig } from "./discovery.js";
+import { readGlobalConfigWithDefaults } from "./global-config.js";
+import { migrateEnvToGlobalJson } from "./configMigrator.js";
+import { readEnvFile, writeEnvFile, getEnvValue, setEnvValue } from "./envManager.js";
+
+migrateEnvToGlobalJson();
 
 export type MemoryBackend = "lancedb" | "local_json";
 const GATEWAY_DEFAULT_MODEL = "gateway-default";
 
-function env(key: string, defaultVal: string): string;
-function env(key: string, defaultVal: number): number;
-function env(key: string, defaultVal: string | number): string | number {
-    const val = process.env[key];
-    if (val === undefined) return defaultVal;
-    if (typeof defaultVal === "number") {
-        const n = parseFloat(val);
-        return Number.isInteger(defaultVal) ? Math.floor(n) : n;
+function loadGlobalConfig() {
+    return readGlobalConfigWithDefaults();
+}
+
+const globalCfg = loadGlobalConfig() as unknown as Record<string, unknown>;
+
+function getGlobalString(key: string, defaultVal: string): string {
+    const val = globalCfg[key];
+    if (typeof val === "string" && val.trim()) return val.trim();
+    return defaultVal;
+}
+
+function getGlobalNumber(key: string, defaultVal: number): number {
+    const val = globalCfg[key];
+    if (typeof val === "number" && Number.isFinite(val)) return val;
+    if (typeof val === "string") {
+        const n = Number(val);
+        if (Number.isFinite(n)) return n;
     }
-    return val;
+    return defaultVal;
 }
 
-function envBool(key: string, defaultVal: boolean): boolean {
-    const val = process.env[key];
-    if (val === undefined) return defaultVal;
-    return ["true", "1", "yes"].includes(val.toLowerCase());
-}
-
-function envMemoryBackend(defaultVal: MemoryBackend): MemoryBackend {
-    const val = (process.env["MEMORY_BACKEND"] ?? "").trim().toLowerCase();
-    if (val === "lancedb" || val === "local_json") return val;
-    if (val === "chroma") return "lancedb";
+function getGlobalBoolean(key: string, defaultVal: boolean): boolean {
+    const val = globalCfg[key];
+    if (typeof val === "boolean") return val;
     return defaultVal;
 }
 
 export const CONFIG = {
-    llmTemperature: env("LLM_TEMPERATURE", 0.7) as number,
-    creativity: env("CREATIVITY", 0.5) as number,
-    llmTimeoutMs: env("LLM_TIMEOUT_MS", 120_000) as number,
+    llmTemperature: getGlobalNumber("llmTemperature", 0.7),
+    creativity: getGlobalNumber("creativity", 0.5),
+    llmTimeoutMs: getGlobalNumber("llmTimeoutMs", 120_000),
 
-    maxCycles: env("MAX_CYCLES", 10) as number,
-    maxRuns: env("MAX_RUNS", env("MAX_GENERATIONS", 5) as number) as number,
+    maxCycles: getGlobalNumber("maxCycles", 10),
+    maxRuns: getGlobalNumber("maxRuns", 5),
 
-    workspaceDir: env("WORKSPACE_DIR", "./teamclaw-workspace") as string,
+    workspaceDir: getGlobalString("workspaceDir", "./teamclaw-workspace"),
 
-    chromadbPersistDir: env(
-        "CHROMADB_PERSIST_DIR",
-        "data/vector_store",
-    ) as string,
-    memoryBackend: envMemoryBackend("lancedb"),
-    verboseLogging: envBool("VERBOSE_LOGGING", true),
+    chromadbPersistDir: getGlobalString("chromadbPersistDir", "data/vector_store"),
+    memoryBackend: (getGlobalString("memoryBackend", "lancedb") as MemoryBackend),
+    verboseLogging: getGlobalBoolean("verboseLogging", false),
+    debugMode: getGlobalBoolean("debugMode", false),
 
-    openclawWorkerUrl: env("OPENCLAW_WORKER_URL", "") as string,
-    openclawHttpUrl: env("OPENCLAW_HTTP_URL", "") as string,
-    openclawWorkers: (() => {
-        const raw = process.env["OPENCLAW_WORKERS"];
-        if (!raw?.trim()) return {} as Record<string, string>;
-        try {
-            return JSON.parse(raw) as Record<string, string>;
-        } catch {
-            return {} as Record<string, string>;
-        }
-    })(),
-    openclawToken: (
-        process.env["OPENCLAW_TOKEN"] ??
-        process.env["OPENCLAW_AUTH_TOKEN"] ??
-        ""
-    ).trim(),
-    openclawChatEndpoint: (
-        process.env["OPENCLAW_CHAT_ENDPOINT"] ?? "/v1/chat/completions"
-    ).trim(),
-    openclawModel: (
-        (process.env["OPENCLAW_MODEL"] ?? "").trim() || GATEWAY_DEFAULT_MODEL
-    ),
-    openclawProvisionTimeout: env(
-        "OPENCLAW_PROVISION_TIMEOUT",
-        30_000,
-    ) as number,
+    openclawWorkerUrl: String(globalCfg.gatewayUrl || ""),
+    openclawHttpUrl: String(globalCfg.apiUrl || ""),
+    openclawWorkers: {} as Record<string, string>,
+    openclawToken: String(globalCfg.token || ""),
+    openclawChatEndpoint: String(globalCfg.chatEndpoint || "/v1/chat/completions"),
+    openclawModel: String(globalCfg.model || GATEWAY_DEFAULT_MODEL),
+    openclawProvisionTimeout: getGlobalNumber("openclawProvisionTimeout", 30_000),
 
-    webhookOnTaskComplete: env("WEBHOOK_ON_TASK_COMPLETE", "") as string,
-    webhookOnCycleEnd: env("WEBHOOK_ON_CYCLE_END", "") as string,
-    webhookSecret: env("WEBHOOK_SECRET", "") as string,
+    webhookOnTaskComplete: getGlobalString("webhookOnTaskComplete", ""),
+    webhookOnCycleEnd: getGlobalString("webhookOnCycleEnd", ""),
+    webhookSecret: getGlobalString("webhookSecret", ""),
 } as const;
 
 type MutableOpenClawRuntimeConfig = {

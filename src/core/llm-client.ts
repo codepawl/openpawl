@@ -3,7 +3,8 @@
  */
 
 import { CONFIG, getSessionTemperature } from "./config.js";
-import { logger } from "./logger.js";
+import { logger, isDebugMode } from "./logger.js";
+import { getTrafficController } from "./traffic-control.js";
 
 export interface GenerateOptions {
   temperature?: number;
@@ -114,7 +115,15 @@ export async function getEffectiveModel(
   return discovered;
 }
 
-export async function generate(prompt: string, options?: GenerateOptions): Promise<string> {
+export async function generate(prompt: string, options?: GenerateOptions & { botId?: string }): Promise<string> {
+  const botId = options?.botId ?? "coordinator";
+  const trafficController = getTrafficController();
+  
+  const canProceed = await trafficController.acquire(botId);
+  if (!canProceed) {
+    throw new Error("Traffic control: Session paused due to safety limit. Please restart the work session.");
+  }
+
   const workerUrl = CONFIG.openclawWorkerUrl?.trim();
   const temperature = options?.temperature ?? getSessionTemperature();
   const timeoutMs = CONFIG.llmTimeoutMs;
@@ -122,12 +131,13 @@ export async function generate(prompt: string, options?: GenerateOptions): Promi
   const model = options?.model ?? (await getEffectiveModel(workerUrl, CONFIG.openclawToken));
 
   if (!workerUrl) {
+    trafficController.release(botId);
     throw new Error("❌ OpenClaw Gateway not found. TeamClaw requires OpenClaw to function.");
   }
 
   const url = buildOpenClawUrl(workerUrl, CONFIG.openclawChatEndpoint);
   const startedAt = Date.now();
-  if (CONFIG.verboseLogging) {
+  if (isDebugMode()) {
     logger.agent(
       `LLM request start: provider=openclaw url=${url} model=${model} timeoutMs=${timeoutMs} promptChars=${promptChars}`,
     );
@@ -150,7 +160,7 @@ export async function generate(prompt: string, options?: GenerateOptions): Promi
     });
     const elapsedMs = Date.now() - startedAt;
     const statusLabel = typeof res.status === "number" ? String(res.status) : "unknown";
-    if (CONFIG.verboseLogging) {
+    if (isDebugMode()) {
       logger.agent(`LLM request end: provider=openclaw status=${statusLabel} elapsedMs=${elapsedMs}`);
     }
     if (!res.ok) {
@@ -160,13 +170,16 @@ export async function generate(prompt: string, options?: GenerateOptions): Promi
       const portHint = res.status === 404
         ? ` ⚠️ 404 often means you are hitting the WS Gateway port instead of the API port. API port = Gateway port + 2 (e.g. 8001 → 8003). Run \`teamclaw setup\` to fix.`
         : "";
+      trafficController.release(botId);
       throw new Error(`OpenClaw HTTP ${res.status}.${snippet}${portHint}`);
     }
     const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+    trafficController.release(botId);
     return (data.choices?.[0]?.message?.content ?? "").trim();
   } catch (err) {
+    trafficController.release(botId);
     const elapsedMs = Date.now() - startedAt;
-    if (CONFIG.verboseLogging) {
+    if (isDebugMode()) {
       logger.agent(
         `LLM request error: provider=openclaw elapsedMs=${elapsedMs} timedOut=${isAbortTimeoutError(err)} err="${shortErr(err)}"`,
       );

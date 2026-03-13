@@ -3,9 +3,15 @@ import { useTheme } from "./theme";
 import { KanbanBoard } from "./components/KanbanBoard";
 import { EisenhowerMatrix } from "./components/EisenhowerMatrix";
 import { NodeGraphView } from "./components/NodeGraphView";
+import { LiveStateGraph } from "./components/LiveStateGraph";
 import { AlertCenter } from "./components/AlertCenter";
 import { SettingsPanel } from "./components/SettingsPanel";
-import { useState } from "react";
+import { HumanApprovalModal } from "./components/HumanApprovalModal";
+import { CostBadge } from "./components/CostBadge";
+import { ErrorBoundary } from "./components/ErrorBoundary";
+import { useState, useEffect, lazy, Suspense } from "react";
+
+const ConsoleViewer = lazy(() => import("./components/ConsoleViewer").then((m) => ({ default: m.ConsoleViewer })));
 
 type ActiveView = "dashboard" | "settings";
 
@@ -102,6 +108,7 @@ function Topbar() {
     <header className="flex h-12 shrink-0 items-center justify-between border-b border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 px-4 transition-colors duration-200 ease-in-out">
       <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Session</span>
       <div className="flex items-center gap-3">
+        <CostBadge />
         <ThemeToggle />
         {connectionStatus === "open" && (
           <span className="text-xs text-gray-500 dark:text-gray-400">Cycle {cycle_count}</span>
@@ -113,7 +120,7 @@ function Topbar() {
 }
 
 function MainContent({ activeView }: { activeView: ActiveView }) {
-  const [activeTab, setActiveTab] = useState<"matrix" | "graph">("matrix");
+  const [activeTab, setActiveTab] = useState<"matrix" | "graph" | "workflow">("matrix");
 
   if (activeView === "settings") {
     return (
@@ -153,15 +160,30 @@ function MainContent({ activeView }: { activeView: ActiveView }) {
             >
               Mind Map
             </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab("workflow")}
+              className={`rounded px-2 py-1 text-xs font-medium transition-colors duration-200 ease-in-out ${
+                activeTab === "workflow"
+                  ? "bg-gray-900 dark:bg-gray-700 text-white"
+                  : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"
+              }`}
+            >
+              Workflow
+            </button>
           </div>
           <div className="flex-1 overflow-hidden">
             {activeTab === "matrix" ? (
               <div className="h-full overflow-auto">
                 <EisenhowerMatrix />
               </div>
-            ) : (
+            ) : activeTab === "graph" ? (
               <div className="h-full overflow-hidden">
                 <NodeGraphView />
+              </div>
+            ) : (
+              <div className="h-full overflow-auto">
+                <LiveStateGraph />
               </div>
             )}
           </div>
@@ -173,6 +195,15 @@ function MainContent({ activeView }: { activeView: ActiveView }) {
 
 function Dashboard() {
   const [activeView, setActiveView] = useState<ActiveView>("dashboard");
+  const [logsExpanded, setLogsExpanded] = useState(true);
+  const connectionStatus = useWsStore((s) => s.connectionStatus);
+
+  useEffect(() => {
+    if (connectionStatus === "open") {
+      setLogsExpanded(true);
+    }
+  }, [connectionStatus]);
+
   return (
     <div className="flex h-screen flex-col bg-gray-100 dark:bg-gray-900 transition-colors duration-200 ease-in-out">
       <Topbar />
@@ -180,6 +211,34 @@ function Dashboard() {
         <Sidebar activeView={activeView} setActiveView={setActiveView} />
         <MainContent activeView={activeView} />
         <AlertCenter />
+        <HumanApprovalModal />
+      </div>
+      <div className="shrink-0 border-t border-gray-200 dark:border-gray-600">
+        <button
+          type="button"
+          onClick={() => setLogsExpanded(!logsExpanded)}
+          className="flex w-full items-center justify-between px-4 py-1.5 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200 border-b border-gray-200 dark:border-gray-600"
+        >
+          <span className="text-xs font-medium text-gray-600 dark:text-gray-400">
+            {logsExpanded ? "▼" : "▶"} Logs
+          </span>
+          <span className="text-xs text-gray-400 dark:text-gray-500">
+            {logsExpanded ? "Hide" : "Show"}
+          </span>
+        </button>
+        {logsExpanded && (
+          <div className="h-[280px]">
+            <Suspense
+              fallback={
+                <div className="flex h-full items-center justify-center bg-[#1c1c1c] text-gray-500 text-sm">
+                  Initializing Terminal...
+                </div>
+              }
+            >
+              <ConsoleViewer isExpanded={logsExpanded} />
+            </Suspense>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -187,9 +246,11 @@ function Dashboard() {
 
 function App() {
   return (
-    <WebSocketProvider>
-      <Dashboard />
-    </WebSocketProvider>
+    <ErrorBoundary>
+      <WebSocketProvider>
+        <Dashboard />
+      </WebSocketProvider>
+    </ErrorBoundary>
   );
 }
 

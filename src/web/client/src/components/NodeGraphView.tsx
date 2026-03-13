@@ -13,7 +13,9 @@ import { useTheme } from "../theme";
 export function NodeGraphView() {
   const task_queue = useWsStore((s) => s.task_queue);
   const config = useWsStore((s) => s.config);
+  const connectionStatus = useWsStore((s) => s.connectionStatus);
   const { isDark } = useTheme();
+  const isLoading = connectionStatus === "connecting" || connectionStatus === "reconnecting";
 
   const goalLabel =
     (config?.saved_goal as string | undefined)?.trim() ||
@@ -93,6 +95,29 @@ export function NodeGraphView() {
     const bg = isDark ? "#374151" : "#e5e7eb";
     return { nodes: baseNodes, edges: baseEdges, bgColor: bg };
   }, [task_queue, goalLabel, isDark]);
+
+  if (isLoading && task_queue.length === 0) {
+    return (
+      <section className="flex h-full min-h-[220px] flex-col rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 p-2 shadow-sm transition-colors duration-200 ease-in-out">
+        <header className="mb-2 flex items-baseline justify-between px-1">
+          <div>
+            <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-200">Mind Map</h2>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              Visual relationship between the user goal and tasks.
+            </p>
+          </div>
+        </header>
+        <div className="flex-1 overflow-hidden rounded-md border border-gray-100 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50">
+          <div className="flex h-full items-center justify-center">
+            <div className="flex flex-col items-center gap-3">
+              <div className="h-8 w-8 animate-spin rounded-full border-4 border-gray-200 dark:border-gray-600 border-t-blue-500"></div>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Loading tasks...</p>
+            </div>
+          </div>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="flex h-full min-h-[220px] flex-col rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 p-2 shadow-sm transition-colors duration-200 ease-in-out">

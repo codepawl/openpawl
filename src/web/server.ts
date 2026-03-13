@@ -7,6 +7,7 @@ import Fastify from "fastify";
 import FastifyCors from "@fastify/cors";
 import FastifyStatic from "@fastify/static";
 import FastifyWebSocket from "@fastify/websocket";
+import WebSocket from "ws";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import path from "node:path";
@@ -35,13 +36,65 @@ import { validateStartup } from "../core/startup-validation.js";
 import { getTeamTemplate } from "../core/team-templates.js";
 import { logger } from "../core/logger.js";
 import { ensureWorkspaceDir } from "../core/workspace-fs.js";
+import { addTerminalClient, removeTerminalClient, initTerminalBroadcast } from "../core/terminal-broadcast.js";
 import { log, note, spinner } from "@clack/prompts";
 import { findAvailablePort } from "../core/port.js";
 import { WsEventSchema } from "../interfaces/ws-events.js";
+import { humanResponseEmitter } from "../core/human-response-events.js";
+import { getDefaultGoal } from "../core/configManager.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const isProduction = process.env.NODE_ENV === "production";
+
+const clients = new Set<WebSocket>();
+
+interface SessionState {
+  activeNode: string | null;
+  cycle: number;
+  taskQueue: Record<string, unknown>[];
+  botStats: Record<string, Record<string, unknown>>;
+  isRunning: boolean;
+  generation: number;
+}
+
+let currentSessionState: SessionState = {
+  activeNode: null,
+  cycle: 0,
+  taskQueue: [],
+  botStats: {},
+  isRunning: false,
+  generation: 0,
+};
+
+function broadcast(event: object): void {
+  const data = JSON.stringify(event);
+  for (const client of clients) {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(data);
+    }
+  }
+}
+
+function updateSessionState(updates: Partial<SessionState>): void {
+  currentSessionState = { ...currentSessionState, ...updates };
+}
+
+function sendStateSync(socket: WebSocket): void {
+  socket.send(
+    JSON.stringify({
+      type: "state_sync",
+      state: {
+        activeNode: currentSessionState.activeNode,
+        cycle: currentSessionState.cycle,
+        taskQueue: currentSessionState.taskQueue,
+        botStats: currentSessionState.botStats,
+        isRunning: currentSessionState.isRunning,
+        generation: currentSessionState.generation,
+      },
+    })
+  );
+}
 
 function resolveClientDir(): string | null {
   const candidates = [
@@ -88,7 +141,6 @@ interface SessionControl {
 
 type ThreadRegistryEntry = {
   orch: ReturnType<typeof createTeamOrchestration>;
-  socket: { send: (data: string) => unknown };
 };
 
 const THREAD_REGISTRY = new Map<string, ThreadRegistryEntry>();
@@ -137,18 +189,14 @@ function startTimeoutChecker(): void {
         if (!updated) continue;
 
         await entry.orch.graph.updateState(config, { task_queue: updatedQueue });
-        entry.socket.send(
-          JSON.stringify({
-            type: "task_queue_updated",
-            task_queue: updatedQueue,
-          })
-        );
-        entry.socket.send(
-          JSON.stringify({
-            type: "timeout_alert",
-            task_queue: updatedQueue,
-          })
-        );
+        broadcast({
+          type: "task_queue_updated",
+          task_queue: updatedQueue,
+        });
+        broadcast({
+          type: "timeout_alert",
+          task_queue: updatedQueue,
+        });
       } catch {
         // Best-effort timeout checking; ignore errors.
       }
@@ -308,6 +356,7 @@ export async function runWeb(args: string[]): Promise<void> {
     s.start("🌐 Booting up Web UI environment...");
   }
 
+  initTerminalBroadcast();
   startTimeoutChecker();
   const result = await validateStartup({ templateId: "game_dev" });
   if (!result.ok) {
@@ -402,6 +451,22 @@ export async function runWeb(args: string[]): Promise<void> {
   await fastify.register(FastifyWebSocket);
 
   fastify.get("/ws", { websocket: true }, async (socket) => {
+    clients.add(socket);
+    const sendFn = (data: string) => socket.send(data);
+    addTerminalClient(sendFn);
+
+    sendStateSync(socket);
+
+    socket.on("close", () => {
+      clients.delete(socket);
+      removeTerminalClient(sendFn);
+    });
+
+    socket.on("error", () => {
+      clients.delete(socket);
+      removeTerminalClient(sendFn);
+    });
+
     const ctrl: SessionControl = {
       speedFactor: 1.0,
       paused: true,
@@ -463,20 +528,27 @@ export async function runWeb(args: string[]): Promise<void> {
         ctrl.speedFactor = Math.max(0.25, Math.min(5, v));
       } else if (cmd === "config") {
         applyConfigOverrides((msg.values as Record<string, unknown>) ?? {});
-        socket.send(
-          JSON.stringify({ type: "config_updated", config: getFullConfig() })
-        );
+        broadcast({ type: "config_updated", config: getFullConfig() });
       } else if (cmd === "cancel") {
         ctrl.cancelled = true;
         ctrl.paused = false;
       } else if (cmd === "approval_response") {
         const action = (msg.action as string) ?? "approved";
         const payload = msg as Record<string, unknown>;
+        const feedback = payload.feedback as string | undefined;
+        const taskId = payload.task_id as string | undefined;
+        
+        humanResponseEmitter.emitResponse({
+          action: action as "approved" | "edited" | "feedback",
+          feedback,
+          taskId,
+        });
+        
         if (approvalResolve) {
           approvalResolve({
             action: action as ApprovalResponse["action"],
             edited_task: payload.edited_task as { description: string } | undefined,
-            feedback: payload.feedback as string | undefined,
+            feedback,
           });
           approvalResolve = null;
         }
@@ -539,7 +611,7 @@ export async function runWeb(args: string[]): Promise<void> {
           const updatedQueue = [...taskQueue];
           updatedQueue[idx] = updatedTask;
           await currentOrch.graph.updateState(config, { task_queue: updatedQueue });
-          socket.send(JSON.stringify({ type: "task_queue_updated", task_queue: updatedQueue }));
+          broadcast({ type: "task_queue_updated", task_queue: updatedQueue });
         } catch (err) {
           socket.send(
             JSON.stringify({
@@ -559,14 +631,12 @@ export async function runWeb(args: string[]): Promise<void> {
         });
         const userGoal =
           (msg.user_goal as string) ??
-          "Build a small 2D game with sprite assets and sound effects";
+          getDefaultGoal();
         const teamTemplate =
           (msg.team_template as string) ?? teamConfig?.template ?? "game_dev";
         const workerUrlOverride = (msg.worker_url as string)?.trim() || undefined;
 
-        socket.send(
-          JSON.stringify({ type: "config_updated", config: getFullConfig() })
-        );
+        broadcast({ type: "config_updated", config: getFullConfig() });
 
         if (getTeamTemplate(teamTemplate) === null) {
           socket.send(
@@ -584,24 +654,20 @@ export async function runWeb(args: string[]): Promise<void> {
             (teamConfig?.worker_url as string | undefined)?.trim() ||
             CONFIG.openclawWorkerUrl?.trim();
           if (!openclawUrl) {
-            socket.send(
-              JSON.stringify({
-                type: "provision_error",
-                error: "❌ OpenClaw Gateway not found. TeamClaw requires OpenClaw to function.",
-              })
-            );
+            broadcast({
+              type: "provision_error",
+              error: "❌ OpenClaw Gateway not found. TeamClaw requires OpenClaw to function.",
+            });
             return;
           }
           const provisionResult = await provisionOpenClaw({ workerUrl: openclawUrl });
           if (!provisionResult.ok) {
             const detail = provisionResult.error ?? "unknown error";
             logger.warn(`OpenClaw provisioning failed: ${detail}`);
-            socket.send(
-              JSON.stringify({
-                type: "provision_error",
-                error: `❌ OpenClaw Gateway not found. TeamClaw requires OpenClaw to function. Details: ${detail}`,
-              })
-            );
+            broadcast({
+              type: "provision_error",
+              error: `❌ OpenClaw Gateway not found. TeamClaw requires OpenClaw to function. Details: ${detail}`,
+            });
             return;
           }
 
@@ -616,14 +682,13 @@ export async function runWeb(args: string[]): Promise<void> {
             if (ctrl.cancelled) break;
 
             const priorLessons = await vectorMemory.getCumulativeLessons();
-            socket.send(
-              JSON.stringify({
-                type: "generation_start",
-                generation: genId,
-                max_generations: cliGenerations,
-                lessons_count: priorLessons.length,
-              })
-            );
+            broadcast({
+              type: "generation_start",
+              generation: genId,
+              max_generations: cliGenerations,
+              lessons_count: priorLessons.length,
+            });
+            updateSessionState({ generation: genId, isRunning: true, activeNode: null, cycle: 0 });
 
             const team =
               teamConfig?.roster && teamConfig.roster.length > 0
@@ -641,7 +706,7 @@ export async function runWeb(args: string[]): Promise<void> {
             runThreadId = randomUUID();
             currentOrch = orch;
           if (runThreadId) {
-            THREAD_REGISTRY.set(runThreadId, { orch, socket });
+            THREAD_REGISTRY.set(runThreadId, { orch });
           }
             const initialState = orch.getInitialState({
               userGoal,
@@ -667,13 +732,11 @@ export async function runWeb(args: string[]): Promise<void> {
                 const cycle = (nodeState.cycle_count as number) ?? 0;
                 if (cycle > lastCycle) {
                   lastCycle = cycle;
-                  socket.send(
-                    JSON.stringify({
-                      type: "cycle_start",
-                      cycle,
-                      max_cycles: cliCycles,
-                    })
-                  );
+                  broadcast({
+                    type: "cycle_start",
+                    cycle,
+                    max_cycles: cliCycles,
+                  });
                 }
 
                 const parsed = parseNodeEvent(nodeName, nodeState);
@@ -709,21 +772,27 @@ export async function runWeb(args: string[]): Promise<void> {
                     tasks_failed: tf,
                   }).catch(() => {});
                 }
-                socket.send(JSON.stringify({ type: "node_event", ...parsed }));
+                broadcast({ type: "node_event", ...parsed });
+
+                updateSessionState({
+                  activeNode: nodeName,
+                  taskQueue: nodeState.task_queue as Record<string, unknown>[] ?? [],
+                  botStats: nodeState.bot_stats as Record<string, Record<string, unknown>> ?? {},
+                  cycle: (nodeState.cycle_count as number) ?? 0,
+                  isRunning: true,
+                });
 
                 await new Promise((r) =>
                   setTimeout(r, 300 / ctrl.speedFactor)
                 );
               }
             } catch (err) {
-              socket.send(
-                JSON.stringify({ type: "error", message: String(err) })
-              );
+              broadcast({ type: "error", message: String(err) });
               break;
             }
 
             if (ctrl.cancelled) {
-              socket.send(JSON.stringify({ type: "session_cancelled" }));
+              broadcast({ type: "session_cancelled" });
               break;
             }
 
@@ -763,27 +832,26 @@ export async function runWeb(args: string[]): Promise<void> {
               tasks_completed: totalDone,
               tasks_failed: totalFailed,
             };
-            socket.send(
-              JSON.stringify({
-                type: "generation_end",
-                generation: genId,
-                outcome,
-                final_state: fs,
-                gen_summary: { outcome, final_state: fs },
-              })
-            );
+            broadcast({
+              type: "generation_end",
+              generation: genId,
+              outcome,
+              final_state: fs,
+              gen_summary: { outcome, final_state: fs },
+            });
 
             await new Promise((r) => setTimeout(r, 1000));
           }
 
           if (!ctrl.cancelled) {
-            socket.send(JSON.stringify({ type: "session_complete" }));
+            broadcast({ type: "session_complete" });
           }
           if (runThreadId) {
             THREAD_REGISTRY.delete(runThreadId);
           }
           runThreadId = null;
           currentOrch = null;
+          updateSessionState({ isRunning: false, activeNode: null });
           clearSessionConfig();
         })();
       }
@@ -795,6 +863,8 @@ export async function runWeb(args: string[]): Promise<void> {
       saved_template: teamConfig?.template,
       saved_goal: teamConfig?.goal,
       saved_worker_url: teamConfig?.worker_url,
+      generation: currentSessionState.generation,
+      is_running: currentSessionState.isRunning,
     };
     socket.send(JSON.stringify({ type: "init", config }));
   });

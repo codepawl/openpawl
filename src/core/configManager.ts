@@ -1,11 +1,10 @@
 /**
- * Config manager: routes keys to `.env` or `teamclaw.config.json`.
- *
- * - `.env` is best for secrets and machine-specific values.
- * - `teamclaw.config.json` is best for project-scoped non-secret tuning.
+ * Config manager: routes all keys to teamclaw.config.json.
+ * 
+ * Project-scoped settings like template, goal, creativity, max_cycles
+ * are stored in teamclaw.config.json in the project directory.
  */
 
-import { readEnvFile, writeEnvFile, getEnvValue, setEnvValue, unsetEnvKey } from "./envManager.js";
 import {
   readTeamclawConfig,
   writeTeamclawConfig,
@@ -14,7 +13,14 @@ import {
   unsetJsonKey,
 } from "./jsonConfigManager.js";
 
-export type ConfigSource = ".env" | "teamclaw.config.json";
+export type ConfigSource = "teamclaw.config.json";
+
+const DEFAULT_GOAL = "Build a small 2D game with sprite assets and sound effects";
+
+export function getDefaultGoal(): string {
+  const result = getConfigValue("default_goal", { raw: true });
+  return result.value ?? DEFAULT_GOAL;
+}
 
 export type GetResult = {
   key: string;
@@ -23,14 +29,8 @@ export type GetResult = {
   masked: boolean;
 };
 
-const JSON_KEYS = new Set(["template", "goal", "creativity", "max_cycles"]);
-
 export function isSecretKey(key: string): boolean {
   return /KEY|TOKEN|SECRET|PASSWORD/i.test(key);
-}
-
-export function routesToJson(key: string): boolean {
-  return JSON_KEYS.has(key);
 }
 
 function maskSecret(value: string): string {
@@ -65,18 +65,11 @@ export function getConfigValue(
   const cwd = options?.cwd ?? process.cwd();
   const raw = options?.raw ?? false;
 
-  if (routesToJson(key)) {
-    const { data } = readTeamclawConfig(cwd);
-    const v = getJsonKey(key, data);
-    const str = v === undefined ? null : String(v);
-    const shouldMask = !raw && str != null && isSecretKey(key);
-    return { key, value: shouldMask && str != null ? maskSecret(str) : str, source: "teamclaw.config.json", masked: shouldMask };
-  }
-
-  const env = readEnvFile(cwd);
-  const v = getEnvValue(key, env.lines);
-  const shouldMask = !raw && v != null && isSecretKey(key);
-  return { key, value: shouldMask && v != null ? maskSecret(v) : v, source: ".env", masked: shouldMask };
+  const { data } = readTeamclawConfig(cwd);
+  const v = getJsonKey(key, data);
+  const str = v === undefined ? null : String(v);
+  const shouldMask = !raw && str != null && isSecretKey(key);
+  return { key, value: shouldMask && str != null ? maskSecret(str) : str, source: "teamclaw.config.json", masked: shouldMask };
 }
 
 export function setConfigValue(
@@ -86,19 +79,12 @@ export function setConfigValue(
 ): { source: ConfigSource } | { error: string; source: ConfigSource } {
   const cwd = options?.cwd ?? process.cwd();
 
-  if (routesToJson(key)) {
-    const { path, data } = readTeamclawConfig(cwd);
-    const coerced = coerceJsonValue(key, value);
-    if (!coerced.ok) return { error: coerced.error, source: "teamclaw.config.json" };
-    const next = setJsonKey(key, coerced.value, data);
-    writeTeamclawConfig(path, next);
-    return { source: "teamclaw.config.json" };
-  }
-
-  const env = readEnvFile(cwd);
-  const nextLines = setEnvValue(key, value, env.lines);
-  writeEnvFile(env.path, nextLines);
-  return { source: ".env" };
+  const { path, data } = readTeamclawConfig(cwd);
+  const coerced = coerceJsonValue(key, value);
+  if (!coerced.ok) return { error: coerced.error, source: "teamclaw.config.json" };
+  const next = setJsonKey(key, coerced.value, data);
+  writeTeamclawConfig(path, next);
+  return { source: "teamclaw.config.json" };
 }
 
 export function unsetConfigKey(
@@ -107,16 +93,8 @@ export function unsetConfigKey(
 ): { source: ConfigSource } {
   const cwd = options?.cwd ?? process.cwd();
 
-  if (routesToJson(key)) {
-    const { path, data } = readTeamclawConfig(cwd);
-    const next = unsetJsonKey(key, data);
-    writeTeamclawConfig(path, next);
-    return { source: "teamclaw.config.json" };
-  }
-
-  const env = readEnvFile(cwd);
-  const nextLines = unsetEnvKey(key, env.lines);
-  writeEnvFile(env.path, nextLines);
-  return { source: ".env" };
+  const { path, data } = readTeamclawConfig(cwd);
+  const next = unsetJsonKey(key, data);
+  writeTeamclawConfig(path, next);
+  return { source: "teamclaw.config.json" };
 }
-
