@@ -860,7 +860,7 @@ export async function runWork(
     }
 
     const vectorMemory = new VectorMemory(
-        CONFIG.chromadbPersistDir,
+        CONFIG.vectorStorePath,
         selectedMemoryBackend,
     );
     await vectorMemory.init();

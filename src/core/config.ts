@@ -23,18 +23,23 @@ import {
 import { discoverOpenAIApi, readLocalOpenClawConfig } from "./discovery.js";
 import { readGlobalConfigWithDefaults } from "./global-config.js";
 import { migrateEnvToGlobalJson } from "./configMigrator.js";
-import { readEnvFile, writeEnvFile, getEnvValue, setEnvValue } from "./envManager.js";
+import { setConfigAgentModels } from "./model-config.js";
 
 migrateEnvToGlobalJson();
 
 export type MemoryBackend = "lancedb" | "local_json";
-const GATEWAY_DEFAULT_MODEL = "gateway-default";
 
 function loadGlobalConfig() {
     return readGlobalConfigWithDefaults();
 }
 
 const globalCfg = loadGlobalConfig() as unknown as Record<string, unknown>;
+
+// Feed per-agent models from global config into the model resolution layer
+const _globalAgentModels = globalCfg.agentModels;
+if (_globalAgentModels && typeof _globalAgentModels === "object" && !Array.isArray(_globalAgentModels)) {
+    setConfigAgentModels(_globalAgentModels as Record<string, string>);
+}
 
 function getGlobalString(key: string, defaultVal: string): string {
     const val = globalCfg[key];
@@ -68,7 +73,7 @@ export const CONFIG = {
 
     workspaceDir: getGlobalString("workspaceDir", "./teamclaw-workspace"),
 
-    chromadbPersistDir: getGlobalString("chromadbPersistDir", "data/vector_store"),
+    vectorStorePath: getGlobalString("vectorStorePath", "data/vector_store"),
     memoryBackend: (getGlobalString("memoryBackend", "lancedb") as MemoryBackend),
     verboseLogging: getGlobalBoolean("verboseLogging", false),
     debugMode: getGlobalBoolean("debugMode", false),
@@ -78,7 +83,7 @@ export const CONFIG = {
     openclawWorkers: {} as Record<string, string>,
     openclawToken: String(globalCfg.token || ""),
     openclawChatEndpoint: String(globalCfg.chatEndpoint || "/v1/chat/completions"),
-    openclawModel: String(globalCfg.model || GATEWAY_DEFAULT_MODEL),
+    openclawModel: String(globalCfg.model || ""),
     openclawProvisionTimeout: getGlobalNumber("openclawProvisionTimeout", 30_000),
 
     webhookOnTaskComplete: getGlobalString("webhookOnTaskComplete", ""),
@@ -301,22 +306,24 @@ export async function validateOrPromptConfig(
     const teamCfg = await loadTeamConfig();
     const rosterOk = hasValidRoster(teamCfg);
 
-    const env = readEnvFile();
-    const urlRaw = getEnvValue("OPENCLAW_WORKER_URL", env.lines);
-    const tokenRaw = getEnvValue("OPENCLAW_TOKEN", env.lines);
-    const chatEndpointRaw = getEnvValue("OPENCLAW_CHAT_ENDPOINT", env.lines);
-    const modelRaw = getEnvValue("OPENCLAW_MODEL", env.lines);
-    const openclawUrl = (urlRaw ?? "").trim();
-    const openclawToken = 
-        (tokenRaw ?? "").trim() || 
+    // Wire per-agent models from team config into model resolution layer
+    if (teamCfg?.agent_models && Object.keys(teamCfg.agent_models).length > 0) {
+        setConfigAgentModels(teamCfg.agent_models);
+    }
+
+    // Read values from global JSON config + project JSON config (no .env)
+    const openclawUrl = CONFIG.openclawWorkerUrl ||
+        (teamCfg?.worker_url ?? "").trim();
+    const openclawToken =
+        CONFIG.openclawToken ||
         (teamCfg?.openclaw_token ?? "").trim();
     const openclawChatEndpoint =
-        (chatEndpointRaw ?? "").trim() ||
+        CONFIG.openclawChatEndpoint ||
         (teamCfg?.openclaw_chat_endpoint ?? "").trim();
     const openclawModel =
-        (modelRaw ?? "").trim() ||
+        CONFIG.openclawModel ||
         (teamCfg?.openclaw_model ?? "").trim() ||
-        GATEWAY_DEFAULT_MODEL;
+        "gateway-default";
 
     let effectiveOpenclawUrl = openclawUrl;
     let effectiveOpenclawToken = openclawToken;
@@ -325,16 +332,11 @@ export async function validateOrPromptConfig(
     let discoveredModels: string[] = [];
     // Track whether local config has auth disabled — used to skip token prompt
     let localConfigAuthNotRequired = false;
-    // Mutable env lines — hoisted early so both the local-config block and the
-    // fast-path return can accumulate and persist changes in a single write.
-    let envLines = env.lines;
+    // Track whether values were filled/changed by discovery so we can persist
+    let configDirty = false;
 
     // Eagerly fill any missing effective values from the local OpenClaw config
-    // file BEFORE the fast-path check.  This matters when URL + token are
-    // already persisted in .env from a prior run but endpoint/model were never
-    // saved — without this the local config file was only consulted inside the
-    // `if (!effectiveOpenclawUrl)` block below, which was skipped entirely
-    // whenever the URL was already known.
+    // file BEFORE the fast-path check.
     if (
         !effectiveOpenclawUrl ||
         !effectiveOpenclawToken ||
@@ -345,52 +347,25 @@ export async function validateOrPromptConfig(
             ? null
             : readLocalOpenClawConfig();
         if (earlyLocalCfg) {
-            // Track if auth is disabled in local config — skip token prompt if so
             if (!earlyLocalCfg.authRequired) {
                 localConfigAuthNotRequired = true;
             }
-            // Only fill URL when it is completely absent — never override a URL
-            // that is already set, because the config file's port may differ from
-            // the port the running gateway process is actually bound to.
             if (!effectiveOpenclawUrl) {
                 effectiveOpenclawUrl = earlyLocalCfg.url;
-                envLines = setEnvValue(
-                    "OPENCLAW_WORKER_URL",
-                    effectiveOpenclawUrl,
-                    envLines,
-                );
+                configDirty = true;
             }
-            // Always sync the HTTP API URL from local config (separate port from WS gateway)
-            envLines = setEnvValue(
-                "OPENCLAW_HTTP_URL",
-                earlyLocalCfg.httpUrl,
-                envLines,
-            );
             applyRuntimeOpenClawConfig({ openclawHttpUrl: earlyLocalCfg.httpUrl });
             if (!effectiveOpenclawToken) {
                 effectiveOpenclawToken = earlyLocalCfg.token;
-                envLines = setEnvValue(
-                    "OPENCLAW_TOKEN",
-                    effectiveOpenclawToken,
-                    envLines,
-                );
+                configDirty = true;
             }
             if (!effectiveOpenclawChatEndpoint) {
                 effectiveOpenclawChatEndpoint = "/v1/chat/completions";
-                envLines = setEnvValue(
-                    "OPENCLAW_CHAT_ENDPOINT",
-                    effectiveOpenclawChatEndpoint,
-                    envLines,
-                );
+                configDirty = true;
             }
-            // Always prefer the model from local OpenClaw config when available
             if (earlyLocalCfg.model) {
                 effectiveOpenclawModel = earlyLocalCfg.model;
-                envLines = setEnvValue(
-                    "OPENCLAW_MODEL",
-                    effectiveOpenclawModel,
-                    envLines,
-                );
+                configDirty = true;
             }
         }
     }
@@ -402,17 +377,15 @@ export async function validateOrPromptConfig(
         effectiveOpenclawChatEndpoint &&
         effectiveOpenclawModel
     ) {
-        // Persist any values that were corrected/filled by the local config
-        // file (e.g. stale port in .env, or missing endpoint/model).
-        if (envLines !== env.lines) {
-            writeEnvFile(env.path, envLines);
-        }
         applyRuntimeOpenClawConfig({
             openclawWorkerUrl: effectiveOpenclawUrl,
             openclawToken: effectiveOpenclawToken,
             openclawChatEndpoint: effectiveOpenclawChatEndpoint,
             openclawModel: effectiveOpenclawModel,
         });
+        if (configDirty) {
+            persistToProjectConfig(effectiveOpenclawUrl, effectiveOpenclawChatEndpoint, effectiveOpenclawModel);
+        }
         return;
     }
 
@@ -433,8 +406,8 @@ export async function validateOrPromptConfig(
             "Welcome! Let's do a quick 10-second setup before we start working.",
             "TeamClaw setup",
         );
-        const { runOnboard } = await import("../onboard/index.js");
-        await runOnboard();
+        const { runSetup } = await import("../commands/setup.js");
+        await runSetup();
         clearTeamConfigCache();
         return;
     }
@@ -443,23 +416,17 @@ export async function validateOrPromptConfig(
     // editing to the dedicated onboard flow if it's still missing.
 
     // Run Discovery only when the gateway URL itself is unknown, or the user
-    // explicitly requested a re-scan via --discover.  If URL + token are both
-    // present we have enough to connect — missing model/endpoint are filled by
-    // the individual prompts below without touching the network scanner.
+    // explicitly requested a re-scan via --discover.
     if (!effectiveOpenclawUrl || opts.forceDiscover) {
         const s = spinner();
         s.start("🔍 Checking for local OpenClaw configuration...");
 
-        // Prefer the local config file over network probing unless the user
-        // explicitly asked for a network re-scan with --discover.
         const localCfg = opts.forceDiscover ? null : readLocalOpenClawConfig();
 
         if (localCfg) {
-            // Track if auth is disabled in local config — skip token prompt if so
             if (!localCfg.authRequired) {
                 localConfigAuthNotRequired = true;
             }
-            // All four values can be read directly from the file — no prompts needed.
             effectiveOpenclawUrl = localCfg.url;
             effectiveOpenclawToken = localCfg.token;
             if (localCfg.model && !effectiveOpenclawModel) {
@@ -467,37 +434,6 @@ export async function validateOrPromptConfig(
             }
             if (!effectiveOpenclawChatEndpoint) {
                 effectiveOpenclawChatEndpoint = "/v1/chat/completions";
-            }
-
-            envLines = setEnvValue(
-                "OPENCLAW_WORKER_URL",
-                effectiveOpenclawUrl,
-                envLines,
-            );
-            envLines = setEnvValue(
-                "OPENCLAW_TOKEN",
-                effectiveOpenclawToken,
-                envLines,
-            );
-            // Always sync the HTTP API URL from local config (separate port from WS gateway)
-            envLines = setEnvValue(
-                "OPENCLAW_HTTP_URL",
-                localCfg.httpUrl,
-                envLines,
-            );
-            if (effectiveOpenclawModel) {
-                envLines = setEnvValue(
-                    "OPENCLAW_MODEL",
-                    effectiveOpenclawModel,
-                    envLines,
-                );
-            }
-            if (!openclawChatEndpoint) {
-                envLines = setEnvValue(
-                    "OPENCLAW_CHAT_ENDPOINT",
-                    effectiveOpenclawChatEndpoint,
-                    envLines,
-                );
             }
 
             applyRuntimeOpenClawConfig({
@@ -524,8 +460,6 @@ export async function validateOrPromptConfig(
             if (discovered.length > 0) {
                 let selected = discovered[0]!;
                 if (discovered.length > 1) {
-                    // Stop spinner BEFORE showing interactive menu — prevents the "spinning
-                    // forever" look where the animation keeps running behind the select list.
                     s.stop(
                         `📡 Found ${discovered.length} OpenAI-compatible service(s).`,
                     );
@@ -554,22 +488,14 @@ export async function validateOrPromptConfig(
                             ? discovered[parsedIdx]!
                             : selected;
                 } else {
-                    // Single result — stop spinner now with service details.
                     s.stop(
                         `✅ Found ${selected.serviceName} at port ${selected.port} (${selected.protocol.toUpperCase()})`,
                     );
                 }
                 discoveredModels =
                     selected.protocol === "http" ? selected.models : [];
-                // Always update URL when force-discovering so the new selection is
-                // persisted for the rest of the session; otherwise only fill when empty.
                 if (!effectiveOpenclawUrl || opts.forceDiscover) {
                     effectiveOpenclawUrl = selected.baseUrl;
-                    envLines = setEnvValue(
-                        "OPENCLAW_WORKER_URL",
-                        effectiveOpenclawUrl,
-                        envLines,
-                    );
                     applyRuntimeOpenClawConfig({
                         openclawWorkerUrl: effectiveOpenclawUrl,
                     });
@@ -579,11 +505,6 @@ export async function validateOrPromptConfig(
                     selected.protocol === "http"
                 ) {
                     effectiveOpenclawChatEndpoint = selected.chatEndpoint;
-                    envLines = setEnvValue(
-                        "OPENCLAW_CHAT_ENDPOINT",
-                        effectiveOpenclawChatEndpoint,
-                        envLines,
-                    );
                     applyRuntimeOpenClawConfig({
                         openclawChatEndpoint: effectiveOpenclawChatEndpoint,
                     });
@@ -607,7 +528,7 @@ export async function validateOrPromptConfig(
         const url = handleInlineCancel(
             await text({
                 message:
-                    "Missing OpenClaw Gateway URL (OPENCLAW_WORKER_URL). Please enter it:",
+                    "Missing OpenClaw Gateway URL. Please enter it:",
                 placeholder: "http://localhost:8001",
                 validate: (v) =>
                     (v ?? "").trim().length > 0
@@ -617,7 +538,6 @@ export async function validateOrPromptConfig(
         ) as string;
         const value = url.trim();
         if (value) {
-            envLines = setEnvValue("OPENCLAW_WORKER_URL", value, envLines);
             effectiveOpenclawUrl = value;
             applyRuntimeOpenClawConfig({ openclawWorkerUrl: value });
         }
@@ -628,7 +548,7 @@ export async function validateOrPromptConfig(
         const token = handleInlineCancel(
             await password({
                 message:
-                    "Missing OpenClaw token (OPENCLAW_TOKEN). Please enter it:",
+                    "Missing OpenClaw token. Please enter it:",
                 validate: (v) =>
                     (v ?? "").trim().length > 0
                         ? undefined
@@ -637,7 +557,6 @@ export async function validateOrPromptConfig(
         ) as string;
         const value = token.trim();
         if (value) {
-            envLines = setEnvValue("OPENCLAW_TOKEN", value, envLines);
             effectiveOpenclawToken = value;
             applyRuntimeOpenClawConfig({ openclawToken: value });
         }
@@ -647,7 +566,7 @@ export async function validateOrPromptConfig(
         const endpoint = handleInlineCancel(
             await text({
                 message:
-                    "Missing OpenClaw chat endpoint (OPENCLAW_CHAT_ENDPOINT). Please enter it:",
+                    "Missing OpenClaw chat endpoint. Please enter it:",
                 initialValue: "/v1/chat/completions",
                 placeholder: "/v1/chat/completions",
                 validate: (v) =>
@@ -658,7 +577,6 @@ export async function validateOrPromptConfig(
         ) as string;
         const value = endpoint.trim();
         if (value) {
-            envLines = setEnvValue("OPENCLAW_CHAT_ENDPOINT", value, envLines);
             effectiveOpenclawChatEndpoint = value;
             applyRuntimeOpenClawConfig({ openclawChatEndpoint: value });
         }
@@ -673,18 +591,12 @@ export async function validateOrPromptConfig(
                       effectiveOpenclawToken,
                   )
                 : null;
-        const value = (discovered ?? GATEWAY_DEFAULT_MODEL).trim();
-        envLines = setEnvValue("OPENCLAW_MODEL", value, envLines);
+        const value = (discovered ?? "gateway-default").trim();
         effectiveOpenclawModel = value;
         applyRuntimeOpenClawConfig({ openclawModel: value });
     }
 
-    if (envLines !== env.lines) {
-        writeEnvFile(env.path, envLines);
-    }
-
-    // Ensure all resolved values are immediately available in this process even if
-    // they came from existing .env/team config and no prompt branch executed.
+    // Ensure all resolved values are immediately available in this process.
     applyRuntimeOpenClawConfig({
         openclawWorkerUrl: effectiveOpenclawUrl,
         openclawToken: effectiveOpenclawToken,
@@ -692,33 +604,8 @@ export async function validateOrPromptConfig(
         openclawModel: effectiveOpenclawModel,
     });
 
-    const persisted = { ...tc.data } as Record<string, unknown>;
-    let persistedChanged = false;
-    if (
-        effectiveOpenclawUrl &&
-        persisted["worker_url"] !== effectiveOpenclawUrl
-    ) {
-        persisted["worker_url"] = effectiveOpenclawUrl;
-        persistedChanged = true;
-    }
-    if (
-        effectiveOpenclawChatEndpoint &&
-        persisted["openclaw_chat_endpoint"] !== effectiveOpenclawChatEndpoint
-    ) {
-        persisted["openclaw_chat_endpoint"] = effectiveOpenclawChatEndpoint;
-        persistedChanged = true;
-    }
-    if (
-        effectiveOpenclawModel &&
-        persisted["openclaw_model"] !== effectiveOpenclawModel
-    ) {
-        persisted["openclaw_model"] = effectiveOpenclawModel;
-        persistedChanged = true;
-    }
-    if (persistedChanged) {
-        writeTeamclawConfig(tc.path, persisted);
-        clearTeamConfigCache();
-    }
+    // Persist discovered/prompted values to project JSON config
+    persistToProjectConfig(effectiveOpenclawUrl, effectiveOpenclawChatEndpoint, effectiveOpenclawModel);
 
     // Ensure a basic roster exists; if not, create a minimal one-on-one config.
     if (!rosterOk) {
@@ -760,5 +647,27 @@ export async function validateOrPromptConfig(
             ].join("\n"),
             title,
         );
+    }
+}
+
+function persistToProjectConfig(url: string, chatEndpoint: string, model: string): void {
+    const tc = readTeamclawConfig();
+    const persisted = { ...tc.data } as Record<string, unknown>;
+    let changed = false;
+    if (url && persisted["worker_url"] !== url) {
+        persisted["worker_url"] = url;
+        changed = true;
+    }
+    if (chatEndpoint && persisted["openclaw_chat_endpoint"] !== chatEndpoint) {
+        persisted["openclaw_chat_endpoint"] = chatEndpoint;
+        changed = true;
+    }
+    if (model && persisted["openclaw_model"] !== model) {
+        persisted["openclaw_model"] = model;
+        changed = true;
+    }
+    if (changed) {
+        writeTeamclawConfig(tc.path, persisted);
+        clearTeamConfigCache();
     }
 }

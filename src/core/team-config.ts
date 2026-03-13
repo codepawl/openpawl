@@ -21,6 +21,7 @@ export interface TeamConfig {
   openclaw_chat_endpoint?: string;
   openclaw_model?: string;
   openclaw_token?: string;
+  agent_models?: Record<string, string>;
   webhooks?: {
     on_task_complete?: string;
     on_cycle_end?: string;
@@ -111,6 +112,14 @@ export async function loadTeamConfig(): Promise<TeamConfig | null> {
           : parsed.memory_backend === "chroma"
             ? "lancedb"
             : undefined,
+      agent_models:
+        parsed.agent_models && typeof parsed.agent_models === "object" && !Array.isArray(parsed.agent_models)
+          ? Object.fromEntries(
+              Object.entries(parsed.agent_models as Record<string, unknown>)
+                .map(([k, v]) => [k.trim().toLowerCase(), typeof v === "string" ? v.trim() : ""])
+                .filter(([k, v]) => k.length > 0 && v.length > 0),
+            )
+          : undefined,
     };
   } catch {
     _cached = null;

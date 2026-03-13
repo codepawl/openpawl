@@ -420,7 +420,7 @@ export async function runWeb(args: string[]): Promise<void> {
   fastify.get("/api/lessons", async () => {
     const teamConfig = await loadTeamConfig();
     const vectorMemory = new VectorMemory(
-      CONFIG.chromadbPersistDir,
+      CONFIG.vectorStorePath,
       teamConfig?.memory_backend ?? CONFIG.memoryBackend
     );
     await vectorMemory.init();
@@ -672,7 +672,7 @@ export async function runWeb(args: string[]): Promise<void> {
           }
 
           const vectorMemory = new VectorMemory(
-            CONFIG.chromadbPersistDir,
+            CONFIG.vectorStorePath,
             teamConfig?.memory_backend ?? CONFIG.memoryBackend
           );
           await vectorMemory.init();

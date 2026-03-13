@@ -10,6 +10,7 @@ import type { VectorMemory } from "../core/knowledge-base.js";
 import { logger, isDebugMode } from "../core/logger.js";
 import { generate } from "../core/llm-client.js";
 import { parseLlmJson } from "../utils/jsonExtractor.js";
+import { resolveModelForAgent } from "../core/model-config.js";
 import { ensureWorkspaceDir } from "../core/workspace-fs.js";
 import path from "node:path";
 import fs from "node:fs";
@@ -103,7 +104,7 @@ ${(finalState.team ?? []).map(b => `- ${(b as { name: string }).name}: ${(b as {
         let result: RetroResult;
 
         try {
-            const response = await generate(RETRO_SYSTEM_PROMPT + "\n\n" + prompt, { botId: "retrospective" });
+            const response = await generate(RETRO_SYSTEM_PROMPT + "\n\n" + prompt, { botId: "retrospective", model: resolveModelForAgent("retrospective") });
             const parsed = parseLlmJson<Record<string, unknown>>(response);
             const actionItemsRaw = parsed.actionItems as unknown[] | undefined;
             const actionItems = Array.isArray(actionItemsRaw) 

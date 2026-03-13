@@ -1,6 +1,8 @@
-import { select, cancel, isCancel } from "@clack/prompts";
+import { select, text, confirm, cancel, isCancel, note } from "@clack/prompts";
+import pc from "picocolors";
 import fs from "node:fs/promises";
 import path from "node:path";
+import os from "node:os";
 
 export interface PathEntry {
     value: string;
@@ -8,171 +10,178 @@ export interface PathEntry {
     hint?: string;
 }
 
-async function scanDirectory(dirPath: string, maxDepth: number = 2, currentDepth: number = 0): Promise<PathEntry[]> {
-    if (currentDepth >= maxDepth) return [];
-
+/** List directories (and optionally files) at the given path. */
+async function listDir(
+    dirPath: string,
+    opts?: { showFiles?: boolean },
+): Promise<PathEntry[]> {
     const entries: PathEntry[] = [];
-
     try {
         const items = await fs.readdir(dirPath, { withFileTypes: true });
+        const sorted = items
+            .filter((i) => !i.name.startsWith("."))
+            .sort((a, b) => {
+                // directories first, then alphabetical
+                if (a.isDirectory() && !b.isDirectory()) return -1;
+                if (!a.isDirectory() && b.isDirectory()) return 1;
+                return a.name.localeCompare(b.name);
+            });
 
-        for (const item of items) {
-            if (item.name.startsWith(".")) continue;
+        for (const item of sorted) {
             if (item.name === "node_modules") continue;
-            if (item.name === "dist") continue;
-            if (item.name === "build") continue;
-
             const fullPath = path.join(dirPath, item.name);
-
             if (item.isDirectory()) {
                 entries.push({
                     value: fullPath,
-                    label: `${item.name}/`,
-                    hint: "directory",
+                    label: `${pc.cyan(item.name)}/`,
+                    hint: "dir",
                 });
-
-                if (currentDepth < maxDepth - 1) {
-                    const subEntries = await scanDirectory(fullPath, maxDepth, currentDepth + 1);
-                    entries.push(...subEntries);
-                }
-            } else if (item.isFile() && item.name.endsWith(".json")) {
+            } else if (opts?.showFiles) {
                 entries.push({
                     value: fullPath,
-                    label: item.name,
+                    label: pc.dim(item.name),
                     hint: "file",
                 });
             }
         }
     } catch {
-        // Ignore permission errors
+        // Permission error or path doesn't exist
     }
-
     return entries;
 }
 
+/** Shorten a path for display, replacing $HOME with ~. */
+function displayPath(p: string): string {
+    const home = os.homedir();
+    if (p === home) return "~";
+    if (p.startsWith(home + path.sep)) return "~" + p.slice(home.length);
+    return p;
+}
+
+/**
+ * Interactive directory browser with navigation.
+ *
+ * Shows directories at the current path in a select list.
+ * Users can navigate into subdirectories, go up to parent,
+ * select the current directory, or type a custom path.
+ */
 export async function promptPath(options: {
     message?: string;
     defaultPath?: string;
     cwd?: string;
     maxDepth?: number;
 }): Promise<string | null> {
-    const cwd = options.cwd || process.cwd();
-    const maxDepth = options.maxDepth || 2;
-
-    const commonPaths: PathEntry[] = [
-        { value: cwd, label: "Current directory", hint: path.basename(cwd) },
-        { value: path.join(cwd, ".."), label: "Parent directory", hint: ".." },
-        { value: path.join(cwd, "projects"), label: "projects/", hint: "subdirectory" },
-        { value: path.join(cwd, "workspace"), label: "workspace/", hint: "subdirectory" },
-    ];
-
-    const scanBtn: PathEntry = {
-        value: "__scan__",
-        label: "🔍 Browse directories...",
-        hint: "scan current directory",
-    };
-
-    const customBtn: PathEntry = {
-        value: "__custom__",
-        label: "⌨️  Type custom path...",
-        hint: "enter path manually",
-    };
-
-    const initialOptions: PathEntry[] = [
-        ...commonPaths.slice(0, 2),
-        scanBtn,
-        customBtn,
-    ];
-
-    let selectedValue: string | symbol = "";
+    const startDir = options.cwd || process.cwd();
+    let currentDir = path.resolve(startDir);
 
     while (true) {
-        selectedValue = await select({
-            message: options.message || "Select workspace path:",
-            options: initialOptions,
+        const dirEntries = await listDir(currentDir);
+        const displayDir = displayPath(currentDir);
+
+        // Build option list
+        const menuOptions: Array<{ value: string; label: string; hint?: string }> = [
+            {
+                value: "__select__",
+                label: pc.green("  Use this directory"),
+                hint: displayDir,
+            },
+            {
+                value: "__up__",
+                label: `${pc.yellow("..")}  Parent directory`,
+                hint: displayPath(path.dirname(currentDir)),
+            },
+            {
+                value: "__type__",
+                label: pc.blue("  Type a path"),
+            },
+        ];
+
+        // Add directory entries (cap at 30 to keep list readable)
+        const dirLimit = 30;
+        const cappedEntries = dirEntries.slice(0, dirLimit);
+        if (cappedEntries.length > 0) {
+            menuOptions.push(
+                ...cappedEntries.map((e) => ({
+                    value: e.value,
+                    label: `   ${e.label}`,
+                    hint: e.hint,
+                })),
+            );
+        }
+
+        if (dirEntries.length > dirLimit) {
+            menuOptions.push({
+                value: "__type__",
+                label: pc.dim(`   ... and ${dirEntries.length - dirLimit} more`),
+                hint: "type path to access",
+            });
+        }
+
+        if (dirEntries.length === 0) {
+            menuOptions.push({
+                value: "__empty__",
+                label: pc.dim("   (empty directory)"),
+            });
+        }
+
+        const choice = await select({
+            message: `${options.message ?? "Select directory"} ${pc.dim(`[${displayDir}]`)}`,
+            options: menuOptions,
         });
 
-        if (isCancel(selectedValue)) {
+        if (isCancel(choice)) {
             cancel("Operation cancelled.");
             return null;
         }
 
-        if (selectedValue === "__scan__") {
-            const scanned = await scanDirectory(cwd, maxDepth);
-            const scanOptions: PathEntry[] = [
-                ...commonPaths,
-                ...scanned.slice(0, 50),
-                customBtn,
-            ];
-
-            const scannedChoice = await select({
-                message: "Select a directory:",
-                options: scanOptions,
-            });
-
-            if (isCancel(scannedChoice)) {
-                continue;
-            }
-
-            if (scannedChoice === "__custom__") {
-                const { text } = await import("@clack/prompts");
-                const customPath = await text({
-                    message: "Enter absolute or relative path:",
-                    placeholder: "./my-project or /home/user/projects",
-                });
-
-                if (isCancel(customPath) || !String(customPath).trim()) {
-                    continue;
-                }
-
-                const resolved = path.resolve(cwd, String(customPath).trim());
-                try {
-                    await fs.access(resolved);
-                    return resolved;
-                } catch {
-                    const { confirm } = await import("@clack/prompts");
-                    const create = await confirm({
-                        message: `Directory doesn't exist. Create "${resolved}"?`,
-                    });
-
-                    if (isCancel(create) || !create) {
-                        continue;
-                    }
-
-                    try {
-                        await fs.mkdir(resolved, { recursive: true });
-                        return resolved;
-                    } catch {
-                        continue;
-                    }
-                }
-            }
-
-            return scannedChoice as string;
+        if (choice === "__select__") {
+            return currentDir;
         }
 
-        if (selectedValue === "__custom__") {
-            const { text } = await import("@clack/prompts");
-            const customPath = await text({
-                message: "Enter absolute or relative path:",
-                placeholder: "./my-project or /home/user/projects",
+        if (choice === "__up__") {
+            const parent = path.dirname(currentDir);
+            if (parent !== currentDir) {
+                currentDir = parent;
+            }
+            continue;
+        }
+
+        if (choice === "__type__") {
+            const typed = await text({
+                message: "Enter path (absolute or relative, ~ supported):",
+                placeholder: currentDir,
+                initialValue: currentDir,
+                validate: (v) =>
+                    (v ?? "").trim().length > 0 ? undefined : "Path cannot be empty",
             });
 
-            if (isCancel(customPath) || !String(customPath).trim()) {
-                continue;
-            }
+            if (isCancel(typed)) continue;
 
-            const resolved = path.resolve(cwd, String(customPath).trim());
+            let resolved = String(typed).trim();
+            // Expand ~ to home directory
+            if (resolved.startsWith("~")) {
+                resolved = path.join(os.homedir(), resolved.slice(1));
+            }
+            resolved = path.resolve(currentDir, resolved);
+
             try {
-                await fs.access(resolved);
-                return resolved;
+                const stat = await fs.stat(resolved);
+                if (stat.isDirectory()) {
+                    // Navigate into the typed directory instead of selecting immediately
+                    currentDir = resolved;
+                    continue;
+                }
+                // If it's a file, go to its parent
+                currentDir = path.dirname(resolved);
+                continue;
             } catch {
-                const { confirm } = await import("@clack/prompts");
-                const create = await confirm({
-                    message: `Directory doesn't exist. Create "${resolved}"?`,
+                // Path doesn't exist — offer to create or navigate to closest parent
+                const createIt = await confirm({
+                    message: `"${displayPath(resolved)}" doesn't exist. Create it?`,
+                    initialValue: true,
                 });
 
-                if (isCancel(create) || !create) {
+                if (isCancel(createIt) || !createIt) {
                     continue;
                 }
 
@@ -180,11 +189,23 @@ export async function promptPath(options: {
                     await fs.mkdir(resolved, { recursive: true });
                     return resolved;
                 } catch {
+                    note("Failed to create directory. Check permissions.", "Error");
                     continue;
                 }
             }
         }
 
-        return selectedValue as string;
+        if (choice === "__empty__") continue;
+
+        // User picked a directory entry — navigate into it
+        const choicePath = choice as string;
+        try {
+            const stat = await fs.stat(choicePath);
+            if (stat.isDirectory()) {
+                currentDir = choicePath;
+            }
+        } catch {
+            continue;
+        }
     }
 }

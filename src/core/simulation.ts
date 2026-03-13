@@ -19,6 +19,7 @@ import { createWorkerBots, createWorkerExecuteNode } from "../agents/worker-bot.
 import { getFirstTaskNeedingApproval, createApprovalNode, createHumanApprovalNode } from "../agents/approval.js";
 import type { ApprovalProvider } from "../agents/approval.js";
 import { UniversalOpenClawAdapter } from "../interfaces/worker-adapter.js";
+import { resolveModelForAgent } from "./model-config.js";
 import { logger, isDebugMode } from "./logger.js";
 import { createSprintPlanningNode } from "../agents/planning.js";
 import { createRFCNode } from "../agents/rfc.js";
@@ -104,6 +105,8 @@ export class TeamOrchestration {
       new UniversalOpenClawAdapter({
         workerUrl: CONFIG.openclawWorkerUrl,
         authToken: CONFIG.openclawToken,
+        model: resolveModelForAgent("coordinator"),
+        botId: "coordinator",
       });
     this.coordinator = new CoordinatorAgent({ llmAdapter: sharedLlmAdapter, workspacePath });
 

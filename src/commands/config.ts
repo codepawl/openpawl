@@ -16,15 +16,14 @@ import {
     readLocalOpenClawConfig,
 } from "../core/discovery.js";
 import {
-    getEnvValue,
-    readEnvFile,
-    setEnvValue,
-    writeEnvFile,
-} from "../core/envManager.js";
-import {
     readTeamclawConfig,
     writeTeamclawConfig,
 } from "../core/jsonConfigManager.js";
+import {
+    readGlobalConfigWithDefaults,
+    writeGlobalConfig,
+    type TeamClawGlobalConfig,
+} from "../core/global-config.js";
 import { clearTeamConfigCache, loadTeamConfig } from "../core/team-config.js";
 
 type MemoryBackend = "lancedb" | "local_json";
@@ -134,52 +133,50 @@ function handleCancel<T>(v: T): T {
 }
 
 async function loadDashboardState(): Promise<DashboardState> {
-    const env = readEnvFile();
-    const cfg = readTeamclawConfig();
+    const globalCfg = readGlobalConfigWithDefaults();
     const parsed = await loadTeamConfig();
+    const cfg = readTeamclawConfig();
     const data = asRecord(cfg.data);
 
-    const envBool = (key: string, fallback: boolean): boolean => {
-        const raw = (getEnvValue(key, env.lines) ?? "").trim();
-        if (!raw) return fallback;
-        return ["1", "true", "yes"].includes(raw.toLowerCase());
-    };
-
-    const envStr = (key: string): string =>
-        (getEnvValue(key, env.lines) ?? "").trim();
-
     const memoryBackendRaw =
-        envStr("MEMORY_BACKEND") ||
         (typeof data.memory_backend === "string" ? data.memory_backend : "") ||
         (parsed?.memory_backend ?? "");
     const memoryBackend: MemoryBackend =
         memoryBackendRaw === "local_json" ? "local_json" : "lancedb";
 
-    const webPort = parsePort(envStr("WEB_PORT")) ?? 8000;
-    const loggingLevel: LoggingLevel = envBool("VERBOSE_LOGGING", true)
-        ? "verbose"
-        : "info";
+    const webPort =
+        (typeof data.web_port === "number" ? data.web_port : 0) ||
+        (typeof globalCfg.dashboardPort === "number" ? globalCfg.dashboardPort : 0) ||
+        8000;
+    const verboseRaw = data.verbose_logging ?? true;
+    const loggingLevel: LoggingLevel =
+        (verboseRaw === true || verboseRaw === "true") ? "verbose" : "info";
 
     const openclawWorkerUrl =
-        envStr("OPENCLAW_WORKER_URL") ||
+        String(globalCfg.gatewayUrl || "") ||
         (typeof data.worker_url === "string" ? data.worker_url.trim() : "") ||
         (parsed?.worker_url?.trim() ?? "");
 
     const openclawChatEndpoint =
-        envStr("OPENCLAW_CHAT_ENDPOINT") ||
+        String(globalCfg.chatEndpoint || "") ||
         (typeof data.openclaw_chat_endpoint === "string"
             ? data.openclaw_chat_endpoint.trim()
             : "") ||
         (parsed?.openclaw_chat_endpoint?.trim() ?? "/v1/chat/completions");
 
     const openclawModel =
-        envStr("OPENCLAW_MODEL") ||
+        String(globalCfg.model || "") ||
         (typeof data.openclaw_model === "string"
             ? data.openclaw_model.trim()
             : "") ||
         (parsed?.openclaw_model?.trim() ?? "");
 
-    const token = envStr("OPENCLAW_TOKEN") || envStr("OPENCLAW_AUTH_TOKEN");
+    const token = String(globalCfg.token || "") ||
+        (parsed?.openclaw_token?.trim() ?? "");
+
+    const memoryPath =
+        (typeof data.vector_store_path === "string" ? data.vector_store_path : "") ||
+        "data/vector_store";
 
     const workers = parsed?.workers ?? {};
     const roster = parsed?.roster ?? [];
@@ -190,7 +187,7 @@ async function loadDashboardState(): Promise<DashboardState> {
         openclawModel,
         openclawChatEndpoint,
         memoryBackend,
-        memoryPath: envStr("CHROMADB_PERSIST_DIR") || "data/vector_store",
+        memoryPath,
         roster,
         workers,
         webPort,
@@ -606,33 +603,25 @@ function applyRuntime(state: DashboardState): void {
     process.env["OPENCLAW_CHAT_ENDPOINT"] = state.openclawChatEndpoint;
     process.env["OPENCLAW_MODEL"] = state.openclawModel;
     process.env["MEMORY_BACKEND"] = state.memoryBackend;
-    process.env["CHROMADB_PERSIST_DIR"] = state.memoryPath;
+    process.env["VECTOR_STORE_PATH"] = state.memoryPath;
     process.env["WEB_PORT"] = String(state.webPort);
     process.env["VERBOSE_LOGGING"] =
         state.loggingLevel === "verbose" ? "true" : "false";
 }
 
 function saveState(state: DashboardState): void {
-    const env = readEnvFile();
-    let lines = env.lines;
-    lines = setEnvValue("OPENCLAW_WORKER_URL", state.openclawWorkerUrl, lines);
-    lines = setEnvValue("OPENCLAW_TOKEN", state.openclawToken, lines);
-    lines = setEnvValue(
-        "OPENCLAW_CHAT_ENDPOINT",
-        state.openclawChatEndpoint,
-        lines,
-    );
-    lines = setEnvValue("OPENCLAW_MODEL", state.openclawModel, lines);
-    lines = setEnvValue("MEMORY_BACKEND", state.memoryBackend, lines);
-    lines = setEnvValue("CHROMADB_PERSIST_DIR", state.memoryPath, lines);
-    lines = setEnvValue("WEB_PORT", String(state.webPort), lines);
-    lines = setEnvValue(
-        "VERBOSE_LOGGING",
-        state.loggingLevel === "verbose" ? "true" : "false",
-        lines,
-    );
-    writeEnvFile(env.path, lines);
+    // Update global config (connection + system prefs)
+    const globalCfg = readGlobalConfigWithDefaults();
+    writeGlobalConfig({
+        ...globalCfg,
+        gatewayUrl: state.openclawWorkerUrl,
+        token: state.openclawToken,
+        chatEndpoint: state.openclawChatEndpoint,
+        model: state.openclawModel,
+        dashboardPort: state.webPort,
+    });
 
+    // Update project config (team + project-specific settings)
     const cfg = readTeamclawConfig();
     const next = {
         ...cfg.data,
@@ -640,6 +629,9 @@ function saveState(state: DashboardState): void {
         openclaw_chat_endpoint: state.openclawChatEndpoint,
         openclaw_model: state.openclawModel,
         memory_backend: state.memoryBackend,
+        vector_store_path: state.memoryPath,
+        verbose_logging: state.loggingLevel === "verbose",
+        web_port: state.webPort,
         roster: state.roster,
         workers: state.workers,
     } as Record<string, unknown>;

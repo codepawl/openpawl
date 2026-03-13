@@ -5,6 +5,7 @@
 import type { GraphState } from "../core/graph-state.js";
 import type { VectorMemory } from "../core/knowledge-base.js";
 import { logger, isDebugMode } from "../core/logger.js";
+import { resolveModelForAgent } from "../core/model-config.js";
 
 function log(msg: string): void {
   if (isDebugMode()) {
@@ -128,7 +129,7 @@ Examples of BAD lessons:
 - "The company should have implemented better financial controls" (too long)
 
 Generate ONLY the lesson text (max 15 words), nothing else:`;
-    let lesson = (await generate(prompt, { temperature: 0.3 })).trim().replace(/^["']|["']$/g, "");
+    let lesson = (await generate(prompt, { temperature: 0.3, model: resolveModelForAgent("analyst"), botId: "analyst" })).trim().replace(/^["']|["']$/g, "");
     const words = lesson.split(/\s+/);
     if (words.length > 15) {
       lesson = words.slice(0, 15).join(" ");
@@ -227,7 +228,7 @@ Examples:
 
 Generate ONLY the summary text (max 30 words), nothing else:`;
 
-      const summary = (await generate(prompt, { temperature: 0.3 })).trim();
+      const summary = (await generate(prompt, { temperature: 0.3, model: resolveModelForAgent("analyst"), botId: "analyst" })).trim();
       const words = summary.split(/\s+/);
       let finalSummary = summary;
       if (words.length > 30) {

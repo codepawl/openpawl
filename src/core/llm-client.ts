@@ -5,6 +5,7 @@
 import { CONFIG, getSessionTemperature } from "./config.js";
 import { logger, isDebugMode } from "./logger.js";
 import { getTrafficController } from "./traffic-control.js";
+import { resolveModelForAgent, getFallbackChain } from "./model-config.js";
 
 export interface GenerateOptions {
   temperature?: number;
@@ -118,7 +119,7 @@ export async function getEffectiveModel(
 export async function generate(prompt: string, options?: GenerateOptions & { botId?: string }): Promise<string> {
   const botId = options?.botId ?? "coordinator";
   const trafficController = getTrafficController();
-  
+
   const canProceed = await trafficController.acquire(botId);
   if (!canProceed) {
     throw new Error("Traffic control: Session paused due to safety limit. Please restart the work session.");
@@ -128,7 +129,8 @@ export async function generate(prompt: string, options?: GenerateOptions & { bot
   const temperature = options?.temperature ?? getSessionTemperature();
   const timeoutMs = CONFIG.llmTimeoutMs;
   const promptChars = prompt.length;
-  const model = options?.model ?? (await getEffectiveModel(workerUrl, CONFIG.openclawToken));
+  const resolved = options?.model ?? resolveModelForAgent(botId);
+  const model = resolved || (await getEffectiveModel(workerUrl, CONFIG.openclawToken));
 
   if (!workerUrl) {
     trafficController.release(botId);
@@ -136,59 +138,89 @@ export async function generate(prompt: string, options?: GenerateOptions & { bot
   }
 
   const url = buildOpenClawUrl(workerUrl, CONFIG.openclawChatEndpoint);
-  const startedAt = Date.now();
-  if (isDebugMode()) {
-    logger.agent(
-      `LLM request start: provider=openclaw url=${url} model=${model} timeoutMs=${timeoutMs} promptChars=${promptChars}`,
-    );
-  }
-  try {
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (CONFIG.openclawToken) {
-      headers.Authorization = `Bearer ${CONFIG.openclawToken}`;
-    }
-    const res = await fetch(url, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        model,
-        messages: [{ role: "user" as const, content: prompt }],
-        temperature,
-        stream: false,
-      }),
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-    const elapsedMs = Date.now() - startedAt;
-    const statusLabel = typeof res.status === "number" ? String(res.status) : "unknown";
-    if (isDebugMode()) {
-      logger.agent(`LLM request end: provider=openclaw status=${statusLabel} elapsedMs=${elapsedMs}`);
-    }
-    if (!res.ok) {
-      const textFn = (res as unknown as { text?: () => Promise<string> }).text;
-      const body = typeof textFn === "function" ? (await textFn.call(res).catch(() => "")).trim() : "";
-      const snippet = body.length > 0 ? ` body="${body.slice(0, 200)}"` : "";
-      const portHint = res.status === 404
-        ? ` ⚠️ 404 often means you are hitting the WS Gateway port instead of the API port. API port = Gateway port + 2 (e.g. 8001 → 8003). Run \`teamclaw setup\` to fix.`
-        : "";
-      trafficController.release(botId);
-      throw new Error(`OpenClaw HTTP ${res.status}.${snippet}${portHint}`);
-    }
-    const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
-    trafficController.release(botId);
-    return (data.choices?.[0]?.message?.content ?? "").trim();
-  } catch (err) {
-    trafficController.release(botId);
-    const elapsedMs = Date.now() - startedAt;
+
+  // Build model chain: primary model + fallback models (max 2 retries)
+  const fallbacks = getFallbackChain();
+  const modelChain = [model, ...fallbacks.filter((m) => m !== model)].slice(0, 3);
+
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt < modelChain.length; attempt++) {
+    const currentModel = modelChain[attempt]!;
+    const startedAt = Date.now();
     if (isDebugMode()) {
       logger.agent(
-        `LLM request error: provider=openclaw elapsedMs=${elapsedMs} timedOut=${isAbortTimeoutError(err)} err="${shortErr(err)}"`,
+        `LLM request start: provider=openclaw url=${url} model=${currentModel} timeoutMs=${timeoutMs} promptChars=${promptChars}${attempt > 0 ? ` fallback=${attempt}` : ""}`,
       );
     }
-    throw new Error(
-      `LLM OpenClaw request failed (url=${url}, model=${model}, timeoutMs=${timeoutMs}, elapsedMs=${elapsedMs}): ${shortErr(err)}`,
-      { cause: err },
-    );
+    try {
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (CONFIG.openclawToken) {
+        headers.Authorization = `Bearer ${CONFIG.openclawToken}`;
+      }
+      const res = await fetch(url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          model: currentModel,
+          messages: [{ role: "user" as const, content: prompt }],
+          temperature,
+          stream: false,
+        }),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      const elapsedMs = Date.now() - startedAt;
+      const statusLabel = typeof res.status === "number" ? String(res.status) : "unknown";
+      if (isDebugMode()) {
+        logger.agent(`LLM request end: provider=openclaw status=${statusLabel} elapsedMs=${elapsedMs}`);
+      }
+      if (!res.ok) {
+        const textFn = (res as unknown as { text?: () => Promise<string> }).text;
+        const body = typeof textFn === "function" ? (await textFn.call(res).catch(() => "")).trim() : "";
+
+        // Retry with fallback on 404 or model-not-found errors
+        const isModelError = res.status === 404 || (res.status === 400 && body.toLowerCase().includes("model"));
+        if (isModelError && attempt < modelChain.length - 1) {
+          if (isDebugMode()) {
+            logger.agent(`Model "${currentModel}" not available (${res.status}), trying fallback...`);
+          }
+          lastError = new Error(`OpenClaw HTTP ${res.status} for model ${currentModel}`);
+          continue;
+        }
+
+        const snippet = body.length > 0 ? ` body="${body.slice(0, 200)}"` : "";
+        const portHint = res.status === 404
+          ? ` ⚠️ 404 often means you are hitting the WS Gateway port instead of the API port. API port = Gateway port + 2 (e.g. 8001 → 8003). Run \`teamclaw setup\` to fix.`
+          : "";
+        trafficController.release(botId);
+        throw new Error(`OpenClaw HTTP ${res.status}.${snippet}${portHint}`);
+      }
+      const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+      trafficController.release(botId);
+      return (data.choices?.[0]?.message?.content ?? "").trim();
+    } catch (err) {
+      const elapsedMs = Date.now() - startedAt;
+      if (isDebugMode()) {
+        logger.agent(
+          `LLM request error: provider=openclaw elapsedMs=${elapsedMs} timedOut=${isAbortTimeoutError(err)} err="${shortErr(err)}"`,
+        );
+      }
+      lastError = err instanceof Error ? err : new Error(String(err));
+
+      // Only retry on model-related errors, not timeouts or network failures
+      if (attempt < modelChain.length - 1 && !isAbortTimeoutError(err)) {
+        continue;
+      }
+
+      trafficController.release(botId);
+      throw new Error(
+        `LLM OpenClaw request failed (url=${url}, model=${currentModel}, timeoutMs=${timeoutMs}, elapsedMs=${elapsedMs}): ${shortErr(err)}`,
+        { cause: err },
+      );
+    }
   }
+
+  trafficController.release(botId);
+  throw lastError ?? new Error("LLM request failed: no models available");
 }
 
 export async function llmHealthCheck(): Promise<boolean> {

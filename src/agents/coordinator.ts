@@ -9,6 +9,7 @@ import { logger, isDebugMode } from "../core/logger.js";
 import { parseLlmJson } from "../utils/jsonExtractor.js";
 import type { WorkerAdapter } from "../interfaces/worker-adapter.js";
 import { UniversalOpenClawAdapter } from "../interfaces/worker-adapter.js";
+import { resolveModelForAgent } from "../core/model-config.js";
 
 function log(msg: string): void {
   if (isDebugMode()) {
@@ -28,6 +29,8 @@ export class CoordinatorAgent {
       new UniversalOpenClawAdapter({
         workerUrl: CONFIG.openclawWorkerUrl,
         authToken: CONFIG.openclawToken,
+        model: resolveModelForAgent("coordinator"),
+        botId: "coordinator",
       });
     this.workspacePath = options.workspacePath ?? process.cwd();
     log(`🎯 Coordinator Agent initialized (workspace: ${this.workspacePath})`);

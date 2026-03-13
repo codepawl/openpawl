@@ -10,6 +10,7 @@ import { CONFIG } from "../core/config.js";
 import { logger, isDebugMode } from "../core/logger.js";
 import { parseLlmJson } from "../utils/jsonExtractor.js";
 import { UniversalOpenClawAdapter } from "../interfaces/worker-adapter.js";
+import { resolveModelForAgent } from "../core/model-config.js";
 import { writeTextFile, readTextFile } from "../core/workspace-fs.js";
 import { getCanvasTelemetry } from "../core/canvas-telemetry.js";
 
@@ -48,6 +49,8 @@ export class RFCNode {
       new UniversalOpenClawAdapter({
         workerUrl: CONFIG.openclawWorkerUrl,
         authToken: CONFIG.openclawToken,
+        model: resolveModelForAgent("rfc"),
+        botId: "rfc",
       });
     this.workspacePath = options.workspacePath ?? process.cwd();
     this.team = options.team ?? [];

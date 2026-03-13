@@ -77,6 +77,41 @@ export const ROLE_TEMPLATES: Record<string, RoleTemplate> = {
     task_types: ["review", "verify", "test", "approve", "reject"],
     default_traits: { focus: "quality assurance and code review" },
   },
+  backend_engineer: {
+    id: "backend_engineer",
+    name: "Backend Engineer",
+    skills: ["backend", "api", "database", "systems"],
+    task_types: ["code", "api", "database", "debug", "refactor"],
+    default_traits: { focus: "backend systems and APIs" },
+  },
+  frontend_engineer: {
+    id: "frontend_engineer",
+    name: "Frontend Engineer",
+    skills: ["frontend", "ui", "css", "accessibility"],
+    task_types: ["code", "ui", "component", "style", "debug"],
+    default_traits: { focus: "frontend implementation" },
+  },
+  devops_engineer: {
+    id: "devops_engineer",
+    name: "DevOps Engineer",
+    skills: ["ci_cd", "infrastructure", "monitoring", "deployment"],
+    task_types: ["deploy", "pipeline", "monitor", "configure", "automate"],
+    default_traits: { focus: "infrastructure and deployment" },
+  },
+  data_analyst: {
+    id: "data_analyst",
+    name: "Data Analyst",
+    skills: ["sql", "analytics", "visualization", "statistics"],
+    task_types: ["analyze", "query", "report", "visualize", "dashboard"],
+    default_traits: { focus: "data analysis and reporting" },
+  },
+  technical_writer: {
+    id: "technical_writer",
+    name: "Technical Writer",
+    skills: ["documentation", "api_docs", "tutorials", "clarity"],
+    task_types: ["document", "guide", "tutorial", "api_doc", "reference"],
+    default_traits: { focus: "technical documentation" },
+  },
 };
 
 export function getRoleTemplate(roleId: string): RoleTemplate | null {

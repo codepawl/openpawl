@@ -28,44 +28,82 @@ export const TeamTemplateSchema = z.object({
 export type TeamTemplate = z.infer<typeof TeamTemplateSchema>;
 
 export const TEAM_TEMPLATES: Record<string, TeamTemplate> = {
-  game_dev: {
-    id: "game_dev",
-    name: "Game Dev Team",
-    description: "Programmers, artists, SFX, and game designer",
-    slots: [
-      { role_id: "software_engineer", count: 2, default_traits: {} },
-      { role_id: "artist", count: 1, default_traits: {} },
-      { role_id: "sfx_designer", count: 1, default_traits: {} },
-      { role_id: "game_designer", count: 1, default_traits: {} },
-    ],
-  },
   maker_reviewer: {
     id: "maker_reviewer",
-    name: "Maker-Reviewer Team",
-    description: "Software Engineer with QA Reviewer for cross-review workflow",
+    name: "Maker-Reviewer",
+    description: "One builds, one validates — ideal for focused tasks",
     slots: [
       { role_id: "software_engineer", count: 1, default_traits: { name: "Maker" } },
       { role_id: "qa_reviewer", count: 1, default_traits: { name: "Reviewer" } },
     ],
   },
+  dev_team: {
+    id: "dev_team",
+    name: "Dev Team",
+    description: "General-purpose dev with QA",
+    slots: [
+      { role_id: "software_engineer", count: 2, default_traits: {} },
+      { role_id: "qa_reviewer", count: 1, default_traits: {} },
+    ],
+  },
+  fullstack: {
+    id: "fullstack",
+    name: "Full-Stack Team",
+    description: "Frontend + backend specialists with QA",
+    slots: [
+      { role_id: "frontend_engineer", count: 1, default_traits: {} },
+      { role_id: "backend_engineer", count: 1, default_traits: {} },
+      { role_id: "qa_reviewer", count: 1, default_traits: {} },
+    ],
+  },
   startup: {
     id: "startup",
     name: "Startup Team",
-    description: "Engineers, product manager, designer",
+    description: "Product-driven team with engineering, PM, and design",
     slots: [
       { role_id: "software_engineer", count: 2, default_traits: {} },
       { role_id: "product_manager", count: 1, default_traits: {} },
       { role_id: "designer", count: 1, default_traits: {} },
     ],
   },
+  api_service: {
+    id: "api_service",
+    name: "API Service Team",
+    description: "Backend engineers with docs for API-first projects",
+    slots: [
+      { role_id: "backend_engineer", count: 2, default_traits: {} },
+      { role_id: "technical_writer", count: 1, default_traits: {} },
+    ],
+  },
+  docs_team: {
+    id: "docs_team",
+    name: "Docs Team",
+    description: "Technical writers + engineer for code-informed docs",
+    slots: [
+      { role_id: "technical_writer", count: 1, default_traits: {} },
+      { role_id: "software_engineer", count: 1, default_traits: {} },
+      { role_id: "editor", count: 1, default_traits: {} },
+    ],
+  },
   content: {
     id: "content",
     name: "Content Team",
-    description: "Writer, editor, designer",
+    description: "Writer, editor, and designer for content production",
     slots: [
       { role_id: "writer", count: 1, default_traits: {} },
       { role_id: "editor", count: 1, default_traits: {} },
       { role_id: "designer", count: 1, default_traits: {} },
+    ],
+  },
+  game_dev: {
+    id: "game_dev",
+    name: "Game Dev Team",
+    description: "Programmers, artist, SFX, and game designer",
+    slots: [
+      { role_id: "software_engineer", count: 2, default_traits: {} },
+      { role_id: "artist", count: 1, default_traits: {} },
+      { role_id: "sfx_designer", count: 1, default_traits: {} },
+      { role_id: "game_designer", count: 1, default_traits: {} },
     ],
   },
 };

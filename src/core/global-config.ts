@@ -15,13 +15,15 @@ export interface TeamClawGlobalConfig {
   chatEndpoint: string;
   dashboardPort: number;
   debugMode: boolean;
+  agentModels?: Record<string, string>;
+  workspaceDir?: string;
 }
 
 const DEFAULT_GATEWAY_HOST = "127.0.0.1";
 const DEFAULT_GATEWAY_PORT = 18789;
 const DEFAULT_CHAT_ENDPOINT = "/v1/chat/completions";
 const DEFAULT_DASHBOARD_PORT = 9001;
-const DEFAULT_OPENCLAW_MODEL = "gateway-default";
+const DEFAULT_OPENCLAW_MODEL = "";
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -125,6 +127,21 @@ export function normalizeGlobalConfig(input: Partial<TeamClawGlobalConfig>): Tea
   const dashboardPort = toPositiveInt(input.dashboardPort, DEFAULT_DASHBOARD_PORT);
   const debugMode = typeof input.debugMode === "boolean" ? input.debugMode : false;
 
+  // Parse agentModels: Record<string, string>
+  const rawAgentModels = (input as Record<string, unknown>).agentModels;
+  const agentModels: Record<string, string> | undefined =
+    rawAgentModels && typeof rawAgentModels === "object" && !Array.isArray(rawAgentModels)
+      ? Object.fromEntries(
+          Object.entries(rawAgentModels as Record<string, unknown>)
+            .map(([k, v]) => [k.trim().toLowerCase(), typeof v === "string" ? v.trim() : ""])
+            .filter(([k, v]) => k.length > 0 && v.length > 0),
+        )
+      : undefined;
+
+  const workspaceDir = typeof input.workspaceDir === "string" && input.workspaceDir.trim()
+    ? input.workspaceDir.trim()
+    : undefined;
+
   return {
     version: 1,
     managedGateway: typeof input.managedGateway === "boolean" ? input.managedGateway : true,
@@ -138,6 +155,8 @@ export function normalizeGlobalConfig(input: Partial<TeamClawGlobalConfig>): Tea
     chatEndpoint,
     dashboardPort,
     debugMode,
+    ...(agentModels && Object.keys(agentModels).length > 0 ? { agentModels } : {}),
+    ...(workspaceDir ? { workspaceDir } : {}),
   };
 }
 

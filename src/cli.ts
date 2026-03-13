@@ -61,10 +61,10 @@ function printHelp(): void {
         section("Usage:") + " teamclaw " + desc("<command> [options]"),
         "",
         section("Setup & Configuration:"),
-        "  " + cmd("setup") + "      " + desc("Run the interactive setup wizard (saves gateway config)"),
+        "  " + cmd("setup") + "      " + desc("Interactive setup wizard (connection, workspace, model, team)"),
         "  " + cmd("init") + "       " + desc("Alias for setup"),
-        "  " + cmd("onboard") + "    " + desc("Full interactive onboarding (team roster, templates, daemon)"),
-        "  " + cmd("config") + "     " + desc("Manage config (.env + teamclaw.config.json) safely"),
+        "  " + cmd("onboard") + "    " + desc("Alias for setup"),
+        "  " + cmd("config") + "     " + desc("Manage config (teamclaw.config.json + global config) safely"),
         "",
         section("Work Session:"),
         "  " + cmd("work") + "       " + desc("Run a work session (reads config, auto-starts web dashboard)"),
@@ -73,6 +73,14 @@ function printHelp(): void {
         "  " + cmd("web stop") + "   " + desc("Stop background Web UI"),
         "  " + cmd("web status") + "  " + desc("Show status of background Web UI"),
         "  " + cmd("check") + "      " + desc("Check connectivity (OpenClaw workers)"),
+        "",
+        section("Model Management:"),
+        "  " + cmd("model") + "      " + desc("Interactive model configuration dashboard"),
+        "  " + cmd("model list") + " " + desc("Show available models from OpenClaw"),
+        "  " + cmd("model get") + "  " + desc("Show current default + per-agent models"),
+        "  " + cmd("model set") + "  " + desc("<model>  Set global default model"),
+        "  " + cmd("model set") + "  " + desc("--agent <role> <model>  Set model for agent"),
+        "  " + cmd("model reset") + desc(" Clear all model overrides"),
         "",
         section("Utilities:"),
         "  " + cmd("lessons") + "    " + desc("Export lessons"),
@@ -94,6 +102,9 @@ function printHelp(): void {
         "  " + exCmd("teamclaw config get OPENCLAW_TOKEN"),
         "  " + exCmd("teamclaw web"),
         "  " + exCmd("teamclaw web --daemon"),
+        "  " + exCmd("teamclaw model list"),
+        "  " + exCmd("teamclaw model set openai/gpt-4o"),
+        "  " + exCmd("teamclaw model set") + " " + desc("--agent coordinator anthropic/claude-sonnet-4-6"),
         "  " + exCmd("teamclaw web start"),
         "  " + exCmd("teamclaw web stop"),
         "  " + exCmd("teamclaw web status"),
@@ -267,6 +278,10 @@ async function main(): Promise<void> {
             "Usage: teamclaw config | config get <KEY> [--raw] | config set <KEY> <VALUE> | config unset <KEY>",
         );
         process.exit(1);
+
+    } else if (cmd === "model") {
+        const { runModelCommand } = await import("./commands/model.js");
+        await runModelCommand(args.slice(1));
 
     } else if (cmd === "lessons") {
         const { runLessonsExport } = await import("./lessons-export.js");

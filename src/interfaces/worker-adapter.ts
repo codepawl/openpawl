@@ -7,6 +7,7 @@ import type { TaskRequest, TaskResult } from "../core/state.js";
 import { CONFIG } from "../core/config.js";
 import { logger, isDebugMode } from "../core/logger.js";
 import { getTrafficController } from "../core/traffic-control.js";
+import { resolveModelForAgent } from "../core/model-config.js";
 import WebSocket from "ws";
 import pc from "picocolors";
 
@@ -84,7 +85,6 @@ function formatAdapterError(title: string, details: string[]): string {
 }
 
 const DEFAULT_TIMEOUT_MS = 120_000;
-const GATEWAY_DEFAULT_MODEL = "github-copilot/gpt-4o";
 
 export class UniversalOpenClawAdapter implements WorkerAdapter {
   readonly adapterType: WorkerAdapterType = "openclaw";
@@ -135,7 +135,7 @@ export class UniversalOpenClawAdapter implements WorkerAdapter {
         onDone?: (error?: { message: string }) => void,
         onUsage?: (input: number, output: number) => void
     ): Promise<string> {
-        const model = this.configuredModel || GATEWAY_DEFAULT_MODEL;
+        const model = this.configuredModel || resolveModelForAgent(this.botId || "worker");
         const timeoutMs = this.timeout;
         const token = this.authToken;
         const requestId = "teamclaw-" + Date.now();

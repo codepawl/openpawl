@@ -8,6 +8,7 @@ import type { WorkerAdapter } from "../interfaces/worker-adapter.js";
 import { CONFIG } from "../core/config.js";
 import { logger, isDebugMode } from "../core/logger.js";
 import { UniversalOpenClawAdapter } from "../interfaces/worker-adapter.js";
+import { resolveModelForAgent } from "../core/model-config.js";
 import { ensureDir, writeTextFile } from "../core/workspace-fs.js";
 import { parseLlmJson } from "../utils/jsonExtractor.js";
 import path from "node:path";
@@ -58,6 +59,8 @@ export class SystemDesignNode {
       new UniversalOpenClawAdapter({
         workerUrl: CONFIG.openclawWorkerUrl,
         authToken: CONFIG.openclawToken,
+        model: resolveModelForAgent("architect"),
+        botId: "architect",
       });
     this.workspacePath = options.workspacePath ?? process.cwd();
     log(`🏗️ SystemDesignNode initialized (workspace: ${this.workspacePath})`);
