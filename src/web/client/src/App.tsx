@@ -10,7 +10,9 @@ import { SettingsPanel } from "./components/SettingsPanel";
 import { HumanApprovalModal } from "./components/HumanApprovalModal";
 import { CostBadge } from "./components/CostBadge";
 import { ErrorBoundary } from "./components/ErrorBoundary";
-import { useState, useEffect, useRef, useCallback, lazy, Suspense } from "react";
+import { getApiBase } from "./utils/api";
+import { useState, useEffect, useMemo, useRef, useCallback, lazy, Suspense } from "react";
+import { AnimatePresence } from "motion/react";
 import { useResizable } from "./hooks/useResizable";
 import type { ConsoleViewerHandle } from "./components/ConsoleViewer";
 
@@ -63,15 +65,15 @@ function Topbar({
         : "text-rose-500 dark:text-rose-400";
 
   return (
-    <header className="flex h-14 shrink-0 items-center justify-between border-b border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 px-6 transition-colors">
-      <div className="flex items-center gap-4">
-        <div className="flex items-center gap-2">
-          <span className={`inline-block h-2 w-2 rounded-full ${statusColor.replace("text-", "bg-")}${connectionStatus === "open" ? " animate-breathe" : ""}`} />
-          <span className="text-sm font-semibold text-stone-800 dark:text-stone-100">TeamClaw</span>
-          {connectionStatus === "open" && (
-            <span className="text-xs text-stone-500 dark:text-stone-400">Cycle {cycle_count}</span>
-          )}
-        </div>
+    <header className="relative flex h-14 shrink-0 items-center justify-between border-b border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 px-6 transition-colors">
+      <div className="flex items-center gap-2">
+        <span className={`inline-block h-2 w-2 rounded-full ${statusColor.replace("text-", "bg-")}${connectionStatus === "open" ? " animate-breathe" : ""}`} />
+        <span className="text-sm font-semibold text-stone-800 dark:text-stone-100">TeamClaw</span>
+      </div>
+      <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center gap-3">
+        {connectionStatus === "open" && (
+          <span className="text-xs text-stone-500 dark:text-stone-400">Cycle {cycle_count}</span>
+        )}
         <WorkflowStepper />
       </div>
       <div className="flex items-center gap-2">
@@ -145,6 +147,208 @@ function ApprovalBanner() {
   );
 }
 
+const inputClass = "w-full rounded-lg border border-stone-300 dark:border-stone-600 bg-white dark:bg-stone-800 px-3 py-2 text-sm text-stone-800 dark:text-stone-200 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20 transition-[border-color,box-shadow] duration-150 placeholder:text-stone-400 dark:placeholder:text-stone-500";
+const selectClass = "w-full appearance-none rounded-lg border border-stone-300 dark:border-stone-600 bg-white dark:bg-stone-800 px-3 py-2 pr-9 text-sm text-stone-800 dark:text-stone-200 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20 transition-[border-color,box-shadow] duration-150 bg-[length:16px_16px] bg-[position:right_0.625rem_center] bg-no-repeat bg-[url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='none' stroke='%2378716c' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3E%3C/svg%3E\")]";
+
+function ReadyToStart() {
+  const config = useWsStore((s) => s.config);
+  const sendMessage = useWsStore((s) => s.sendMessage);
+  const setLastError = useWsStore((s) => s.setLastError);
+
+  const [template, setTemplate] = useState(
+    (config?.saved_template as string) ?? "game_dev"
+  );
+  const [goal, setGoal] = useState((config?.saved_goal as string) ?? "");
+  const [creativity, setCreativity] = useState(
+    Number(config?.creativity ?? 0.5)
+  );
+  const [maxCycles, setMaxCycles] = useState(
+    Number(config?.max_cycles ?? 10)
+  );
+  const [status, setStatus] = useState<"idle" | "saving" | "error">("idle");
+  const [errorMsg, setErrorMsg] = useState("");
+
+  useEffect(() => {
+    if (!config) return;
+    setTemplate((config.saved_template as string) ?? "game_dev");
+    setGoal((config.saved_goal as string) ?? "");
+    const c = Number(config.creativity);
+    const mc = Number(config.max_cycles);
+    if (Number.isFinite(c)) setCreativity(c);
+    if (Number.isFinite(mc)) setMaxCycles(mc);
+  }, [config]);
+
+  const dirtyFields = useMemo(() => {
+    if (!config) return { template: false, goal: false, creativity: false, maxCycles: false };
+    return {
+      template: template !== ((config.saved_template as string) ?? "game_dev"),
+      goal: goal !== ((config.saved_goal as string) ?? ""),
+      creativity: creativity !== Number(config.creativity ?? 0.5),
+      maxCycles: maxCycles !== Number(config.max_cycles ?? 10),
+    };
+  }, [config, template, goal, creativity, maxCycles]);
+
+  const isDirty = dirtyFields.template || dirtyFields.goal || dirtyFields.creativity || dirtyFields.maxCycles;
+
+  async function handleStart() {
+    setStatus("saving");
+    setErrorMsg("");
+    setLastError(null);
+
+    const base = getApiBase();
+
+    if (isDirty) {
+      try {
+        const res = await fetch(`${base}/api/config`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            template,
+            goal: goal.trim(),
+            creativity: Math.max(0, Math.min(1, creativity)),
+            max_cycles: Math.max(1, Math.floor(maxCycles)),
+          }),
+        });
+        const data = (await res.json()) as { ok?: boolean; error?: string };
+        if (!data.ok) {
+          setStatus("error");
+          setErrorMsg(data.error ?? `HTTP ${res.status}`);
+          setLastError(data.error ?? "Failed to save config");
+          return;
+        }
+      } catch (err) {
+        setStatus("error");
+        setErrorMsg(String(err));
+        setLastError(String(err));
+        return;
+      }
+
+      sendMessage({
+        command: "config",
+        values: {
+          creativity: Math.max(0, Math.min(1, creativity)),
+          max_cycles: Math.max(1, Math.floor(maxCycles)),
+        },
+      });
+    }
+
+    sendMessage({ command: "start" });
+    setStatus("idle");
+  }
+
+  const dirtyHint = (
+    <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+      Modified — will be saved on start
+    </p>
+  );
+
+  return (
+    <div className="flex flex-1 items-center justify-center">
+      <div className="w-full max-w-md rounded-2xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 p-6 shadow-sm space-y-5">
+        <div className="text-center space-y-1">
+          <i className="bi bi-rocket-takeoff text-2xl text-amber-500" />
+          <h2 className="text-lg font-semibold text-stone-800 dark:text-stone-100">
+            Ready to start
+          </h2>
+          <p className="text-sm text-stone-500 dark:text-stone-400">
+            Configure your session and launch when ready.
+          </p>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label htmlFor="ready-template" className="mb-1 block text-xs font-medium text-stone-600 dark:text-stone-400">
+              Team Template
+            </label>
+            <select
+              id="ready-template"
+              value={template}
+              onChange={(e) => setTemplate(e.target.value)}
+              className={selectClass}
+            >
+              <option value="game_dev">Game Dev (Programmers, Artist, SFX, Designer)</option>
+              <option value="startup">Startup (Engineers, PM, Designer)</option>
+              <option value="content">Content (Writer, Editor, Designer)</option>
+            </select>
+            {dirtyFields.template && dirtyHint}
+          </div>
+
+          <div>
+            <label htmlFor="ready-goal" className="mb-1 block text-xs font-medium text-stone-600 dark:text-stone-400">
+              Goal
+            </label>
+            <textarea
+              id="ready-goal"
+              value={goal}
+              onChange={(e) => setGoal(e.target.value)}
+              rows={2}
+              placeholder="e.g. Build a simple 2D platformer with sprite assets and sound effects"
+              className={inputClass}
+            />
+            {dirtyFields.goal && dirtyHint}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label htmlFor="ready-creativity" className="mb-1 block text-xs font-medium text-stone-600 dark:text-stone-400">
+                Creativity (0-1)
+              </label>
+              <input
+                id="ready-creativity"
+                type="number"
+                min={0}
+                max={1}
+                step={0.1}
+                value={creativity}
+                onChange={(e) => setCreativity(Number(e.target.value) || 0)}
+                className={inputClass}
+              />
+              {dirtyFields.creativity && dirtyHint}
+            </div>
+            <div>
+              <label htmlFor="ready-max-cycles" className="mb-1 block text-xs font-medium text-stone-600 dark:text-stone-400">
+                Max Cycles
+              </label>
+              <input
+                id="ready-max-cycles"
+                type="number"
+                min={1}
+                value={maxCycles}
+                onChange={(e) => setMaxCycles(Number(e.target.value) || 1)}
+                className={inputClass}
+              />
+              {dirtyFields.maxCycles && dirtyHint}
+            </div>
+          </div>
+
+          <div className="border-t border-stone-200 dark:border-stone-700 pt-4">
+            <PaletteSettings />
+          </div>
+        </div>
+
+        {status === "error" && (
+          <div className="rounded-lg border border-rose-300 dark:border-rose-600 bg-rose-50 dark:bg-rose-900/30 px-3 py-2 text-sm text-rose-700 dark:text-rose-300">
+            {errorMsg}
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={handleStart}
+          disabled={status === "saving"}
+          className="w-full rounded-lg bg-amber-500 hover:bg-amber-600 active:scale-[0.98] disabled:opacity-50 px-4 py-2.5 text-sm font-medium text-white transition-colors focus:outline-none focus:ring-2 focus:ring-amber-500/30"
+        >
+          {status === "saving" ? (
+            <><i className="bi bi-arrow-repeat animate-spin mr-1.5" />Saving...</>
+          ) : (
+            <><i className="bi bi-play-fill mr-1.5" />Start Session</>
+          )}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function Dashboard() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -186,31 +390,26 @@ function Dashboard() {
         </div>
       </div>
 
-      <main className="flex-1 overflow-auto px-6 py-4 space-y-4">
-        <ServerRestartBanner />
-        <ApprovalBanner />
-        {cycle_count === 0 ? (
-          <div className="flex flex-1 items-center justify-center pt-16">
-            <div className="w-full max-w-sm space-y-4 text-center">
-              <h2 className="text-lg font-semibold text-stone-700 dark:text-stone-300">
-                Ready to start
-              </h2>
-              <p className="text-sm text-stone-500 dark:text-stone-400">
-                Configure your workspace or pick a color palette.
-              </p>
-              <div className="text-left">
-                <PaletteSettings />
-              </div>
-            </div>
-          </div>
-        ) : (
-          <>
-            <SummaryCards />
-            <KanbanBoard />
-            <InsightsSection />
-          </>
-        )}
-      </main>
+      <div className="flex flex-1 overflow-hidden">
+        <main className="flex-1 overflow-auto px-6 py-4 space-y-4">
+          <ServerRestartBanner />
+          <ApprovalBanner />
+          {cycle_count === 0 ? (
+            <ReadyToStart />
+          ) : (
+            <>
+              <SummaryCards />
+              <KanbanBoard />
+              <InsightsSection />
+            </>
+          )}
+        </main>
+        <AnimatePresence>
+          {settingsOpen && (
+            <SettingsPanel key="settings" onClose={() => setSettingsOpen(false)} />
+          )}
+        </AnimatePresence>
+      </div>
 
       <div className="shrink-0 border-t border-stone-200 dark:border-stone-700">
         <div className="flex items-center justify-between px-6 py-0 bg-white dark:bg-stone-900 border-b border-stone-200 dark:border-stone-700">
@@ -278,7 +477,6 @@ function Dashboard() {
         )}
       </div>
 
-      <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <HumanApprovalModal />
     </div>
   );

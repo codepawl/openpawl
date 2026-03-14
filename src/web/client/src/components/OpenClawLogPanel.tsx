@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState, useCallback } from "react";
-import { useWsStore, type OpenClawLogFilter } from "../ws/store";
+import { useWsStore, type OpenClawLogFilter, type OpenClawSourceFilter } from "../ws/store";
 
 const LEVEL_STYLES: Record<string, { badge: string; border: string }> = {
   info: {
@@ -28,6 +28,13 @@ const FILTERS: { label: string; value: OpenClawLogFilter }[] = [
   { label: "Error", value: "error" },
 ];
 
+const SOURCE_FILTERS: { label: string; value: OpenClawSourceFilter }[] = [
+  { label: "All Sources", value: "all" },
+  { label: "LLM", value: "llm-client" },
+  { label: "Worker", value: "worker-adapter" },
+  { label: "Gateway", value: "gateway" },
+];
+
 function formatTime(ts: number): string {
   const d = new Date(ts);
   return d.toTimeString().slice(0, 8);
@@ -37,13 +44,19 @@ export function OpenClawLogPanel() {
   const logs = useWsStore((s) => s.openclawLogs);
   const filter = useWsStore((s) => s.openclawLogFilter);
   const setFilter = useWsStore((s) => s.setOpenClawLogFilter);
+  const sourceFilter = useWsStore((s) => s.openclawSourceFilter);
+  const setSourceFilter = useWsStore((s) => s.setOpenClawSourceFilter);
   const clearLogs = useWsStore((s) => s.clearOpenClawLogs);
 
   const listRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  const filtered = filter === "all" ? logs : logs.filter((l) => l.level === filter);
+  const filtered = logs.filter((l) => {
+    if (filter !== "all" && l.level !== filter) return false;
+    if (sourceFilter !== "all" && l.source !== sourceFilter) return false;
+    return true;
+  });
 
   const handleScroll = useCallback(() => {
     const el = listRef.current;
@@ -70,21 +83,40 @@ export function OpenClawLogPanel() {
     <div className="flex h-full flex-col bg-stone-50 dark:bg-stone-950">
       {/* Header */}
       <div className="flex items-center justify-between gap-2 border-b border-stone-200 dark:border-stone-700 px-3 py-1.5">
-        <div className="flex items-center gap-1">
-          {FILTERS.map((f) => (
-            <button
-              key={f.value}
-              type="button"
-              onClick={() => setFilter(f.value)}
-              className={`rounded px-2 py-0.5 text-[11px] font-medium transition-colors ${
-                filter === f.value
-                  ? "bg-stone-800 text-white dark:bg-stone-200 dark:text-stone-900"
-                  : "text-stone-500 dark:text-stone-400 hover:bg-stone-200 dark:hover:bg-stone-800"
-              }`}
-            >
-              {f.label}
-            </button>
-          ))}
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1">
+            {FILTERS.map((f) => (
+              <button
+                key={f.value}
+                type="button"
+                onClick={() => setFilter(f.value)}
+                className={`rounded px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                  filter === f.value
+                    ? "bg-stone-800 text-white dark:bg-stone-200 dark:text-stone-900"
+                    : "text-stone-500 dark:text-stone-400 hover:bg-stone-200 dark:hover:bg-stone-800"
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+          <div className="h-3 w-px bg-stone-300 dark:bg-stone-600" />
+          <div className="flex items-center gap-1">
+            {SOURCE_FILTERS.map((f) => (
+              <button
+                key={f.value}
+                type="button"
+                onClick={() => setSourceFilter(f.value)}
+                className={`rounded px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                  sourceFilter === f.value
+                    ? "bg-stone-800 text-white dark:bg-stone-200 dark:text-stone-900"
+                    : "text-stone-500 dark:text-stone-400 hover:bg-stone-200 dark:hover:bg-stone-800"
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <span className="text-[11px] text-stone-400 dark:text-stone-500">
@@ -126,6 +158,8 @@ export function OpenClawLogPanel() {
                 <span className="shrink-0 text-stone-400 dark:text-stone-500" title={entry.source}>
                   {entry.source === "llm-client" ? (
                     <i className="bi bi-globe2 text-[11px]" />
+                  ) : entry.source === "gateway" ? (
+                    <i className="bi bi-hdd-network text-[11px]" />
                   ) : (
                     <i className="bi bi-terminal text-[11px]" />
                   )}

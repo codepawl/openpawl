@@ -111,6 +111,7 @@ export interface OpenClawLogEntry {
 }
 
 export type OpenClawLogFilter = "all" | "info" | "success" | "warn" | "error";
+export type OpenClawSourceFilter = "all" | "llm-client" | "worker-adapter" | "gateway";
 
 export interface StreamingTextEntry {
   botId: string;
@@ -139,6 +140,7 @@ interface WsStore {
   streamingText: Record<string, StreamingTextEntry>;
   openclawLogs: OpenClawLogEntry[];
   openclawLogFilter: OpenClawLogFilter;
+  openclawSourceFilter: OpenClawSourceFilter;
   serverStartTs: number | null;
   serverRestarted: boolean;
   sendMessage: (payload: object) => void;
@@ -169,6 +171,7 @@ interface WsStore {
   clearStreamingText: (botId: string) => void;
   pushOpenClawLog: (entry: OpenClawLogEntry) => void;
   setOpenClawLogFilter: (filter: OpenClawLogFilter) => void;
+  setOpenClawSourceFilter: (filter: OpenClawSourceFilter) => void;
   clearOpenClawLogs: () => void;
   setServerStartTs: (ts: number) => void;
   dismissServerRestart: () => void;
@@ -196,6 +199,7 @@ export const useWsStore = create<WsStore>((set) => ({
   streamingText: {},
   openclawLogs: [],
   openclawLogFilter: "all",
+  openclawSourceFilter: "all",
   serverStartTs: null,
   serverRestarted: false,
   tokenUsage: { totalInputTokens: 0, totalOutputTokens: 0, totalCachedInputTokens: 0, lastUpdate: 0, model: "gpt-4o-mini" },
@@ -328,6 +332,7 @@ export const useWsStore = create<WsStore>((set) => ({
       openclawLogs: [...prev.openclawLogs, entry].slice(-200),
     })),
   setOpenClawLogFilter: (filter) => set({ openclawLogFilter: filter }),
+  setOpenClawSourceFilter: (filter) => set({ openclawSourceFilter: filter }),
   clearOpenClawLogs: () => set({ openclawLogs: [] }),
   setServerStartTs: (ts) =>
     set((prev) => {

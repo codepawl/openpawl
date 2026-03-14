@@ -1,20 +1,12 @@
 import { useEffect, useState } from "react";
+import { motion } from "motion/react";
 import { useWsStore } from "../ws";
+import { getApiBase } from "../utils/api";
 import { ModelSettings } from "./settings/ModelSettings";
 import { PaletteSettings } from "./settings/PaletteSettings";
 import { WebhookSettings } from "./settings/WebhookSettings";
 
-function getApiBase(): string {
-  if (typeof location === "undefined") return "";
-  const env = import.meta.env.VITE_WS_URL as string | undefined;
-  if (env && typeof env === "string") {
-    const base = env.replace(/^ws:/, "http:").replace(/\/ws\/?$/, "");
-    if (base) return base;
-  }
-  return location.origin;
-}
-
-export function SettingsPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const config = useWsStore((s) => s.config);
   const setConfig = useWsStore((s) => s.setConfig);
   const setLastError = useWsStore((s) => s.setLastError);
@@ -147,8 +139,6 @@ export function SettingsPanel({ open, onClose }: { open: boolean; onClose: () =>
     }
   }
 
-  if (!open) return null;
-
   const inputClass = "w-full rounded-lg border border-stone-300 dark:border-stone-600 bg-white dark:bg-stone-800 px-3 py-2 text-sm text-stone-800 dark:text-stone-200 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20 transition-[border-color,box-shadow] duration-150 placeholder:text-stone-400 dark:placeholder:text-stone-500";
   const selectClass = "w-full appearance-none rounded-lg border border-stone-300 dark:border-stone-600 bg-white dark:bg-stone-800 px-3 py-2 pr-9 text-sm text-stone-800 dark:text-stone-200 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20 transition-[border-color,box-shadow] duration-150 bg-[length:16px_16px] bg-[position:right_0.625rem_center] bg-no-repeat bg-[url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='none' stroke='%2378716c' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3E%3C/svg%3E\")]";
   const tabBase = "flex-1 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors text-center";
@@ -156,9 +146,13 @@ export function SettingsPanel({ open, onClose }: { open: boolean; onClose: () =>
   const tabInactive = `${tabBase} text-stone-500 dark:text-stone-400 hover:text-stone-700 dark:hover:text-stone-300`;
 
   return (
-    <>
-      <div className="fixed inset-0 z-30 bg-black/20 animate-fade-in" onClick={onClose} />
-      <aside className="fixed inset-y-0 right-0 z-40 w-96 rounded-l-2xl bg-white dark:bg-stone-900 shadow-2xl transition-colors animate-slide-in-right">
+      <motion.aside
+        className="shrink-0 bg-white dark:bg-stone-900 shadow-lg border-l border-stone-200 dark:border-stone-700 overflow-auto"
+        initial={{ width: 0, opacity: 0 }}
+        animate={{ width: 384, opacity: 1 }}
+        exit={{ width: 0, opacity: 0 }}
+        transition={{ duration: 0.15, ease: [0.25, 0.1, 0.25, 1] }}
+      >
         <div className="flex h-full flex-col">
           <div className="flex items-center justify-between border-b border-stone-200 dark:border-stone-700 px-6 py-4">
             <h2 className="text-lg font-semibold text-stone-800 dark:text-stone-100"><i className="bi bi-gear-fill mr-2" />Settings</h2>
@@ -337,7 +331,6 @@ export function SettingsPanel({ open, onClose }: { open: boolean; onClose: () =>
             </div>
           </div>
         </div>
-      </aside>
-    </>
+      </motion.aside>
   );
 }

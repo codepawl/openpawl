@@ -35,6 +35,7 @@ import { logger } from "../core/logger.js";
 import { ensureWorkspaceDir } from "../core/workspace-fs.js";
 import { addTerminalClient, removeTerminalClient, initTerminalBroadcast } from "../core/terminal-broadcast.js";
 import { log, note, spinner } from "@clack/prompts";
+import { randomPhrase } from "../utils/spinner-phrases.js";
 import { findAvailablePort } from "../core/port.js";
 import { WsEventSchema } from "../types/ws-events.js";
 import { humanResponseEmitter } from "../core/human-response-events.js";
@@ -42,6 +43,7 @@ import { getDefaultGoal } from "../core/configManager.js";
 import { coordinatorEvents, type CoordinatorStep } from "../core/coordinator-events.js";
 import { workerEvents } from "../core/worker-events.js";
 import { openclawEvents, type OpenClawLogEntry } from "../core/openclaw-events.js";
+import { startGatewayLogTailer } from "../core/gateway-log-tailer.js";
 
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -103,7 +105,7 @@ export async function runWeb(args: string[]): Promise<void> {
   const canRenderSpinner = Boolean(process.stdout.isTTY && process.stderr.isTTY);
   const s = canRenderSpinner ? spinner() : null;
   if (s) {
-    s.start("🌐 Booting up Web UI environment...");
+    s.start(randomPhrase("boot"));
   }
 
   initTerminalBroadcast();
@@ -132,6 +134,8 @@ export async function runWeb(args: string[]): Promise<void> {
     broadcast({ type: "openclaw_log", entry });
   });
 
+  const stopGatewayTailer = startGatewayLogTailer();
+
   const result = await validateStartup({ templateId: "game_dev" });
   if (!result.ok) {
     if (s) {
@@ -143,7 +147,7 @@ export async function runWeb(args: string[]): Promise<void> {
 
   await ensureWorkspaceDir(CONFIG.workspaceDir);
   if (s) {
-    s.message("🌐 Initializing Vector Memory and workspace...");
+    s.message(randomPhrase("boot"));
   }
 
   let requestedPort = 8000;

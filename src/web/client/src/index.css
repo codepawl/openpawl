@@ -150,11 +150,6 @@ input[type="checkbox"]:focus-visible {
 
 /* --- Animations --- */
 
-@keyframes slide-in-right {
-  from { transform: translateX(100%); opacity: 0; }
-  to { transform: translateX(0); opacity: 1; }
-}
-
 @keyframes drop-in {
   from { transform: translateY(-8px) scale(0.96); opacity: 0; }
   to { transform: translateY(0) scale(1); opacity: 1; }
@@ -168,11 +163,6 @@ input[type="checkbox"]:focus-visible {
 @keyframes fade-in {
   from { opacity: 0; }
   to { opacity: 1; }
-}
-
-@keyframes expand-down {
-  from { opacity: 0; max-height: 0; }
-  to { opacity: 1; max-height: 800px; }
 }
 
 @keyframes glow-pulse {
@@ -196,9 +186,6 @@ input[type="checkbox"]:focus-visible {
   100% { transform: scale(1); }
 }
 
-.animate-slide-in-right {
-  animation: slide-in-right 250ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
-}
 .animate-drop-in {
   animation: drop-in 200ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
@@ -207,10 +194,6 @@ input[type="checkbox"]:focus-visible {
 }
 .animate-fade-in {
   animation: fade-in 150ms ease-out both;
-}
-.animate-expand-down {
-  animation: expand-down 250ms ease-out both;
-  overflow: hidden;
 }
 .animate-glow-pulse {
   animation: glow-pulse 2s ease-in-out infinite;

@@ -1,0 +1,188 @@
+/* ── Terracotta: warm cream neutrals + terracotta accent ── */
+[data-palette="terracotta"] {
+  --color-stone-50: #FAF9F6;
+  --color-stone-100: #F4F3EE;
+  --color-stone-200: #E8E6DE;
+  --color-stone-300: #D5D2C7;
+  --color-stone-400: #B1ADA1;
+  --color-stone-500: #8E897C;
+  --color-stone-600: #6D6960;
+  --color-stone-700: #524F48;
+  --color-stone-800: #3A3833;
+  --color-stone-900: #282620;
+  --color-stone-950: #1A1815;
+
+  --color-amber-50: #FEF5F0;
+  --color-amber-100: #FDE8DC;
+  --color-amber-200: #FACDB6;
+  --color-amber-300: #F2A882;
+  --color-amber-400: #E2834F;
+  --color-amber-500: #C15F3C;
+  --color-amber-600: #A24A2E;
+  --color-amber-700: #833A24;
+  --color-amber-800: #6A2E1D;
+  --color-amber-900: #4F2316;
+  --color-amber-950: #351710;
+}
+
+/* ── Teal: clean gray + teal-green accent ── */
+[data-palette="teal"] {
+  --color-stone-50: #F9F9FA;
+  --color-stone-100: #F4F4F5;
+  --color-stone-200: #E4E4E7;
+  --color-stone-300: #C8C8D0;
+  --color-stone-400: #A1A1B0;
+  --color-stone-500: #6e6e80;
+  --color-stone-600: #56566A;
+  --color-stone-700: #40404F;
+  --color-stone-800: #2D2D38;
+  --color-stone-900: #1A1A24;
+  --color-stone-950: #0D0D14;
+
+  --color-amber-50: #EDFCF7;
+  --color-amber-100: #D1F7E9;
+  --color-amber-200: #A6EFD5;
+  --color-amber-300: #6DE0BA;
+  --color-amber-400: #33CC9E;
+  --color-amber-500: #10a37f;
+  --color-amber-600: #0B8A6A;
+  --color-amber-700: #097056;
+  --color-amber-800: #075843;
+  --color-amber-900: #054332;
+  --color-amber-950: #032B21;
+}
+
+/* ── Cobalt: cool gray + blue accent ── */
+[data-palette="cobalt"] {
+  --color-stone-50: #F8F9FA;
+  --color-stone-100: #F1F3F4;
+  --color-stone-200: #E0E3E6;
+  --color-stone-300: #C5CAD0;
+  --color-stone-400: #9AA0A6;
+  --color-stone-500: #5f6368;
+  --color-stone-600: #4A4E54;
+  --color-stone-700: #3C3F44;
+  --color-stone-800: #2D3035;
+  --color-stone-900: #202124;
+  --color-stone-950: #131416;
+
+  --color-amber-50: #EAF1FE;
+  --color-amber-100: #D2E3FC;
+  --color-amber-200: #AECBFA;
+  --color-amber-300: #8AB4F8;
+  --color-amber-400: #669DF6;
+  --color-amber-500: #4285F4;
+  --color-amber-600: #1A73E8;
+  --color-amber-700: #1765CC;
+  --color-amber-800: #1356A9;
+  --color-amber-900: #0D47A1;
+  --color-amber-950: #082E6A;
+}
+
+/* ── Gruvbox: retro warm tones + orange accent ── */
+[data-palette="gruvbox"] {
+  --color-stone-50: #fbf1c7;
+  --color-stone-100: #f2e5bc;
+  --color-stone-200: #d5c4a1;
+  --color-stone-300: #bdae93;
+  --color-stone-400: #a89984;
+  --color-stone-500: #928374;
+  --color-stone-600: #7c6f64;
+  --color-stone-700: #665c54;
+  --color-stone-800: #504945;
+  --color-stone-900: #3c3836;
+  --color-stone-950: #1d2021;
+
+  --color-amber-50: #FEF3E2;
+  --color-amber-100: #FDE4C0;
+  --color-amber-200: #FBD09A;
+  --color-amber-300: #F9B970;
+  --color-amber-400: #fe8019;
+  --color-amber-500: #d65d0e;
+  --color-amber-600: #af4b0a;
+  --color-amber-700: #8E3D09;
+  --color-amber-800: #6D2F07;
+  --color-amber-900: #4E2205;
+  --color-amber-950: #331603;
+}
+
+/* ── Monokai: editor-inspired + orange accent ── */
+[data-palette="monokai"] {
+  --color-stone-50: #f8f8f2;
+  --color-stone-100: #efefe6;
+  --color-stone-200: #d8d8cc;
+  --color-stone-300: #b8b8a8;
+  --color-stone-400: #979788;
+  --color-stone-500: #797979;
+  --color-stone-600: #636357;
+  --color-stone-700: #4e4e43;
+  --color-stone-800: #3e3e34;
+  --color-stone-900: #2f2f27;
+  --color-stone-950: #272822;
+
+  --color-amber-50: #FEF3EB;
+  --color-amber-100: #FDE2CE;
+  --color-amber-200: #FBCAA6;
+  --color-amber-300: #F5AC74;
+  --color-amber-400: #e87d3e;
+  --color-amber-500: #D16623;
+  --color-amber-600: #B5531A;
+  --color-amber-700: #944315;
+  --color-amber-800: #733510;
+  --color-amber-900: #55270C;
+  --color-amber-950: #381A08;
+}
+
+/* ── Evergreen: cool gray-green + green accent ── */
+[data-palette="evergreen"] {
+  --color-stone-50: #F2F5F3;
+  --color-stone-100: #E6EBE8;
+  --color-stone-200: #CED6D1;
+  --color-stone-300: #ABB5AE;
+  --color-stone-400: #7D8A81;
+  --color-stone-500: #586159;
+  --color-stone-600: #434D46;
+  --color-stone-700: #343D37;
+  --color-stone-800: #262E28;
+  --color-stone-900: #1A211C;
+  --color-stone-950: #101411;
+
+  --color-amber-50: #E8FDEE;
+  --color-amber-100: #C5F9D3;
+  --color-amber-200: #8FF0A8;
+  --color-amber-300: #56E37A;
+  --color-amber-400: #2BD458;
+  --color-amber-500: #0FBF3E;
+  --color-amber-600: #0CA533;
+  --color-amber-700: #098828;
+  --color-amber-800: #076B1F;
+  --color-amber-900: #055017;
+  --color-amber-950: #03340F;
+}
+
+/* ── Lavender: soft lilac-gray + violet accent ── */
+[data-palette="lavender"] {
+  --color-stone-50: #F5F3FA;
+  --color-stone-100: #ECEAF4;
+  --color-stone-200: #D9D5E8;
+  --color-stone-300: #BDB7D4;
+  --color-stone-400: #9A92B8;
+  --color-stone-500: #756C99;
+  --color-stone-600: #5C5479;
+  --color-stone-700: #4A4558;
+  --color-stone-800: #37333F;
+  --color-stone-900: #25222B;
+  --color-stone-950: #16141B;
+
+  --color-amber-50: #F3EEFE;
+  --color-amber-100: #E5DBFD;
+  --color-amber-200: #CBB5FB;
+  --color-amber-300: #AE8CF8;
+  --color-amber-400: #9363F5;
+  --color-amber-500: #7C3AED;
+  --color-amber-600: #6A2DD0;
+  --color-amber-700: #5623A8;
+  --color-amber-800: #431B83;
+  --color-amber-900: #311461;
+  --color-amber-950: #200D40;
+}
