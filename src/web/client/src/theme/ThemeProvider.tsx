@@ -3,8 +3,13 @@ import { PALETTE_IDS, type PaletteId } from "./palettes";
 
 const STORAGE_KEY = "teamclaw-theme";
 const PALETTE_STORAGE_KEY = "teamclaw-palette";
+const FONT_SIZE_STORAGE_KEY = "teamclaw-font-size";
 
 export type ThemePreference = "light" | "dark" | "system";
+
+const DEFAULT_FONT_SIZE = 15;
+const MIN_FONT_SIZE = 10;
+const MAX_FONT_SIZE = 24;
 
 function getSystemPrefersDark(): boolean {
   if (typeof window === "undefined") return false;
@@ -67,12 +72,42 @@ function persistPalette(id: PaletteId): void {
   }
 }
 
+function clampFontSize(px: number): number {
+  return Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, Math.round(px)));
+}
+
+function getStoredFontSize(): number {
+  if (typeof window === "undefined") return DEFAULT_FONT_SIZE;
+  const stored = localStorage.getItem(FONT_SIZE_STORAGE_KEY);
+  if (stored) {
+    const parsed = Number(stored);
+    if (!Number.isNaN(parsed)) return clampFontSize(parsed);
+  }
+  return DEFAULT_FONT_SIZE;
+}
+
+function applyFontSize(px: number): void {
+  if (typeof document === "undefined") return;
+  document.documentElement.style.fontSize = `${px}px`;
+}
+
+function persistFontSize(px: number): void {
+  if (typeof window === "undefined") return;
+  if (px === DEFAULT_FONT_SIZE) {
+    localStorage.removeItem(FONT_SIZE_STORAGE_KEY);
+  } else {
+    localStorage.setItem(FONT_SIZE_STORAGE_KEY, String(px));
+  }
+}
+
 interface ThemeContextValue {
   theme: ThemePreference;
   isDark: boolean;
   setTheme: (theme: ThemePreference) => void;
   palette: PaletteId;
   setPalette: (id: PaletteId) => void;
+  fontSize: number;
+  setFontSize: (px: number) => void;
 }
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
@@ -81,6 +116,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setThemeState] = useState<ThemePreference>(getStoredTheme);
   const [isDark, setIsDark] = useState(resolveIsDark(theme));
   const [palette, setPaletteState] = useState<PaletteId>(getStoredPalette);
+  const [fontSizeState, setFontSizeState] = useState<number>(getStoredFontSize);
 
   const setTheme = useCallback((next: ThemePreference) => {
     setThemeState(next);
@@ -96,6 +132,13 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     persistPalette(id);
   }, []);
 
+  const setFontSize = useCallback((px: number) => {
+    const clamped = clampFontSize(px);
+    setFontSizeState(clamped);
+    applyFontSize(clamped);
+    persistFontSize(clamped);
+  }, []);
+
   useEffect(() => {
     applyDarkClass(isDark);
   }, [isDark]);
@@ -103,6 +146,10 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     applyPalette(palette);
   }, [palette]);
+
+  useEffect(() => {
+    applyFontSize(fontSizeState);
+  }, [fontSizeState]);
 
   useEffect(() => {
     if (theme !== "system") return;
@@ -117,8 +164,8 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   }, [theme]);
 
   const value = useMemo(
-    () => ({ theme, isDark, setTheme, palette, setPalette }),
-    [theme, isDark, setTheme, palette, setPalette]
+    () => ({ theme, isDark, setTheme, palette, setPalette, fontSize: fontSizeState, setFontSize }),
+    [theme, isDark, setTheme, palette, setPalette, fontSizeState, setFontSize]
   );
 
   return (
