@@ -20,6 +20,7 @@ import {
     writeTeamclawConfig,
 } from "./jsonConfigManager.js";
 import { discoverOpenAIApi, readLocalOpenClawConfig } from "./discovery.js";
+import { randomPhrase } from "../utils/spinner-phrases.js";
 import { setConfigAgentModels } from "./model-config.js";
 import {
     CONFIG,
@@ -245,7 +246,7 @@ export async function validateOrPromptConfig(
 
     if (!effectiveOpenclawUrl || opts.forceDiscover) {
         const s = spinner();
-        s.start("🔍 Checking for local OpenClaw configuration...");
+        s.start(randomPhrase("scan"));
 
         const localCfg = opts.forceDiscover ? null : readLocalOpenClawConfig();
 
@@ -277,7 +278,7 @@ export async function validateOrPromptConfig(
                 `✅ [Config File] Found OpenClaw configuration! (Port: ${localCfg.port}${modelLabel})`,
             );
         } else {
-            s.start("📡 Scanning local network for OpenClaw API...");
+            s.start(randomPhrase("scan"));
             const discovered = await discoverOpenAIApi("http://localhost", {
                 preferredPort: parsePortFromUrl(effectiveOpenclawUrl),
                 timeoutMs: 1000,

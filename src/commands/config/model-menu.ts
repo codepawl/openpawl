@@ -25,6 +25,7 @@ import {
   type ModelSummary,
 } from "../../core/model-operations.js";
 import { listAvailableModels } from "../../core/model-config.js";
+import { randomPhrase } from "../../utils/spinner-phrases.js";
 
 const KNOWN_AGENT_ROLES = [
   "coordinator",
@@ -288,7 +289,7 @@ export async function modelManagementMenu(): Promise<void> {
   let back = false;
   while (!back) {
     const s = spinner();
-    s.start("Loading model configuration...");
+    s.start(randomPhrase("model"));
     const summary = await getModelSummary();
     s.stop("Model configuration loaded.");
 

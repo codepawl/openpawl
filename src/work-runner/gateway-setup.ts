@@ -3,6 +3,7 @@
  */
 
 import { spinner, select, isCancel } from "@clack/prompts";
+import { randomPhrase } from "../utils/spinner-phrases.js";
 import { logger } from "../core/logger.js";
 import { isPortInUse, cleanupManagedGateway, setupGatewayCleanupHandlers } from "../commands/run-openclaw.js";
 import { runGatewayHealthCheck } from "../core/health.js";
@@ -55,7 +56,7 @@ export async function waitForGatewayWithUi(
     logFn: (level: "info" | "warn" | "error", msg: string) => void,
 ): Promise<void> {
     const readinessSpinner = canRenderSpinner ? spinner() : null;
-    if (readinessSpinner) readinessSpinner.start("◌ Waiting for Gateway to initialize...");
+    if (readinessSpinner) readinessSpinner.start(randomPhrase("gateway"));
     else logFn("info", "◌ Waiting for Gateway to initialize...");
 
     const gatewayReady = await waitForManagedGatewayReady(gatewayPort, token);

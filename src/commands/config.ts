@@ -33,6 +33,7 @@ import {
 } from "../core/config.js";
 import { modelManagementMenu } from "./config/model-menu.js";
 import { advancedSettingsMenu, type AdvancedState } from "./config/advanced-menu.js";
+import { randomPhrase } from "../utils/spinner-phrases.js";
 
 type MemoryBackend = "lancedb" | "local_json";
 type LoggingLevel = "info" | "verbose";
@@ -319,7 +320,7 @@ async function openClawMenu(state: DashboardState): Promise<void> {
 
         if (choice === "discover") {
             const s = spinner();
-            s.start("🔍 Checking for local OpenClaw configuration...");
+            s.start(randomPhrase("scan"));
 
             // Prefer the on-disk OpenClaw server config — it contains the exact
             // port and token with no network probing required.
@@ -354,7 +355,7 @@ async function openClawMenu(state: DashboardState): Promise<void> {
             }
 
             // Config file not found — fall back to the network port scanner.
-            s.start("📡 Scanning local network for OpenClaw API...");
+            s.start(randomPhrase("scan"));
             const discovered = await discoverOpenAIApi("http://localhost", {
                 preferredPort: parsePortFromUrl(state.openclawWorkerUrl),
                 timeoutMs: 1000,

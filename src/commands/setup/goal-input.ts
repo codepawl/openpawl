@@ -15,6 +15,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { readTeamclawConfig } from "../../core/jsonConfigManager.js";
 import { getDefaultGoal } from "../../core/configManager.js";
 import { handleCancel, type WizardState } from "./connection.js";
+import { randomPhrase } from "../../utils/spinner-phrases.js";
 
 function detectGoalFiles(workspaceDir: string): Array<{ path: string; label: string }> {
     const candidates = [
@@ -130,7 +131,7 @@ async function refineGoalWithAI(state: WizardState, draft: string): Promise<stri
     const model = state.selectedModel || state.detectedModel || "gateway-default";
 
     const s = spinner();
-    s.start("Refining goal with AI...");
+    s.start(randomPhrase("ai"));
 
     try {
         const headers: Record<string, string> = { "Content-Type": "application/json" };

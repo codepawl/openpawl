@@ -14,6 +14,7 @@ import {
 import pc from "picocolors";
 import { readGlobalConfig } from "../../core/global-config.js";
 import { readLocalOpenClawConfig } from "../../core/discovery.js";
+import { randomPhrase } from "../../utils/spinner-phrases.js";
 
 export interface WizardState {
     ip: string;
@@ -161,7 +162,7 @@ async function promptConnectionDetails(
 async function verifyConnection(state: WizardState): Promise<void> {
     while (true) {
         const s = spinner();
-        s.start(`Pinging gateway at ${state.ip}:${state.port}...`);
+        s.start(randomPhrase("gateway"));
 
         const result = await pingGateway(state.ip, state.port, state.token);
 

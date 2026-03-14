@@ -6,6 +6,7 @@ import { buildTeamFromTemplate } from "./core/team-templates.js";
 import { getWorkerUrlsForTeam } from "./core/config.js";
 import { logger } from "./core/logger.js";
 import { intro, log, note, outro, spinner } from "@clack/prompts";
+import { randomPhrase } from "./utils/spinner-phrases.js";
 
 async function pingWorker(url: string): Promise<boolean> {
   try {
@@ -44,7 +45,7 @@ export async function runCheck(_args: string[]): Promise<void> {
   let ok = 0;
   const s = canRenderSpinner ? spinner() : null;
   if (s) {
-    s.start("🌐 Connecting to OpenClaw workers...");
+    s.start(randomPhrase("network"));
   }
   for (const url of urls) {
     const reachable = await pingWorker(url);

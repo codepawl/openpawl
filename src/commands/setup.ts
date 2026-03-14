@@ -48,6 +48,7 @@ import { promptPath } from "../utils/path-autocomplete.js";
 import { handleCancel, stepConnection, type WizardState } from "./setup/connection.js";
 import { stepGoal } from "./setup/goal-input.js";
 import { stepTeam } from "./setup/team-builder.js";
+import { randomPhrase } from "../utils/spinner-phrases.js";
 
 // ---------------------------------------------------------------------------
 // Step 2: Workspace
@@ -184,7 +185,7 @@ async function stepProject(state: WizardState): Promise<void> {
 
 async function stepModel(state: WizardState): Promise<void> {
     const s = spinner();
-    s.start("Fetching available models...");
+    s.start(randomPhrase("model"));
 
     let models: string[] = [];
     try {

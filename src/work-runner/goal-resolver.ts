@@ -9,6 +9,7 @@ import { promisify } from "node:util";
 import path from "node:path";
 import { log as clackLog, note, spinner, select, text, cancel, isCancel } from "@clack/prompts";
 import { logger } from "../core/logger.js";
+import { randomPhrase } from "../utils/spinner-phrases.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -60,7 +61,7 @@ export async function suggestGoalFromWorkspace(
 ): Promise<string | null> {
     const s = spinner();
     try {
-        s.start("Reading project files...");
+        s.start(randomPhrase("file"));
         const entryNames = await readdir(workspacePath);
 
         const keyFiles = ["docs/ARCHITECTURE.md", "DOCS/PLANNING.md", "README.md", "package.json"];
@@ -88,7 +89,7 @@ export async function suggestGoalFromWorkspace(
             "\nSuggest an updated goal that accounts for the existing work. Respond with ONLY the goal text, no explanation.",
         ].join("\n");
 
-        s.message("Asking AI for goal suggestion...");
+        s.message(randomPhrase("ai"));
         const { stdout } = await execFileAsync(
             "openclaw",
             ["agent", "-m", prompt, "--json", "--timeout", "30"],
