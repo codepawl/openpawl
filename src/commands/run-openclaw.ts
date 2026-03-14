@@ -47,8 +47,8 @@ export function detectPortFromConfig(): string {
  * and finally defaulting to 18789.
  */
 export function detectHttpPortFromConfig(): string {
-    // 1. Try OPENCLAW_HTTP_URL env var (may have been set by validateOrPromptConfig)
-    const envHttpUrl = (process.env["OPENCLAW_HTTP_URL"] ?? "").trim();
+    // 1. Try the runtime config HTTP URL (set during setup/config)
+    const envHttpUrl = (CONFIG.openclawHttpUrl ?? "").trim();
     if (envHttpUrl) {
         try {
             const url = new URL(envHttpUrl);

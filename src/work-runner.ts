@@ -299,7 +299,7 @@ export async function runWork(
     // Dashboard auto-start
     // ---------------------------------------------------------------------------
     if (!noWebFlag) {
-        const webPort = Number(process.env["WEB_PORT"]) || setupConfig.dashboardPort || 9001;
+        const webPort = setupConfig.dashboardPort || 9001;
         await startDashboard({ webPort });
     }
 

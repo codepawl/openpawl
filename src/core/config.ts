@@ -5,10 +5,7 @@
  */
 
 import { readGlobalConfigWithDefaults } from "./global-config.js";
-import { migrateEnvToGlobalJson } from "./configMigrator.js";
 import { setConfigAgentModels } from "./model-config.js";
-
-migrateEnvToGlobalJson();
 
 export type MemoryBackend = "lancedb" | "local_json";
 
@@ -88,23 +85,18 @@ function applyRuntimeOpenClawConfig(
 ): void {
     const cfg = CONFIG as unknown as MutableOpenClawRuntimeConfig;
     if (typeof update.openclawWorkerUrl === "string") {
-        process.env["OPENCLAW_WORKER_URL"] = update.openclawWorkerUrl;
         cfg.openclawWorkerUrl = update.openclawWorkerUrl;
     }
     if (typeof update.openclawHttpUrl === "string") {
-        process.env["OPENCLAW_HTTP_URL"] = update.openclawHttpUrl;
         cfg.openclawHttpUrl = update.openclawHttpUrl;
     }
     if (typeof update.openclawToken === "string") {
-        process.env["OPENCLAW_TOKEN"] = update.openclawToken;
         cfg.openclawToken = update.openclawToken;
     }
     if (typeof update.openclawChatEndpoint === "string") {
-        process.env["OPENCLAW_CHAT_ENDPOINT"] = update.openclawChatEndpoint;
         cfg.openclawChatEndpoint = update.openclawChatEndpoint;
     }
     if (typeof update.openclawModel === "string") {
-        process.env["OPENCLAW_MODEL"] = update.openclawModel;
         cfg.openclawModel = update.openclawModel;
     }
 }

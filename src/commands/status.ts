@@ -2,7 +2,7 @@ import { intro, note, outro } from "@clack/prompts";
 import { runGatewayHealthCheck } from "../core/health.js";
 import { buildTeamFromRoster, buildTeamFromTemplate } from "../core/team-templates.js";
 import { loadTeamConfig } from "../core/team-config.js";
-import { getWorkerUrlsForTeam } from "../core/config.js";
+import { CONFIG, getWorkerUrlsForTeam } from "../core/config.js";
 import { createWorkerAdapter } from "../adapters/worker-adapter.js";
 
 function formatMs(n: number): string {
@@ -40,7 +40,7 @@ export async function runStatusCommand(): Promise<void> {
     const adapter = createWorkerAdapter(bot, workerUrls);
     const available = await adapter.healthCheck();
     botLines.push(
-      `${bot.id} (${bot.name}) | model=${process.env["OPENCLAW_MODEL"] ?? "(not set)"} | ${
+      `${bot.id} (${bot.name}) | model=${CONFIG.openclawModel || "(not set)"} | ${
         available ? "available" : "unreachable"
       }`,
     );

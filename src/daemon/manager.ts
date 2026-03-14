@@ -6,6 +6,7 @@
 import { spawn } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { readGlobalConfigWithDefaults } from "../core/global-config.js";
 
 const DAEMON_DIR = ".teamclaw";
 const STATE_FILE = "daemon.json";
@@ -78,7 +79,7 @@ export function start(options: StartOptions): { started: string[]; error?: strin
   const newState: DaemonState = {};
 
   if (options.web === true) {
-    const port = options.webPort ?? (Number(process.env["WEB_PORT"]) || DEFAULT_WEB_PORT);
+    const port = options.webPort ?? readGlobalConfigWithDefaults().dashboardPort ?? DEFAULT_WEB_PORT;
     const logPath = path.join(getDaemonDir(), WEB_LOG);
     ensureDaemonDir();
     const logFd = openSync(logPath, "a");

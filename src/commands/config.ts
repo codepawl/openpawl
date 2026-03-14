@@ -25,6 +25,12 @@ import {
     type TeamClawGlobalConfig,
 } from "../core/global-config.js";
 import { clearTeamConfigCache, loadTeamConfig } from "../core/team-config.js";
+import {
+    setOpenClawWorkerUrl,
+    setOpenClawToken,
+    setOpenClawChatEndpoint,
+    setOpenClawModel,
+} from "../core/config.js";
 import { modelManagementMenu } from "./config/model-menu.js";
 import { advancedSettingsMenu, type AdvancedState } from "./config/advanced-menu.js";
 
@@ -636,15 +642,10 @@ async function systemMenu(state: DashboardState): Promise<void> {
 }
 
 function applyRuntime(state: DashboardState): void {
-    process.env["OPENCLAW_WORKER_URL"] = state.openclawWorkerUrl;
-    process.env["OPENCLAW_TOKEN"] = state.openclawToken;
-    process.env["OPENCLAW_CHAT_ENDPOINT"] = state.openclawChatEndpoint;
-    process.env["OPENCLAW_MODEL"] = state.openclawModel;
-    process.env["MEMORY_BACKEND"] = state.memoryBackend;
-    process.env["VECTOR_STORE_PATH"] = state.memoryPath;
-    process.env["WEB_PORT"] = String(state.webPort);
-    process.env["VERBOSE_LOGGING"] =
-        state.loggingLevel === "verbose" ? "true" : "false";
+    setOpenClawWorkerUrl(state.openclawWorkerUrl);
+    setOpenClawToken(state.openclawToken);
+    setOpenClawChatEndpoint(state.openclawChatEndpoint);
+    setOpenClawModel(state.openclawModel);
 }
 
 function saveState(state: DashboardState): void {
