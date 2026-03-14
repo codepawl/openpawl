@@ -6,7 +6,7 @@
 import { CONFIG } from "../core/config.js";
 import { logger, isDebugMode } from "../core/logger.js";
 import { wsManager } from "./ws-manager.js";
-import type { WsEvent } from "../interfaces/ws-events.js";
+import type { WsEvent } from "../types/ws-events.js";
 
 export interface TaskEvent {
     task_id: string;
@@ -23,8 +23,10 @@ export class CanvasTelemetry {
 
     constructor() {
         const rawUrl = CONFIG.openclawWorkerUrl ?? "http://localhost:18789";
-        const hasScheme = /^wss?:\/\//i.test(rawUrl);
-        const baseUrl = hasScheme ? rawUrl : `ws://${rawUrl.replace(/^http/i, "ws")}`;
+        const baseUrl = rawUrl
+            .replace(/^https:\/\//i, "wss://")
+            .replace(/^http:\/\//i, "ws://")
+            .replace(/^(?!wss?:\/\/)/, "ws://");
         
         const token = CONFIG.openclawToken ?? "";
         const url = new URL(baseUrl);
@@ -53,6 +55,9 @@ export class CanvasTelemetry {
         this.connected = ok;
         if (ok && isDebugMode()) {
             logger.agent("📡 Connected to OpenClaw Gateway for Canvas telemetry");
+        }
+        if (!ok) {
+            wsManager.close();
         }
         return ok;
     }
@@ -186,6 +191,17 @@ export class CanvasTelemetry {
             output_tokens: outputTokens,
             cached_input_tokens: cachedInputTokens,
             model,
+            timestamp: Date.now(),
+            source: "teamclaw",
+        });
+    }
+
+    sendReasoning(taskId: string, botId: string, reasoning: string): void {
+        this.emitTelemetry({
+            event: "REASONING",
+            task_id: taskId,
+            bot_id: botId,
+            reasoning,
             timestamp: Date.now(),
             source: "teamclaw",
         });

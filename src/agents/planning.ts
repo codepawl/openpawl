@@ -3,11 +3,11 @@
  */
 
 import type { GraphState } from "../core/graph-state.js";
-import type { WorkerAdapter } from "../interfaces/worker-adapter.js";
+import type { WorkerAdapter } from "../adapters/worker-adapter.js";
 import { CONFIG } from "../core/config.js";
 import { logger, isDebugMode } from "../core/logger.js";
 import { parseLlmJson } from "../utils/jsonExtractor.js";
-import { UniversalOpenClawAdapter } from "../interfaces/worker-adapter.js";
+import { UniversalOpenClawAdapter } from "../adapters/worker-adapter.js";
 import { resolveModelForAgent } from "../core/model-config.js";
 import { ensureWorkspaceDir, writeTextFile } from "../core/workspace-fs.js";
 import { getCanvasTelemetry } from "../core/canvas-telemetry.js";
@@ -27,7 +27,7 @@ interface SprintPlan {
 export class SprintPlanningNode {
   private readonly llmAdapter: WorkerAdapter;
   private readonly workspacePath: string;
-  private static readonly PLANNING_TIMEOUT_MS = 45_000;
+  private static readonly PLANNING_TIMEOUT_MS = CONFIG.llmTimeoutMs || 120_000;
 
   constructor(options: { llmAdapter?: WorkerAdapter; workspacePath?: string } = {}) {
     this.llmAdapter =
@@ -42,7 +42,7 @@ export class SprintPlanningNode {
     log(`📋 SprintPlanningNode initialized (workspace: ${this.workspacePath})`);
   }
 
-  async createSprintPlan(state: GraphState): Promise<Partial<GraphState>> {
+  async createSprintPlan(state: GraphState, signal?: AbortSignal): Promise<Partial<GraphState>> {
     const userGoal = state.user_goal;
     const team = state.team ?? [];
     const ancestralLessons = (state.ancestral_lessons ?? []) as string[];
@@ -60,7 +60,8 @@ export class SprintPlanningNode {
       const sprintPlan = await this.generateSprintPlanWithLlm(
         userGoal,
         team,
-        ancestralLessons
+        ancestralLessons,
+        signal
       );
 
       await this.writePlanningDocument(sprintPlan, userGoal);
@@ -97,7 +98,8 @@ export class SprintPlanningNode {
   private async generateSprintPlanWithLlm(
     goal: string,
     team: Record<string, unknown>[],
-    lessons: string[]
+    lessons: string[],
+    signal?: AbortSignal
   ): Promise<SprintPlan> {
     const teamLines = team
       .map(
@@ -155,7 +157,7 @@ Example:
         description: prompt,
         priority: "HIGH",
         estimated_cost: 0,
-      }),
+      }, { signal }),
       new Promise<never>((_, reject) =>
         setTimeout(
           () => reject(new Error("Sprint planning timed out")),
@@ -173,12 +175,44 @@ Example:
       throw new Error("Sprint planning returned empty output");
     }
 
-    const parsed = parseLlmJson<SprintPlan>(raw);
-    if (!parsed || !parsed.sprintGoal || !parsed.definitionOfSuccess) {
-      throw new Error("Invalid sprint plan format from LLM");
+    const parsed = parseLlmJson<Record<string, unknown>>(raw);
+    if (!parsed || typeof parsed !== "object") {
+      throw new Error(`Invalid sprint plan format from LLM: ${raw.slice(0, 300)}`);
     }
 
-    return parsed;
+    // Normalize keys — LLMs often use snake_case or other variants
+    const sprintGoal = String(
+      parsed.sprintGoal ?? parsed.sprint_goal ?? parsed.goal ?? ""
+    ).trim();
+    const rawDoS =
+      parsed.definitionOfSuccess ?? parsed.definition_of_success ?? parsed.success_criteria ?? parsed.criteria ?? [];
+    const definitionOfSuccess: string[] = Array.isArray(rawDoS)
+      ? rawDoS.map((x: unknown) => String(x))
+      : typeof rawDoS === "string"
+        ? rawDoS.split(/\n|;/).map((s: string) => s.trim()).filter(Boolean)
+        : [];
+    const rawAssignments =
+      parsed.teamAssignments ?? parsed.team_assignments ?? parsed.assignments ?? [];
+    const teamAssignments: Array<{ role: string; bot: string; focus: string }> =
+      Array.isArray(rawAssignments)
+        ? rawAssignments.map((a: Record<string, unknown>) => ({
+            role: String(a.role ?? ""),
+            bot: String(a.bot ?? a.bot_id ?? ""),
+            focus: String(a.focus ?? a.focus_area ?? ""),
+          }))
+        : [];
+
+    if (!sprintGoal) {
+      log(`Sprint plan parse failed. Raw keys: ${Object.keys(parsed).join(", ")}. Raw: ${raw.slice(0, 300)}`);
+      throw new Error(`Invalid sprint plan format from LLM (missing goal). Keys: ${Object.keys(parsed).join(", ")}`);
+    }
+
+    // Provide sensible defaults if DoS is empty
+    if (definitionOfSuccess.length === 0) {
+      definitionOfSuccess.push("All assigned tasks completed successfully");
+    }
+
+    return { sprintGoal, definitionOfSuccess, teamAssignments };
   }
 
   private formatPlanningDocument(plan: SprintPlan, goal: string): string {
@@ -242,8 +276,9 @@ ${assignmentTable}
 
 export function createSprintPlanningNode(
   workspacePath: string,
-  llmAdapter?: WorkerAdapter
+  llmAdapter?: WorkerAdapter,
+  signal?: AbortSignal
 ): (state: GraphState) => Promise<Partial<GraphState>> {
   const node = new SprintPlanningNode({ llmAdapter, workspacePath });
-  return (state: GraphState) => node.createSprintPlan(state);
+  return (state: GraphState) => node.createSprintPlan(state, signal);
 }

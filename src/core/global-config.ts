@@ -16,6 +16,9 @@ export interface TeamClawGlobalConfig {
   dashboardPort: number;
   debugMode: boolean;
   agentModels?: Record<string, string>;
+  modelAliases?: Record<string, string>;
+  modelAllowlist?: string[];
+  fallbackChain?: string[];
   workspaceDir?: string;
 }
 
@@ -138,6 +141,35 @@ export function normalizeGlobalConfig(input: Partial<TeamClawGlobalConfig>): Tea
         )
       : undefined;
 
+  // Parse modelAliases: Record<string, string>
+  const rawModelAliases = (input as Record<string, unknown>).modelAliases;
+  const modelAliases: Record<string, string> | undefined =
+    rawModelAliases && typeof rawModelAliases === "object" && !Array.isArray(rawModelAliases)
+      ? Object.fromEntries(
+          Object.entries(rawModelAliases as Record<string, unknown>)
+            .map(([k, v]) => [k.trim(), typeof v === "string" ? v.trim() : ""])
+            .filter(([k, v]) => k.length > 0 && v.length > 0),
+        )
+      : undefined;
+
+  // Parse modelAllowlist: string[]
+  const rawAllowlist = (input as Record<string, unknown>).modelAllowlist;
+  const modelAllowlist: string[] | undefined = Array.isArray(rawAllowlist)
+    ? (rawAllowlist as unknown[])
+        .filter((v): v is string => typeof v === "string")
+        .map((v) => v.trim())
+        .filter(Boolean)
+    : undefined;
+
+  // Parse fallbackChain: string[]
+  const rawFallbackChain = (input as Record<string, unknown>).fallbackChain;
+  const fallbackChain: string[] | undefined = Array.isArray(rawFallbackChain)
+    ? (rawFallbackChain as unknown[])
+        .filter((v): v is string => typeof v === "string")
+        .map((v) => v.trim())
+        .filter(Boolean)
+    : undefined;
+
   const workspaceDir = typeof input.workspaceDir === "string" && input.workspaceDir.trim()
     ? input.workspaceDir.trim()
     : undefined;
@@ -156,6 +188,9 @@ export function normalizeGlobalConfig(input: Partial<TeamClawGlobalConfig>): Tea
     dashboardPort,
     debugMode,
     ...(agentModels && Object.keys(agentModels).length > 0 ? { agentModels } : {}),
+    ...(modelAliases && Object.keys(modelAliases).length > 0 ? { modelAliases } : {}),
+    ...(modelAllowlist && modelAllowlist.length > 0 ? { modelAllowlist } : {}),
+    ...(fallbackChain && fallbackChain.length > 0 ? { fallbackChain } : {}),
     ...(workspaceDir ? { workspaceDir } : {}),
   };
 }

@@ -3,7 +3,7 @@ import { runGatewayHealthCheck } from "../core/health.js";
 import { buildTeamFromRoster, buildTeamFromTemplate } from "../core/team-templates.js";
 import { loadTeamConfig } from "../core/team-config.js";
 import { getWorkerUrlsForTeam } from "../core/config.js";
-import { createWorkerAdapter } from "../interfaces/worker-adapter.js";
+import { createWorkerAdapter } from "../adapters/worker-adapter.js";
 
 function formatMs(n: number): string {
   return n >= 0 ? `${n}ms` : "n/a";

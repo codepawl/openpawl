@@ -6,10 +6,13 @@ import { CONFIG, getSessionTemperature } from "./config.js";
 import { logger, isDebugMode } from "./logger.js";
 import { getTrafficController } from "./traffic-control.js";
 import { resolveModelForAgent, getFallbackChain } from "./model-config.js";
+import { openclawEvents } from "./openclaw-events.js";
 
 export interface GenerateOptions {
   temperature?: number;
   model?: string;
+  stream?: boolean;
+  onChunk?: (chunk: string) => void;
 }
 
 function isAbortTimeoutError(err: unknown): boolean {
@@ -21,6 +24,59 @@ function isAbortTimeoutError(err: unknown): boolean {
 function shortErr(err: unknown): string {
   if (err instanceof Error) return `${err.name}: ${err.message}`;
   return String(err);
+}
+
+interface SSEResult {
+  text: string;
+  usage?: { prompt_tokens?: number; completion_tokens?: number };
+}
+
+async function consumeSSEStream(
+  body: ReadableStream<Uint8Array>,
+  onChunk?: (chunk: string) => void,
+): Promise<SSEResult> {
+  const decoder = new TextDecoder();
+  const reader = body.getReader();
+  let buffer = "";
+  let accumulated = "";
+  let usage: SSEResult["usage"];
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    const lines = buffer.split("\n");
+    // Keep the last (possibly incomplete) line in the buffer
+    buffer = lines.pop() ?? "";
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith(":")) continue;
+      if (!trimmed.startsWith("data:")) continue;
+      const data = trimmed.slice(5).trim();
+      if (data === "[DONE]") continue;
+
+      try {
+        const parsed = JSON.parse(data) as {
+          choices?: Array<{ delta?: { content?: string } }>;
+          usage?: { prompt_tokens?: number; completion_tokens?: number };
+        };
+        const content = parsed.choices?.[0]?.delta?.content;
+        if (content) {
+          accumulated += content;
+          onChunk?.(content);
+        }
+        if (parsed.usage) {
+          usage = parsed.usage;
+        }
+      } catch {
+        // skip malformed JSON chunks
+      }
+    }
+  }
+
+  return { text: accumulated, usage };
 }
 
 /**
@@ -147,6 +203,17 @@ export async function generate(prompt: string, options?: GenerateOptions & { bot
   for (let attempt = 0; attempt < modelChain.length; attempt++) {
     const currentModel = modelChain[attempt]!;
     const startedAt = Date.now();
+    openclawEvents.emit("log", {
+      id: `llm-${Date.now()}-${attempt}`,
+      level: "info",
+      source: "llm-client",
+      action: "request_start",
+      model: currentModel,
+      botId,
+      message: `LLM request → ${currentModel}${attempt > 0 ? ` (fallback #${attempt})` : ""}`,
+      meta: { url, timeoutMs, promptChars, attempt },
+      timestamp: Date.now(),
+    });
     if (isDebugMode()) {
       logger.agent(
         `LLM request start: provider=openclaw url=${url} model=${currentModel} timeoutMs=${timeoutMs} promptChars=${promptChars}${attempt > 0 ? ` fallback=${attempt}` : ""}`,
@@ -157,6 +224,7 @@ export async function generate(prompt: string, options?: GenerateOptions & { bot
       if (CONFIG.openclawToken) {
         headers.Authorization = `Bearer ${CONFIG.openclawToken}`;
       }
+      const useStreaming = !!(options?.onChunk);
       const res = await fetch(url, {
         method: "POST",
         headers,
@@ -164,12 +232,23 @@ export async function generate(prompt: string, options?: GenerateOptions & { bot
           model: currentModel,
           messages: [{ role: "user" as const, content: prompt }],
           temperature,
-          stream: false,
+          stream: useStreaming,
         }),
         signal: AbortSignal.timeout(timeoutMs),
       });
       const elapsedMs = Date.now() - startedAt;
       const statusLabel = typeof res.status === "number" ? String(res.status) : "unknown";
+      openclawEvents.emit("log", {
+        id: `llm-${Date.now()}-${attempt}-end`,
+        level: res.ok ? "success" : "warn",
+        source: "llm-client",
+        action: "request_end",
+        model: currentModel,
+        botId,
+        message: res.ok ? `Response ${statusLabel} in ${elapsedMs}ms` : `HTTP ${statusLabel} from ${currentModel}`,
+        meta: { status: res.status, elapsedMs },
+        timestamp: Date.now(),
+      });
       if (isDebugMode()) {
         logger.agent(`LLM request end: provider=openclaw status=${statusLabel} elapsedMs=${elapsedMs}`);
       }
@@ -180,6 +259,17 @@ export async function generate(prompt: string, options?: GenerateOptions & { bot
         // Retry with fallback on 404 or model-not-found errors
         const isModelError = res.status === 404 || (res.status === 400 && body.toLowerCase().includes("model"));
         if (isModelError && attempt < modelChain.length - 1) {
+          openclawEvents.emit("log", {
+            id: `llm-${Date.now()}-${attempt}-fallback`,
+            level: "warn",
+            source: "llm-client",
+            action: "fallback",
+            model: currentModel,
+            botId,
+            message: `Model "${currentModel}" unavailable (${res.status}), falling back to ${modelChain[attempt + 1]}`,
+            meta: { status: res.status, nextModel: modelChain[attempt + 1] },
+            timestamp: Date.now(),
+          });
           if (isDebugMode()) {
             logger.agent(`Model "${currentModel}" not available (${res.status}), trying fallback...`);
           }
@@ -194,11 +284,35 @@ export async function generate(prompt: string, options?: GenerateOptions & { bot
         trafficController.release(botId);
         throw new Error(`OpenClaw HTTP ${res.status}.${snippet}${portHint}`);
       }
+      if (useStreaming && res.body) {
+        const sseResult = await consumeSSEStream(res.body, (chunk) => {
+          options!.onChunk!(chunk);
+          openclawEvents.emit("stream_chunk", {
+            botId,
+            model: currentModel,
+            chunk,
+            timestamp: Date.now(),
+          });
+        });
+        trafficController.release(botId);
+        return sseResult.text.trim();
+      }
       const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
       trafficController.release(botId);
       return (data.choices?.[0]?.message?.content ?? "").trim();
     } catch (err) {
       const elapsedMs = Date.now() - startedAt;
+      openclawEvents.emit("log", {
+        id: `llm-${Date.now()}-${attempt}-error`,
+        level: "error",
+        source: "llm-client",
+        action: "request_error",
+        model: currentModel,
+        botId,
+        message: `Request failed: ${shortErr(err)}`,
+        meta: { elapsedMs, timedOut: isAbortTimeoutError(err), error: shortErr(err) },
+        timestamp: Date.now(),
+      });
       if (isDebugMode()) {
         logger.agent(
           `LLM request error: provider=openclaw elapsedMs=${elapsedMs} timedOut=${isAbortTimeoutError(err)} err="${shortErr(err)}"`,
@@ -233,14 +347,50 @@ export async function llmHealthCheck(): Promise<boolean> {
     if (CONFIG.openclawToken) {
       headers.Authorization = `Bearer ${CONFIG.openclawToken}`;
     }
+    openclawEvents.emit("log", {
+      id: `health-${Date.now()}`,
+      level: "info",
+      source: "llm-client",
+      action: "health_check",
+      model: CONFIG.openclawModel ?? "",
+      botId: "system",
+      message: `Health check → ${url}`,
+      meta: { url },
+      timestamp: Date.now(),
+    });
+    const startedAt = Date.now();
     const res = await fetch(url, {
       method: "GET",
       headers,
       signal: AbortSignal.timeout(5000),
     });
+    const elapsedMs = Date.now() - startedAt;
     // Any response (even 401/403) means gateway is reachable
-    return res.status !== 0;
-  } catch {
+    const ok = res.status !== 0;
+    openclawEvents.emit("log", {
+      id: `health-${Date.now()}-result`,
+      level: ok ? "success" : "error",
+      source: "llm-client",
+      action: "health_check",
+      model: CONFIG.openclawModel ?? "",
+      botId: "system",
+      message: ok ? `Gateway healthy (HTTP ${res.status}, ${elapsedMs}ms)` : `Health check failed (HTTP ${res.status})`,
+      meta: { status: res.status, elapsedMs },
+      timestamp: Date.now(),
+    });
+    return ok;
+  } catch (err) {
+    openclawEvents.emit("log", {
+      id: `health-${Date.now()}-err`,
+      level: "error",
+      source: "llm-client",
+      action: "health_check",
+      model: CONFIG.openclawModel ?? "",
+      botId: "system",
+      message: `Health check failed: ${err instanceof Error ? err.message : String(err)}`,
+      meta: { error: err instanceof Error ? err.message : String(err) },
+      timestamp: Date.now(),
+    });
     return false;
   }
 }

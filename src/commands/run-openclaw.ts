@@ -262,18 +262,17 @@ export function cleanupManagedGateway(): void {
     }
 }
 
+let _cleanupHandlersInstalled = false;
+
 export function setupGatewayCleanupHandlers(): void {
+    if (_cleanupHandlersInstalled) return;
+    _cleanupHandlersInstalled = true;
+
     const cleanup = () => {
         cleanupManagedGateway();
     };
 
+    // Only register on "exit" — SIGINT/SIGTERM are handled by the work-runner
+    // which controls abort signal propagation and exit timing.
     process.on("exit", cleanup);
-    process.on("SIGINT", () => {
-        cleanup();
-        process.exit(0);
-    });
-    process.on("SIGTERM", () => {
-        cleanup();
-        process.exit(0);
-    });
 }

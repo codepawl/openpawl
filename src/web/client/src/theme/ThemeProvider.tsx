@@ -1,6 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { PALETTE_IDS, type PaletteId } from "./palettes";
 
 const STORAGE_KEY = "teamclaw-theme";
+const PALETTE_STORAGE_KEY = "teamclaw-palette";
 
 export type ThemePreference = "light" | "dark" | "system";
 
@@ -14,6 +16,13 @@ function getStoredTheme(): ThemePreference {
   const stored = localStorage.getItem(STORAGE_KEY) as ThemePreference | null;
   if (stored === "light" || stored === "dark" || stored === "system") return stored;
   return "system";
+}
+
+function getStoredPalette(): PaletteId {
+  if (typeof window === "undefined") return "default";
+  const stored = localStorage.getItem(PALETTE_STORAGE_KEY);
+  if (stored && (PALETTE_IDS as string[]).includes(stored)) return stored as PaletteId;
+  return "default";
 }
 
 function resolveIsDark(theme: ThemePreference): boolean {
@@ -31,6 +40,15 @@ function applyDarkClass(isDark: boolean): void {
   }
 }
 
+function applyPalette(id: PaletteId): void {
+  if (typeof document === "undefined") return;
+  if (id === "default") {
+    delete document.documentElement.dataset.palette;
+  } else {
+    document.documentElement.dataset.palette = id;
+  }
+}
+
 function persistTheme(theme: ThemePreference): void {
   if (typeof window === "undefined") return;
   if (theme === "system") {
@@ -40,10 +58,21 @@ function persistTheme(theme: ThemePreference): void {
   }
 }
 
+function persistPalette(id: PaletteId): void {
+  if (typeof window === "undefined") return;
+  if (id === "default") {
+    localStorage.removeItem(PALETTE_STORAGE_KEY);
+  } else {
+    localStorage.setItem(PALETTE_STORAGE_KEY, id);
+  }
+}
+
 interface ThemeContextValue {
   theme: ThemePreference;
   isDark: boolean;
   setTheme: (theme: ThemePreference) => void;
+  palette: PaletteId;
+  setPalette: (id: PaletteId) => void;
 }
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
@@ -51,6 +80,7 @@ const ThemeContext = createContext<ThemeContextValue | null>(null);
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setThemeState] = useState<ThemePreference>(getStoredTheme);
   const [isDark, setIsDark] = useState(resolveIsDark(theme));
+  const [palette, setPaletteState] = useState<PaletteId>(getStoredPalette);
 
   const setTheme = useCallback((next: ThemePreference) => {
     setThemeState(next);
@@ -60,9 +90,19 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     persistTheme(next);
   }, []);
 
+  const setPalette = useCallback((id: PaletteId) => {
+    setPaletteState(id);
+    applyPalette(id);
+    persistPalette(id);
+  }, []);
+
   useEffect(() => {
     applyDarkClass(isDark);
   }, [isDark]);
+
+  useEffect(() => {
+    applyPalette(palette);
+  }, [palette]);
 
   useEffect(() => {
     if (theme !== "system") return;
@@ -77,8 +117,8 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   }, [theme]);
 
   const value = useMemo(
-    () => ({ theme, isDark, setTheme }),
-    [theme, isDark, setTheme]
+    () => ({ theme, isDark, setTheme, palette, setPalette }),
+    [theme, isDark, setTheme, palette, setPalette]
   );
 
   return (

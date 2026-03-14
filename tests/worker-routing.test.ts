@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import type { WorkerAdapter } from "../src/interfaces/worker-adapter.js";
-import { resolveTargetUrl } from "../src/interfaces/worker-adapter.js";
+import type { WorkerAdapter } from "../src/adapters/worker-adapter.js";
+import { resolveTargetUrl } from "../src/adapters/worker-adapter.js";
 import { WorkerBot, createWorkerExecuteNode } from "../src/agents/worker-bot.js";
 import type { TaskRequest, TaskResult } from "../src/core/state.js";
 import type { GraphState } from "../src/core/graph-state.js";

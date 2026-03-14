@@ -7,9 +7,10 @@ import { getRoleTemplate } from "../core/bot-definitions.js";
 import { CONFIG } from "../core/config.js";
 import { logger, isDebugMode } from "../core/logger.js";
 import { parseLlmJson } from "../utils/jsonExtractor.js";
-import type { WorkerAdapter } from "../interfaces/worker-adapter.js";
-import { UniversalOpenClawAdapter } from "../interfaces/worker-adapter.js";
+import type { WorkerAdapter } from "../adapters/worker-adapter.js";
+import { UniversalOpenClawAdapter } from "../adapters/worker-adapter.js";
 import { resolveModelForAgent } from "../core/model-config.js";
+import { coordinatorEvents } from "../core/coordinator-events.js";
 
 function log(msg: string): void {
   if (isDebugMode()) {
@@ -21,7 +22,7 @@ export class CoordinatorAgent {
   private taskCounter = 0;
   private readonly llmAdapter: WorkerAdapter;
   private readonly workspacePath: string;
-  private static readonly DECOMPOSITION_TIMEOUT_MS = 30_000;
+  private static readonly DECOMPOSITION_TIMEOUT_MS = CONFIG.llmTimeoutMs || 120_000;
 
   constructor(options: { llmAdapter?: WorkerAdapter; workspacePath?: string } = {}) {
     this.llmAdapter =
@@ -46,7 +47,8 @@ export class CoordinatorAgent {
     team: Record<string, unknown>[],
     ancestralLessons: string[] = [],
     projectContext: string = "",
-    preferencesContext: string = ""
+    preferencesContext: string = "",
+    signal?: AbortSignal
   ): Promise<Array<{ description: string; assigned_to: string; worker_tier: "light" | "heavy"; complexity: "LOW" | "MEDIUM" | "HIGH" | "ARCHITECTURE" }>> {
     const roleSummary: string[] = [];
     const rosterAgg = new Map<string, { count: number; descriptions: Set<string> }>();
@@ -99,47 +101,26 @@ ${ancestralLessons.map((l, i) => `  ${i + 1}. ${l}`).join("\n")}
         : "";
 
     const prompt = `You are a team coordinator. Break this goal into 3-6 concrete subtasks.
-RETURN ONLY RAW JSON. DO NOT INCLUDE PREAMBLE OR EXPLANATIONS. START WITH '{' OR '[' AND END WITH '}' OR ']'.
-Assign each subtask to ONE team member based on their role and skills.
-You MUST decompose the goal into multiple smaller, actionable tasks.
-You MUST create at least one specific task for EACH role provided in the roster.
-Do not output a single monolithic task.
-
-You are working in a strictly defined workspace. Treat this workspace as your root directory.
-WORKSPACE PATH: ${this.workspacePath}
-IMPORTANT: Do NOT create arbitrary subdirectories unless explicitly specified in the task.
-Output files directly to the root of the provided workspace path unless the task explicitly requires a specific structure (like 'assets/' or 'src/components/').
-All file operations (read, write, create, edit) MUST be performed within this directory.
-Do not attempt to read or write files outside of it.
-
-📋 SPRINT PLANNING: The team has already defined the Sprint Goal and Definition of Success in DOCS/PLANNING.md.
-📝 RFC PROCESS: Complex tasks (marked HIGH or ARCHITECTURE complexity) require RFC approval before execution.
-📖 AGENTS.md: Read DOCS/AGENTS.md for team rules, culture (blame-free), and communication standards.
+RETURN ONLY RAW JSON — no preamble. Start with '[' and end with ']'.
+Assign each subtask to ONE team member. Create at least one task per roster role.
 ${lessonsBlock}${projectContextBlock}${preferencesBlock}
 
 Goal: ${goal}
 
-You are managing a team of ${team.length} bots.
-Your roster:
+Team (${team.length} bots):
 ${rosterLines.join("\n")}
 
-Team:
 ${roleSummary.join("\n")}
 
-Output a JSON array. Each element MUST be an object with exactly these four keys:
-- "description" (string): the task description
-- "assigned_to" (string): bot id (e.g. bot_0, bot_1)
-- "worker_tier" (string): MUST be either "light" or "heavy". Use "heavy" only when the task explicitly requires UI automation, browser control, or complex GUI interaction; otherwise use "light".
-- "complexity" (string): MUST be "LOW", "MEDIUM", "HIGH", or "ARCHITECTURE". Use "HIGH" or "ARCHITECTURE" for tasks involving new architecture, multiple components, or significant design decisions. Simpler tasks should be "LOW" or "MEDIUM".
+Output a JSON array. Each element: {"description": string, "assigned_to": bot id, "worker_tier": "light"|"heavy", "complexity": "LOW"|"MEDIUM"|"HIGH"|"ARCHITECTURE"}.
+Use "heavy" only for browser/GUI tasks. Use "HIGH"/"ARCHITECTURE" for significant design work.
+Array MUST have >= ${Math.max(3, team.length)} tasks covering all roles. No other keys, no explanations.`;
 
-You must include worker_tier and complexity for every task. No other keys. No explanations, only the JSON array.
-The array MUST contain at least ${Math.max(3, team.length)} tasks and cover all roster roles.
-You are managing a roster of specific roles. You MUST output an array of MULTIPLE tasks.
-You MUST create at least one distinct task for EACH role in the roster that is relevant to the goal.
-It is strictly FORBIDDEN to output only 1 task if the roster has more than 1 bot.
-
-Example:
-[{"description": "Implement login API", "assigned_to": "bot_0", "worker_tier": "light", "complexity": "LOW"}, {"description": "Design and implement authentication architecture", "assigned_to": "bot_0", "worker_tier": "light", "complexity": "ARCHITECTURE"}, {"description": "Open browser and click Login button", "assigned_to": "bot_1", "worker_tier": "heavy", "complexity": "MEDIUM"}]`;
+    coordinatorEvents.emit("progress", {
+      step: "preparing",
+      detail: `Analyzing goal for ${team.length} team members, ${ancestralLessons.length} lessons loaded`,
+      timestamp: Date.now(),
+    });
 
     try {
       const llmTaskId = `COORD-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
@@ -149,7 +130,7 @@ Example:
           description: prompt,
           priority: "HIGH",
           estimated_cost: 0,
-        }),
+        }, { signal }),
         new Promise<never>((_, reject) =>
           setTimeout(
             () => reject(new Error("❌ Decomposition timed out - Check Gateway logs")),
@@ -160,6 +141,11 @@ Example:
       if (!llmResult.success) {
         throw new Error(String(llmResult.output ?? "Coordinator decomposition failed"));
       }
+      coordinatorEvents.emit("progress", {
+        step: "parsing",
+        detail: "Parsing LLM response...",
+        timestamp: Date.now(),
+      });
       const raw = String(llmResult.output ?? "").trim();
       if (!raw) {
         throw new Error("Coordinator decomposition returned empty output");
@@ -190,6 +176,11 @@ Example:
           worker_tier: tier,
           complexity,
         };
+      });
+      coordinatorEvents.emit("progress", {
+        step: "assigning",
+        detail: `Validated ${parsed.length} tasks, backfilling assignments...`,
+        timestamp: Date.now(),
       });
       const minTasks = team.length > 1 ? Math.max(3, team.length) : 1;
       const out: Array<{ description: string; assigned_to: string; worker_tier: "light" | "heavy"; complexity: "LOW" | "MEDIUM" | "HIGH" | "ARCHITECTURE" }> =
@@ -227,32 +218,45 @@ Example:
     }
   }
 
-  async coordinateNode(state: GraphState): Promise<Partial<GraphState>> {
+  async coordinateNode(state: GraphState, signal?: AbortSignal): Promise<Partial<GraphState>> {
     const team = state.team ?? [];
     const userGoal = state.user_goal;
     const projectContext = (state.project_context as string) ?? "";
     const taskQueue = [...(state.task_queue ?? [])];
     const preferencesContext = (state.preferences_context as string) ?? "";
 
+    const complexityMap: Record<string, { priority: string; urgency: number; importance: number }> = {
+      ARCHITECTURE: { priority: "HIGH", urgency: 9, importance: 9 },
+      HIGH:         { priority: "HIGH", urgency: 8, importance: 7 },
+      MEDIUM:       { priority: "MEDIUM", urgency: 5, importance: 6 },
+      LOW:          { priority: "LOW", urgency: 3, importance: 4 },
+    };
+
     if (userGoal) {
       const lessons = (state.ancestral_lessons ?? []) as string[];
-      const decomposed = await this.decomposeGoalWithLlm(userGoal, team, lessons, projectContext, preferencesContext);
+      const decomposed = await this.decomposeGoalWithLlm(userGoal, team, lessons, projectContext, preferencesContext, signal);
       for (const item of decomposed) {
+        const derived = complexityMap[item.complexity] ?? complexityMap.MEDIUM;
         taskQueue.push({
           task_id: this.nextTaskId(),
           assigned_to: item.assigned_to,
           status: "pending",
           description: item.description,
-          priority: "MEDIUM",
+          priority: derived.priority,
           worker_tier: item.worker_tier,
           complexity: item.complexity,
           result: null,
-          urgency: 5,
-          importance: 5,
+          urgency: derived.urgency,
+          importance: derived.importance,
           timebox_minutes: 25,
           in_progress_at: null,
         });
       }
+      coordinatorEvents.emit("progress", {
+        step: "complete",
+        detail: `Decomposed into ${decomposed.length} tasks`,
+        timestamp: Date.now(),
+      });
       log(`🎯 Coordinator enqueued ${decomposed.length} tasks`);
       return {
         user_goal: null,
@@ -265,6 +269,11 @@ Example:
     }
 
     if (taskQueue.length > 0) {
+      coordinatorEvents.emit("progress", {
+        step: "reprioritizing",
+        detail: `Re-scoring ${taskQueue.length} tasks by urgency/importance`,
+        timestamp: Date.now(),
+      });
       const scoredQueue = taskQueue.map((t) => {
         const rawUrgency = Number(t.urgency);
         const rawImportance = Number(t.importance);

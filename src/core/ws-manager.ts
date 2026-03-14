@@ -23,6 +23,7 @@ export class WebSocketManager {
 
   private readonly connectTimeoutMs = 5000;
   private readonly maxReconnectDelayMs = 30_000;
+  private readonly maxReconnectAttempts = 5;
   private readonly heartbeatIntervalMs = 15_000;
   private readonly pongTimeoutMs = 8_000;
 
@@ -234,6 +235,11 @@ export class WebSocketManager {
 
   private scheduleReconnect(): void {
     if (!this.shouldReconnect || !this.currentUrl) return;
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      logger.warn("WS max reconnect attempts reached, giving up");
+      this.shouldReconnect = false;
+      return;
+    }
     this.clearReconnectTimer();
     const delay = Math.min(
       this.maxReconnectDelayMs,

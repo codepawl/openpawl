@@ -84,7 +84,9 @@ function printHelp(): void {
         "",
         section("Utilities:"),
         "  " + cmd("lessons") + "    " + desc("Export lessons"),
+        "  " + cmd("logs") + "       " + desc("View gateway / web / work session logs"),
         "  " + cmd("run") + "        " + desc("Run OpenClaw gateway (run openclaw --port 8001)"),
+        "  " + cmd("demo") + "       " + desc("Run a synthetic demo (no gateway needed)"),
         "",
         section("work flags:"),
         "  " + pc.green("--goal") + " " + desc('"Your goal" or @file.md   Set goal (supports multiline & file: .md, .txt, .json)'),
@@ -284,7 +286,7 @@ async function main(): Promise<void> {
         await runModelCommand(args.slice(1));
 
     } else if (cmd === "lessons") {
-        const { runLessonsExport } = await import("./lessons-export.js");
+        const { runLessonsExport } = await import("./commands/lessons-export.js");
         await runLessonsExport(args.slice(1));
 
     } else if (cmd === "run") {
@@ -313,10 +315,21 @@ async function main(): Promise<void> {
             process.exit(1);
         }
 
+    } else if (cmd === "logs") {
+        const { runLogs } = await import("./commands/logs.js");
+        await runLogs(args.slice(1));
+
+    } else if (cmd === "demo") {
+        const canRenderSpinner = Boolean(process.stdout.isTTY && process.stderr.isTTY);
+        if (canRenderSpinner) intro("TeamClaw Demo Mode");
+        const { runDemo } = await import("./commands/demo.js");
+        await runDemo(args.slice(1));
+        if (canRenderSpinner) outro("Demo session finished.");
+
     } else {
         logger.error(`Unknown command: ${cmd}`);
         logger.error(
-            "Run `teamclaw --help` for usage. Key commands: setup, work, config, web, check.",
+            "Run `teamclaw --help` for usage. Key commands: setup, work, config, web, check, logs.",
         );
         process.exit(1);
     }

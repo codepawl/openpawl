@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { useWsStore, pushTerminalOutput } from "./store";
+import { useWsStore, pushTerminalOutput, type OpenClawLogEntry } from "./store";
 
 const INITIAL_RECONNECT_MS = 1500;
 const MAX_RECONNECT_MS = 15000;
@@ -7,8 +7,8 @@ const MAX_RECONNECT_MS = 15000;
 function getWsUrl(): string {
   const env = import.meta.env.VITE_WS_URL;
   if (env && typeof env === "string") return env.trim();
-  const { hostname } = typeof location !== "undefined" ? location : { hostname: "localhost" };
-  return `ws://${hostname}:8000/ws`;
+  const { hostname, port } = typeof location !== "undefined" ? location : { hostname: "localhost", port: "8000" };
+  return `ws://${hostname}:${port || "8000"}/ws`;
 }
 
 export function WebSocketProvider({ children }: { children: React.ReactNode }) {
@@ -28,6 +28,14 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
   const addCompletedNode = useWsStore((s) => s.addCompletedNode);
   const addTokenUsage = useWsStore((s) => s.addTokenUsage);
   const setModel = useWsStore((s) => s.setModel);
+  const pushNodeEvent = useWsStore((s) => s.pushNodeEvent);
+  const setGenerationProgress = useWsStore((s) => s.setGenerationProgress);
+  const setCycleProgress = useWsStore((s) => s.setCycleProgress);
+  const setModelConfig = useWsStore((s) => s.setModelConfig);
+  const setReasoning = useWsStore((s) => s.setReasoning);
+  const pushOpenClawLog = useWsStore((s) => s.pushOpenClawLog);
+  const appendStreamChunk = useWsStore((s) => s.appendStreamChunk);
+  const setServerStartTs = useWsStore((s) => s.setServerStartTs);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -55,15 +63,48 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
         try {
           const payload = JSON.parse(event.data) as Record<string, unknown>;
           const type = payload.type as string | undefined;
-          if (type === "node_event" && payload.state && typeof payload.state === "object") {
+          if (type === "state_sync" && payload.state && typeof payload.state === "object") {
+            const state = payload.state as Record<string, unknown>;
+            setFromNodeEvent({
+              task_queue: state.taskQueue as Record<string, unknown>[] | undefined,
+              bot_stats: state.botStats as Record<string, Record<string, unknown>> | undefined,
+              cycle: state.cycle as number | undefined,
+            });
+            if (typeof state.activeNode === "string") {
+              setActiveNode(state.activeNode);
+            }
+            if (state.generationProgress) {
+              setGenerationProgress(state.generationProgress as {
+                generation: number; maxGenerations: number; lessonsCount: number;
+                startedAt: number; outcome: string | null; finalState: Record<string, unknown> | null;
+              });
+            }
+            if (state.cycleProgress) {
+              setCycleProgress(state.cycleProgress as {
+                cycle: number; maxCycles: number; startedAt: number;
+              });
+            }
+            if (state.pendingApproval) {
+              setPendingApproval(state.pendingApproval as Record<string, unknown>);
+            }
+          } else if (type === "node_event" && payload.state && typeof payload.state === "object") {
             const state = payload.state as Record<string, unknown>;
             setFromNodeEvent({
               task_queue: state.task_queue as Record<string, unknown>[] | undefined,
               bot_stats: state.bot_stats as Record<string, Record<string, unknown>> | undefined,
               cycle: state.cycle as number | undefined,
             });
+            const node = payload.node as string | undefined;
+            const data = (payload.data ?? {}) as Record<string, unknown>;
+            const timestamp = (payload.timestamp ?? "") as string;
+            if (node) {
+              pushNodeEvent({ node, data, timestamp, receivedAt: Date.now() });
+            }
           } else if (type === "init" && payload.config) {
             setConfig(payload.config as Record<string, unknown>);
+            if (typeof payload.server_start_ts === "number") {
+              setServerStartTs(payload.server_start_ts);
+            }
           } else if (type === "config_updated" && payload.config) {
             setConfig(payload.config as Record<string, unknown>);
           } else if (type === "error" && typeof payload.message === "string") {
@@ -81,17 +122,32 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
             }
             if (taskId) {
               setLastError(`Task ${taskId} exceeded its timebox.`);
+              const prefs = useWsStore.getState().notificationPrefs;
+              if (prefs.enabled && prefs.types.timeout) {
+                pushAlert({
+                  id: `timeout-${Date.now()}`,
+                  type: "timeout",
+                  message: `Task ${taskId} exceeded its timebox.`,
+                  details: payload as Record<string, unknown>,
+                  created_at: new Date().toISOString(),
+                  read: false,
+                });
+              }
             }
           } else if (type === "approval_request" && payload.pending) {
             const pending = payload.pending as Record<string, unknown>;
             setPendingApproval(pending);
-            pushAlert({
-              id: `approval-${Date.now()}`,
-              type: "approval_request",
-              message: "Approval required for a task.",
-              details: pending,
-              created_at: new Date().toISOString(),
-            });
+            const prefs = useWsStore.getState().notificationPrefs;
+            if (prefs.enabled && prefs.types.approval_request) {
+              pushAlert({
+                id: `approval-${Date.now()}`,
+                type: "approval_request",
+                message: "Approval required for a task.",
+                details: pending,
+                created_at: new Date().toISOString(),
+                read: false,
+              });
+            }
           } else if (type === "WAITING_FOR_HUMAN" && payload.task_id) {
             const taskId = payload.task_id as string;
             const message = (payload.message as string) || "Task requires human approval";
@@ -100,32 +156,86 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
               description: message,
               waiting: true,
             });
-            pushAlert({
-              id: `waiting-${Date.now()}`,
-              type: "approval_request",
-              message: message,
-              details: { task_id: taskId },
-              created_at: new Date().toISOString(),
-            });
+            const prefs = useWsStore.getState().notificationPrefs;
+            if (prefs.enabled && prefs.types.approval_request) {
+              pushAlert({
+                id: `waiting-${Date.now()}`,
+                type: "approval_request",
+                message: message,
+                details: { task_id: taskId },
+                created_at: new Date().toISOString(),
+                read: false,
+              });
+            }
           } else if (type === "hallucination_warning") {
-            pushAlert({
-              id: `hallucination-${Date.now()}`,
-              type: "hallucination_warning",
-              message:
-                (payload.message as string) ||
-                "Potential hallucination detected in model output.",
-              details: payload as Record<string, unknown>,
-              created_at: new Date().toISOString(),
-            });
+            const prefs = useWsStore.getState().notificationPrefs;
+            if (prefs.enabled && prefs.types.hallucination_warning) {
+              pushAlert({
+                id: `hallucination-${Date.now()}`,
+                type: "hallucination_warning",
+                message:
+                  (payload.message as string) ||
+                  "Potential hallucination detected in model output.",
+                details: payload as Record<string, unknown>,
+                created_at: new Date().toISOString(),
+                read: false,
+              });
+            }
           } else if (type === "system_error") {
             const msg = (payload.message as string) || "A system error occurred.";
             setLastError(msg);
-            pushAlert({
-              id: `system-${Date.now()}`,
-              type: "system_error",
-              message: msg,
-              details: payload as Record<string, unknown>,
-              created_at: new Date().toISOString(),
+            const prefs = useWsStore.getState().notificationPrefs;
+            if (prefs.enabled && prefs.types.system_error) {
+              pushAlert({
+                id: `system-${Date.now()}`,
+                type: "system_error",
+                message: msg,
+                details: payload as Record<string, unknown>,
+                created_at: new Date().toISOString(),
+                read: false,
+              });
+            }
+          } else if (type === "provision_error") {
+            const msg = (payload.error as string) || "OpenClaw Gateway not available.";
+            setLastError(msg);
+            const prefs = useWsStore.getState().notificationPrefs;
+            if (prefs.enabled && prefs.types.system_error) {
+              pushAlert({
+                id: `provision-${Date.now()}`,
+                type: "system_error",
+                message: msg,
+                details: payload as Record<string, unknown>,
+                created_at: new Date().toISOString(),
+                read: false,
+              });
+            }
+          } else if (type === "session_complete") {
+            setGenerationProgress(null);
+            setCycleProgress(null);
+            setActiveNode(null);
+          } else if (type === "generation_start") {
+            setGenerationProgress({
+              generation: (payload.generation as number) ?? 1,
+              maxGenerations: (payload.max_generations as number) ?? (payload.maxGenerations as number) ?? 1,
+              lessonsCount: (payload.lessons_count as number) ?? (payload.lessonsCount as number) ?? 0,
+              startedAt: Date.now(),
+              outcome: null,
+              finalState: null,
+            });
+          } else if (type === "generation_end") {
+            const current = useWsStore.getState().generationProgress;
+            if (current) {
+              setGenerationProgress({
+                ...current,
+                outcome: (payload.outcome as string) ?? "unknown",
+                finalState: (payload.final_state as Record<string, unknown>) ?? (payload.finalState as Record<string, unknown>) ?? null,
+              });
+            }
+          } else if (type === "cycle_start") {
+            setCycleProgress({
+              cycle: (payload.cycle as number) ?? 1,
+              maxCycles: (payload.max_cycles as number) ?? (payload.maxCycles as number) ?? 1,
+              startedAt: Date.now(),
             });
           } else if (type === "telemetry" && payload.payload) {
             const telemetryPayload = payload.payload as Record<string, unknown>;
@@ -148,7 +258,31 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
                 addTokenUsage(input, output, cached);
               }
               setModel(model);
+            } else if (telemetryPayload.event === "REASONING") {
+              const taskId = (telemetryPayload.task_id as string) || "";
+              const botId = (telemetryPayload.bot_id as string) || "";
+              const reasoning = (telemetryPayload.reasoning as string) || "";
+              if (taskId && reasoning) {
+                setReasoning(taskId, botId, reasoning);
+              }
+            } else if (telemetryPayload.event === "STREAM_CHUNK") {
+              const botId = (telemetryPayload.bot_id as string) || "";
+              const chunk = (telemetryPayload.chunk as string) || "";
+              if (botId && chunk) {
+                appendStreamChunk(botId, chunk);
+              }
             }
+          } else if (type === "model_updated" || type === "model_state") {
+            setModelConfig({
+              defaultModel: (payload.default_model as string) ?? "",
+              agentModels: (payload.agent_models as Record<string, string>) ?? {},
+              fallbackChain: (payload.fallback_chain as string[]) ?? [],
+              availableModels: (payload.available_models as string[]) ?? [],
+              aliases: (payload.aliases as Record<string, string>) ?? {},
+              allowlist: (payload.allowlist as string[]) ?? [],
+            });
+          } else if (type === "openclaw_log" && payload.entry) {
+            pushOpenClawLog(payload.entry as OpenClawLogEntry);
           } else if (type === "terminal_out" && payload.payload) {
             const terminalPayload = payload.payload as { data?: string };
             if (terminalPayload.data) {
@@ -209,6 +343,14 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     addCompletedNode,
     addTokenUsage,
     setModel,
+    pushNodeEvent,
+    setGenerationProgress,
+    setCycleProgress,
+    setModelConfig,
+    setReasoning,
+    pushOpenClawLog,
+    appendStreamChunk,
+    setServerStartTs,
   ]);
 
   return <>{children}</>;

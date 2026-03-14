@@ -18,7 +18,7 @@ import { CoordinatorAgent } from "../agents/coordinator.js";
 import { createWorkerBots, createWorkerExecuteNode } from "../agents/worker-bot.js";
 import { getFirstTaskNeedingApproval, createApprovalNode, createHumanApprovalNode } from "../agents/approval.js";
 import type { ApprovalProvider } from "../agents/approval.js";
-import { UniversalOpenClawAdapter } from "../interfaces/worker-adapter.js";
+import { UniversalOpenClawAdapter } from "../adapters/worker-adapter.js";
 import { resolveModelForAgent } from "./model-config.js";
 import { logger, isDebugMode } from "./logger.js";
 import { createSprintPlanningNode } from "../agents/planning.js";
@@ -88,6 +88,13 @@ export class TeamOrchestration {
   private sessionTimeoutMs: number = 0;
   private sessionMaxRuns: number = 0;
 
+  /** Configure session limits without starting a run/stream. */
+  configureSession(opts: { maxRuns?: number; timeoutMinutes?: number }): void {
+    this.sessionStartTime = Date.now();
+    this.sessionTimeoutMs = (opts.timeoutMinutes ?? 0) * 60 * 1000;
+    this.sessionMaxRuns = opts.maxRuns ?? 0;
+  }
+
   constructor(options: {
     team?: BotDefinition[];
     teamTemplateId?: string;
@@ -96,8 +103,9 @@ export class TeamOrchestration {
     workspacePath?: string;
     autoApprove?: boolean;
     vectorMemory?: VectorMemory;
+    signal?: AbortSignal;
   } = {}) {
-    const { team, teamTemplateId = "game_dev", workerUrls = {}, approvalProvider = null, workspacePath, autoApprove = false, vectorMemory } = options;
+    const { team, teamTemplateId = "game_dev", workerUrls = {}, approvalProvider = null, workspacePath, autoApprove = false, vectorMemory, signal } = options;
     this.team = team ?? buildTeamFromTemplate(teamTemplateId);
     this.workerBots = createWorkerBots(this.team, workerUrls, workspacePath);
     const sharedLlmAdapter =
@@ -113,9 +121,9 @@ export class TeamOrchestration {
     const workerNode = createWorkerExecuteNode(this.workerBots, this.team);
     const approvalNode = createApprovalNode(approvalProvider);
     const humanApprovalNode = createHumanApprovalNode(autoApprove);
-    const sprintPlanningNode = createSprintPlanningNode(workspacePath ?? "", sharedLlmAdapter);
-    const systemDesignNode = createSystemDesignNode(workspacePath ?? "", sharedLlmAdapter);
-    const rfcNode = createRFCNode(workspacePath ?? "", this.team, sharedLlmAdapter);
+    const sprintPlanningNode = createSprintPlanningNode(workspacePath ?? "", sharedLlmAdapter, signal);
+    const systemDesignNode = createSystemDesignNode(workspacePath ?? "", sharedLlmAdapter, signal);
+    const rfcNode = createRFCNode(workspacePath ?? "", this.team, sharedLlmAdapter, signal);
     const memoryRetrievalNode = vectorMemory 
       ? createMemoryRetrievalNode(vectorMemory)
       : createMemoryRetrievalNode({} as VectorMemory);
@@ -142,7 +150,7 @@ export class TeamOrchestration {
     const telemetrySystemDesignNode = wrapWithTelemetry("system_design", systemDesignNode);
     const telemetryRfcNode = wrapWithTelemetry("rfc_phase", rfcNode);
     const telemetryMemoryRetrievalNode = wrapWithTelemetry("memory_retrieval", memoryRetrievalNode);
-    const telemetryCoordinatorNode = wrapWithTelemetry("coordinator", (s) => this.coordinator.coordinateNode(s));
+    const telemetryCoordinatorNode = wrapWithTelemetry("coordinator", (s) => this.coordinator.coordinateNode(s, signal));
 
     const workflow = new StateGraph(GameStateAnnotation)
       .addNode("memory_retrieval", telemetryMemoryRetrievalNode)
@@ -169,9 +177,7 @@ export class TeamOrchestration {
         
         if (totalTasks > 0 && !alreadyReported && (completedTasks / totalTasks) >= 0.5) {
           const summary = generateMidSprintSummary(s);
-          const currentMessages = [...(s.messages ?? [])];
-          currentMessages.push(summary);
-          updates.messages = currentMessages;
+            updates.messages = [summary];
           updates.mid_sprint_reported = true;
         }
         
@@ -354,6 +360,7 @@ export class TeamOrchestration {
   async *stream(options: {
     userGoal?: string | null;
     initialTasks?: Array<{ assigned_to?: string; description?: string; priority?: string }>;
+    ancestralLessons?: string[];
     projectContext?: string;
     maxRuns?: number;
     timeoutMinutes?: number;
@@ -415,6 +422,7 @@ export function createTeamOrchestration(options: {
   workspacePath?: string;
   autoApprove?: boolean;
   vectorMemory?: VectorMemory;
+  signal?: AbortSignal;
 } = {}): TeamOrchestration {
   return new TeamOrchestration(options);
 }

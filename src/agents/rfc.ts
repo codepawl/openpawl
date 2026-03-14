@@ -5,11 +5,11 @@
 
 import type { GraphState } from "../core/graph-state.js";
 import type { BotDefinition } from "../core/bot-definitions.js";
-import type { WorkerAdapter } from "../interfaces/worker-adapter.js";
+import type { WorkerAdapter } from "../adapters/worker-adapter.js";
 import { CONFIG } from "../core/config.js";
 import { logger, isDebugMode } from "../core/logger.js";
 import { parseLlmJson } from "../utils/jsonExtractor.js";
-import { UniversalOpenClawAdapter } from "../interfaces/worker-adapter.js";
+import { UniversalOpenClawAdapter } from "../adapters/worker-adapter.js";
 import { resolveModelForAgent } from "../core/model-config.js";
 import { writeTextFile, readTextFile } from "../core/workspace-fs.js";
 import { getCanvasTelemetry } from "../core/canvas-telemetry.js";
@@ -39,7 +39,7 @@ export class RFCNode {
   private readonly llmAdapter: WorkerAdapter;
   private readonly workspacePath: string;
   private readonly team: BotDefinition[];
-  private static readonly RFC_TIMEOUT_MS = 45_000;
+  private static readonly RFC_TIMEOUT_MS = CONFIG.llmTimeoutMs || 120_000;
 
   constructor(
     options: { llmAdapter?: WorkerAdapter; workspacePath?: string; team?: BotDefinition[] } = {}
@@ -57,7 +57,7 @@ export class RFCNode {
     log(`📝 RFCNode initialized (workspace: ${this.workspacePath})`);
   }
 
-  async processRFCPhase(state: GraphState): Promise<Partial<GraphState>> {
+  async processRFCPhase(state: GraphState, signal?: AbortSignal): Promise<Partial<GraphState>> {
     const taskQueue = (state.task_queue ?? []) as Record<string, unknown>[];
     const messages: string[] = [];
     
@@ -97,7 +97,8 @@ export class RFCNode {
           description,
           makerId,
           reviewerId,
-          (task.complexity as string) || "HIGH"
+          (task.complexity as string) || "HIGH",
+          signal
         );
 
         await this.appendRfcToLog(rfcEntry);
@@ -184,7 +185,8 @@ export class RFCNode {
     description: string,
     makerId: string,
     reviewerId: string,
-    complexity: string
+    complexity: string,
+    signal?: AbortSignal
   ): Promise<RFCEntry> {
     const prompt = `You are a Software Engineer (Maker) creating an RFC for this task.
 
@@ -216,7 +218,7 @@ Output ONLY a JSON object:
         description: prompt,
         priority: "HIGH",
         estimated_cost: 0,
-      }),
+      }, { signal }),
       new Promise<never>((_, reject) =>
         setTimeout(
           () => reject(new Error("RFC creation timed out")),
@@ -358,8 +360,9 @@ ${entry.fileStructure}
 export function createRFCNode(
   workspacePath: string,
   team: BotDefinition[],
-  llmAdapter?: WorkerAdapter
+  llmAdapter?: WorkerAdapter,
+  signal?: AbortSignal
 ): (state: GraphState) => Promise<Partial<GraphState>> {
   const node = new RFCNode({ llmAdapter, workspacePath, team });
-  return (state: GraphState) => node.processRFCPhase(state);
+  return (state: GraphState) => node.processRFCPhase(state, signal);
 }

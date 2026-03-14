@@ -25,6 +25,8 @@ import {
     type TeamClawGlobalConfig,
 } from "../core/global-config.js";
 import { clearTeamConfigCache, loadTeamConfig } from "../core/team-config.js";
+import { modelManagementMenu } from "./config/model-menu.js";
+import { advancedSettingsMenu, type AdvancedState } from "./config/advanced-menu.js";
 
 type MemoryBackend = "lancedb" | "local_json";
 type LoggingLevel = "info" | "verbose";
@@ -41,6 +43,11 @@ interface DashboardState {
     workers: Record<string, string>;
     webPort: number;
     loggingLevel: LoggingLevel;
+    creativity: number;
+    maxCycles: number;
+    webhookOnTaskComplete: string;
+    webhookOnCycleEnd: string;
+    webhookSecret: string;
 }
 
 function maskSecret(value: string): string {
@@ -181,6 +188,32 @@ async function loadDashboardState(): Promise<DashboardState> {
     const workers = parsed?.workers ?? {};
     const roster = parsed?.roster ?? [];
 
+    const globalRaw = globalCfg as unknown as Record<string, unknown>;
+
+    const creativityRaw = data.creativity ?? globalRaw.creativity;
+    const creativity = typeof creativityRaw === "number" ? creativityRaw : 0.5;
+
+    const maxCyclesRaw = data.max_cycles ?? globalRaw.maxCycles;
+    const maxCycles = typeof maxCyclesRaw === "number" ? maxCyclesRaw : 10;
+
+    const webhookOnTaskComplete =
+        (typeof globalRaw.webhookOnTaskComplete === "string"
+            ? (globalRaw.webhookOnTaskComplete as string).trim()
+            : "") ||
+        (typeof data.webhook_on_task_complete === "string" ? data.webhook_on_task_complete : "");
+
+    const webhookOnCycleEnd =
+        (typeof globalRaw.webhookOnCycleEnd === "string"
+            ? (globalRaw.webhookOnCycleEnd as string).trim()
+            : "") ||
+        (typeof data.webhook_on_cycle_end === "string" ? data.webhook_on_cycle_end : "");
+
+    const webhookSecret =
+        (typeof globalRaw.webhookSecret === "string"
+            ? (globalRaw.webhookSecret as string).trim()
+            : "") ||
+        (typeof data.webhook_secret === "string" ? data.webhook_secret : "");
+
     return {
         openclawWorkerUrl,
         openclawToken: token,
@@ -192,6 +225,11 @@ async function loadDashboardState(): Promise<DashboardState> {
         workers,
         webPort,
         loggingLevel,
+        creativity,
+        maxCycles,
+        webhookOnTaskComplete,
+        webhookOnCycleEnd,
+        webhookSecret,
     };
 }
 
@@ -619,7 +657,12 @@ function saveState(state: DashboardState): void {
         chatEndpoint: state.openclawChatEndpoint,
         model: state.openclawModel,
         dashboardPort: state.webPort,
-    });
+        ...({
+            webhookOnTaskComplete: state.webhookOnTaskComplete || undefined,
+            webhookOnCycleEnd: state.webhookOnCycleEnd || undefined,
+            webhookSecret: state.webhookSecret || undefined,
+        }),
+    } as unknown as TeamClawGlobalConfig);
 
     // Update project config (team + project-specific settings)
     const cfg = readTeamclawConfig();
@@ -634,6 +677,8 @@ function saveState(state: DashboardState): void {
         web_port: state.webPort,
         roster: state.roster,
         workers: state.workers,
+        creativity: state.creativity,
+        max_cycles: state.maxCycles,
     } as Record<string, unknown>;
     writeTeamclawConfig(cfg.path, next);
     clearTeamConfigCache();
@@ -651,16 +696,25 @@ export async function runConfigDashboard(): Promise<void> {
                 message: "Main Menu",
                 options: [
                     { value: "openclaw", label: "🔌 OpenClaw & LLM Settings" },
+                    { value: "models", label: "🧩 Model Management" },
                     { value: "memory", label: "🧠 Memory & Database" },
                     { value: "team", label: "🤖 Team Roster & Workers" },
+                    { value: "advanced", label: "🔧 Advanced Settings" },
                     { value: "system", label: "⚙️ System Preferences" },
                     { value: "save", label: "💾 Save & Exit" },
                 ],
             }),
-        ) as "openclaw" | "memory" | "team" | "system" | "save";
+        ) as "openclaw" | "models" | "memory" | "team" | "advanced" | "system" | "save";
 
         if (choice === "openclaw") {
             await openClawMenu(state);
+            continue;
+        }
+        if (choice === "models") {
+            await modelManagementMenu();
+            // Refresh state from disk — model menu persists changes directly
+            const refreshedCfg = readGlobalConfigWithDefaults();
+            state.openclawModel = String(refreshedCfg.model || "") || state.openclawModel;
             continue;
         }
         if (choice === "memory") {
@@ -669,6 +723,22 @@ export async function runConfigDashboard(): Promise<void> {
         }
         if (choice === "team") {
             await teamMenu(state);
+            continue;
+        }
+        if (choice === "advanced") {
+            const advState: AdvancedState = {
+                creativity: state.creativity,
+                maxCycles: state.maxCycles,
+                webhookOnTaskComplete: state.webhookOnTaskComplete,
+                webhookOnCycleEnd: state.webhookOnCycleEnd,
+                webhookSecret: state.webhookSecret,
+            };
+            await advancedSettingsMenu(advState);
+            state.creativity = advState.creativity;
+            state.maxCycles = advState.maxCycles;
+            state.webhookOnTaskComplete = advState.webhookOnTaskComplete;
+            state.webhookOnCycleEnd = advState.webhookOnCycleEnd;
+            state.webhookSecret = advState.webhookSecret;
             continue;
         }
         if (choice === "system") {

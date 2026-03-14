@@ -17,19 +17,12 @@ import {
   getModelConfig,
   listAvailableModels,
   resolveModelForAgent,
-  setAgentModel,
-  setDefaultModel,
-  resetAgentModels,
-  setConfigAgentModels,
-  clearModelConfigCache,
 } from "../core/model-config.js";
-import { setOpenClawModel } from "../core/config.js";
 import {
-  readGlobalConfig,
-  writeGlobalConfig,
-  type TeamClawGlobalConfig,
-  buildDefaultGlobalConfig,
-} from "../core/global-config.js";
+  persistDefaultModel,
+  persistAgentModel,
+  resetAllModelOverrides,
+} from "../core/model-operations.js";
 
 const KNOWN_AGENT_ROLES = [
   "coordinator",
@@ -42,6 +35,7 @@ const KNOWN_AGENT_ROLES = [
 ];
 
 export async function runModelCommand(args: string[]): Promise<void> {
+  logger.warn(pc.yellow("Note: teamclaw model is moving into teamclaw config"));
   const sub = args[0];
 
   if (!sub) {
@@ -261,53 +255,6 @@ async function runModelSet(args: string[]): Promise<void> {
 }
 
 function runModelReset(): void {
-  resetAgentModels();
-
-  // Clear persisted agent models from global config
-  const existing = readGlobalConfig() ?? buildDefaultGlobalConfig();
-  if (existing.agentModels && Object.keys(existing.agentModels).length > 0) {
-    const updated = { ...existing };
-    delete updated.agentModels;
-    writeGlobalConfig(updated);
-  }
-
-  clearModelConfigCache();
+  resetAllModelOverrides();
   logger.success("All model overrides cleared.");
-}
-
-function persistDefaultModel(model: string): void {
-  // Update runtime
-  setDefaultModel(model);
-  setOpenClawModel(model);
-
-  // Persist to global config
-  const existing = readGlobalConfig() ?? buildDefaultGlobalConfig();
-  const updated: TeamClawGlobalConfig = { ...existing, model };
-  writeGlobalConfig(updated);
-}
-
-function persistAgentModel(role: string, model: string): void {
-  const normalizedRole = role.trim().toLowerCase();
-
-  // Update runtime
-  setAgentModel(normalizedRole, model);
-
-  // Persist to global config
-  const existing = readGlobalConfig() ?? buildDefaultGlobalConfig();
-  const agentModels = { ...(existing.agentModels ?? {}) };
-
-  if (model.trim()) {
-    agentModels[normalizedRole] = model.trim();
-  } else {
-    delete agentModels[normalizedRole];
-  }
-
-  const updated: TeamClawGlobalConfig = {
-    ...existing,
-    agentModels: Object.keys(agentModels).length > 0 ? agentModels : undefined,
-  };
-  writeGlobalConfig(updated);
-
-  // Refresh config cache
-  setConfigAgentModels(agentModels);
 }

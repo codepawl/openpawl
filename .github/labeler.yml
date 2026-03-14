@@ -1,0 +1,47 @@
+# Labels applied by .github/workflows/pr-labeler.yml based on changed paths
+
+"core":
+  - changed-files:
+      - any-glob-to-any-file: "src/core/**"
+
+"agents":
+  - changed-files:
+      - any-glob-to-any-file: "src/agents/**"
+
+"web":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "src/web/**"
+
+"cli":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "src/cli.ts"
+          - "src/commands/**"
+
+"ci":
+  - changed-files:
+      - any-glob-to-any-file: ".github/**"
+
+"tests":
+  - changed-files:
+      - any-glob-to-any-file: "tests/**"
+
+"docs":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "docs/**"
+          - "*.md"
+
+"dependencies":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "package.json"
+          - "pnpm-lock.yaml"
+
+"config":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "tsconfig.json"
+          - "tsup.config.*"
+          - ".eslint*"

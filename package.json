@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsup --watch",
-    "build": "tsup",
+    "build": "tsup && pnpm --dir src/web/client build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -21,6 +21,7 @@
     "@lancedb/lancedb": "^0.17.0",
     "@langchain/langgraph": "^0.2.74",
     "@langchain/langgraph-checkpoint": "^0.0.17",
+    "bootstrap-icons": "^1.13.1",
     "fastify": "^5.8.2",
     "picocolors": "^1.1.1",
     "ws": "^8.19.0",
@@ -28,6 +29,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.19.15",
+    "@types/ws": "^8.18.1",
     "@typescript-eslint/eslint-plugin": "^8.56.1",
     "eslint": "^9.39.4",
     "eslint-plugin-react-hooks": "^5.2.0",

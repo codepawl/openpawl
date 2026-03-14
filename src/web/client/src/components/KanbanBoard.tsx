@@ -5,11 +5,11 @@ import { KanbanColumn } from "./KanbanColumn";
 const COLUMNS: { id: string; title: string; statuses: string[] }[] = [
   { id: "backlog", title: "Backlog", statuses: ["backlog"] },
   { id: "todo", title: "To Do", statuses: ["pending"] },
-  { id: "in_progress", title: "In Progress", statuses: ["in_progress"] },
+  { id: "in_progress", title: "In Progress", statuses: ["in_progress", "reviewing", "needs_rework", "rfc_pending"] },
   {
     id: "needs_approval",
     title: "Needs Approval",
-    statuses: ["needs_approval", "TIMEOUT_WARNING"],
+    statuses: ["needs_approval", "waiting_for_human", "TIMEOUT_WARNING"],
   },
   { id: "done", title: "Done", statuses: ["completed", "failed"] },
 ];
@@ -45,22 +45,19 @@ export function KanbanBoard() {
 
   if (isLoading && task_queue.length === 0) {
     return (
-      <div className="flex flex-col gap-4">
-        <h2 className="text-lg font-semibold text-gray-700 dark:text-gray-200">Task Queue</h2>
-        <div className="flex gap-4 overflow-x-auto pb-4">
-          {COLUMNS.map((col) => (
-            <div
-              key={col.id}
-              className="flex-shrink-0 w-64 bg-gray-100 dark:bg-gray-700 rounded-lg p-3 animate-pulse"
-            >
-              <div className="h-5 w-24 bg-gray-300 dark:bg-gray-600 rounded mb-3"></div>
-              <div className="space-y-2">
-                <div className="h-16 bg-gray-200 dark:bg-gray-600 rounded"></div>
-                <div className="h-16 bg-gray-200 dark:bg-gray-600 rounded"></div>
-              </div>
+      <div className="flex gap-3 overflow-x-auto pb-4">
+        {COLUMNS.map((col) => (
+          <div
+            key={col.id}
+            className="min-w-[260px] flex-1 rounded-xl bg-stone-100 dark:bg-stone-800 p-3 animate-pulse"
+          >
+            <div className="h-5 w-24 bg-stone-300 dark:bg-stone-700 rounded-lg mb-3"></div>
+            <div className="space-y-2">
+              <div className="h-16 bg-stone-200 dark:bg-stone-700 rounded-xl"></div>
+              <div className="h-16 bg-stone-200 dark:bg-stone-700 rounded-xl"></div>
             </div>
-          ))}
-        </div>
+          </div>
+        ))}
       </div>
     );
   }
@@ -93,20 +90,17 @@ export function KanbanBoard() {
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      <h2 className="text-lg font-semibold text-gray-700 dark:text-gray-200">Task Queue</h2>
-      <DndContext onDragEnd={handleDragEnd}>
-        <div className="flex gap-4 overflow-x-auto pb-4">
-          {tasksByColumn.map((col) => (
-            <KanbanColumn
-              key={col.id}
-              id={col.id}
-              title={col.title}
-              tasks={col.tasks}
-            />
-          ))}
-        </div>
-      </DndContext>
-    </div>
+    <DndContext onDragEnd={handleDragEnd}>
+      <div className="flex gap-3 overflow-x-auto pb-4">
+        {tasksByColumn.map((col) => (
+          <KanbanColumn
+            key={col.id}
+            id={col.id}
+            title={col.title}
+            tasks={col.tasks}
+          />
+        ))}
+      </div>
+    </DndContext>
   );
 }

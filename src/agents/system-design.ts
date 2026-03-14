@@ -4,10 +4,10 @@
  */
 
 import type { GraphState } from "../core/graph-state.js";
-import type { WorkerAdapter } from "../interfaces/worker-adapter.js";
+import type { WorkerAdapter } from "../adapters/worker-adapter.js";
 import { CONFIG } from "../core/config.js";
 import { logger, isDebugMode } from "../core/logger.js";
-import { UniversalOpenClawAdapter } from "../interfaces/worker-adapter.js";
+import { UniversalOpenClawAdapter } from "../adapters/worker-adapter.js";
 import { resolveModelForAgent } from "../core/model-config.js";
 import { ensureDir, writeTextFile } from "../core/workspace-fs.js";
 import { parseLlmJson } from "../utils/jsonExtractor.js";
@@ -51,7 +51,7 @@ Generate a JSON object with this exact structure:
 export class SystemDesignNode {
   private readonly llmAdapter: WorkerAdapter;
   private readonly workspacePath: string;
-  private static readonly DESIGN_TIMEOUT_MS = 60_000;
+  private static readonly DESIGN_TIMEOUT_MS = CONFIG.llmTimeoutMs || 120_000;
 
   constructor(options: { llmAdapter?: WorkerAdapter; workspacePath?: string } = {}) {
     this.llmAdapter =
@@ -66,7 +66,7 @@ export class SystemDesignNode {
     log(`🏗️ SystemDesignNode initialized (workspace: ${this.workspacePath})`);
   }
 
-  async processSystemDesign(state: GraphState): Promise<Partial<GraphState>> {
+  async processSystemDesign(state: GraphState, signal?: AbortSignal): Promise<Partial<GraphState>> {
     const userGoal = state.user_goal;
     const planningDoc = state.planning_document as string | undefined;
 
@@ -77,17 +77,17 @@ export class SystemDesignNode {
       };
     }
 
-    logger.info("🏗️ [Tech Lead] Designing system architecture...");
+    log("🏗️ [Tech Lead] Designing system architecture...");
 
     try {
-      const architecture = await this.generateArchitectureWithLlm(userGoal, planningDoc);
+      const architecture = await this.generateArchitectureWithLlm(userGoal, planningDoc, signal);
       await this.writeArchitectureDocument(architecture);
 
-      logger.success("✅ Architecture finalized at docs/ARCHITECTURE.md");
+      log("✅ Architecture finalized at docs/ARCHITECTURE.md");
 
       return {
         architecture_document: architecture,
-        messages: [...(state.messages ?? []), "🏗️ System architecture complete. See DOCS/ARCHITECTURE.md"],
+        messages: ["🏗️ System architecture complete. See DOCS/ARCHITECTURE.md"],
         last_action: "System design completed - architecture saved to docs/ARCHITECTURE.md",
         __node__: "system_design",
       };
@@ -100,7 +100,8 @@ export class SystemDesignNode {
 
   private async generateArchitectureWithLlm(
     goal: string,
-    planningDoc?: string
+    planningDoc?: string,
+    signal?: AbortSignal
   ): Promise<string> {
     const planningContent = planningDoc 
       ? `\n## Sprint Plan:\n${planningDoc.slice(0, 2000)}`
@@ -121,7 +122,7 @@ ${planningContent}
 
     return new Promise((resolve, reject) => {
       let resolved = false;
-      
+
       const timeoutId = setTimeout(() => {
         if (!resolved) {
           resolved = true;
@@ -129,13 +130,29 @@ ${planningContent}
         }
       }, SystemDesignNode.DESIGN_TIMEOUT_MS);
 
+      // Abort signal support
+      if (signal) {
+        if (signal.aborted) {
+          clearTimeout(timeoutId);
+          reject(new Error("Aborted"));
+          return;
+        }
+        signal.addEventListener("abort", () => {
+          if (!resolved) {
+            resolved = true;
+            clearTimeout(timeoutId);
+            reject(new Error("Aborted"));
+          }
+        }, { once: true });
+      }
+
       this.llmAdapter
         .executeTask({
           task_id: `design-${Date.now()}`,
           description: JSON.stringify(messages),
           priority: "HIGH",
           estimated_cost: 0,
-        })
+        }, { signal })
         .then((result) => {
           clearTimeout(timeoutId);
           if (!resolved) {
@@ -252,8 +269,9 @@ ${planningContent}
 
 export function createSystemDesignNode(
   workspacePath: string,
-  llmAdapter?: WorkerAdapter
+  llmAdapter?: WorkerAdapter,
+  signal?: AbortSignal
 ): (state: GraphState) => Promise<Partial<GraphState>> {
   const node = new SystemDesignNode({ llmAdapter, workspacePath });
-  return (state: GraphState) => node.processSystemDesign(state);
+  return (state: GraphState) => node.processSystemDesign(state, signal);
 }

@@ -13,12 +13,19 @@
 
 import { CONFIG } from "./config.js";
 import { readLocalOpenClawConfig } from "./discovery.js";
+import {
+  readGlobalConfig,
+  writeGlobalConfig,
+  buildDefaultGlobalConfig,
+} from "./global-config.js";
 
 export interface ModelConfig {
   defaultModel: string;
   agentModels: Record<string, string>;
   fallbackChain: string[];
   availableModels: string[];
+  aliases: Record<string, string>;
+  allowlist: string[];
 }
 
 // Runtime per-agent overrides (set via setAgentModel / CLI)
@@ -32,7 +39,17 @@ let openclawConfigCache: {
   primaryModel: string;
   fallbackChain: string[];
   availableModels: string[];
+  aliases: Record<string, string>;
 } | null = null;
+
+// Runtime aliases (user-defined + OpenClaw config)
+let runtimeAliases: Record<string, string> = {};
+
+// Runtime allowlist (empty = allow all)
+let runtimeAllowlist: string[] = [];
+
+// Runtime fallback chain override
+let runtimeFallbackChain: string[] | null = null;
 
 /**
  * Normalize an agent role for lookup.
@@ -80,16 +97,42 @@ function loadOpenClawConfig(): typeof openclawConfigCache {
       primaryModel: localCfg.model,
       fallbackChain: localCfg.fallbackModels,
       availableModels: localCfg.availableModels,
+      aliases: localCfg.aliases ?? {},
     };
   } else {
     openclawConfigCache = {
       primaryModel: "",
       fallbackChain: [],
       availableModels: [],
+      aliases: {},
     };
   }
 
+  // Merge OpenClaw aliases into runtime aliases (user-defined take precedence)
+  const merged = { ...(openclawConfigCache.aliases ?? {}), ...runtimeAliases };
+  runtimeAliases = merged;
+
   return openclawConfigCache;
+}
+
+/**
+ * Resolve alias: if modelOrAlias matches a known alias, return the target model.
+ */
+export function resolveAlias(modelOrAlias: string): string {
+  const trimmed = modelOrAlias.trim();
+  if (!trimmed) return trimmed;
+  // Load to ensure OpenClaw aliases are populated
+  loadOpenClawConfig();
+  return runtimeAliases[trimmed] ?? trimmed;
+}
+
+/**
+ * Check whether a model is allowed by the allowlist.
+ * Empty allowlist means all models are allowed.
+ */
+export function isModelAllowed(model: string): boolean {
+  if (runtimeAllowlist.length === 0) return true;
+  return runtimeAllowlist.includes(model.trim());
 }
 
 /**
@@ -98,31 +141,51 @@ function loadOpenClawConfig(): typeof openclawConfigCache {
 export function resolveModelForAgent(agentRole: string): string {
   const candidates = normalizeRole(agentRole);
 
+  let resolved = "";
+
   // Priority 1: Per-agent runtime override
   for (const role of candidates) {
     const runtime = runtimeAgentModels[role];
-    if (runtime) return runtime;
+    if (runtime) { resolved = runtime; break; }
   }
 
   // Priority 2: Per-agent config (teamclaw.config.json → agent_models)
-  const cfgModels = loadConfigAgentModels();
-  for (const role of candidates) {
-    const cfgModel = cfgModels[role];
-    if (cfgModel) return cfgModel;
+  if (!resolved) {
+    const cfgModels = loadConfigAgentModels();
+    for (const role of candidates) {
+      const cfgModel = cfgModels[role];
+      if (cfgModel) { resolved = cfgModel; break; }
+    }
   }
 
   // Priority 3: Global runtime model (CONFIG.openclawModel)
-  const globalModel = CONFIG.openclawModel?.trim();
-  if (globalModel) return globalModel;
-
-  // Priority 4 is already folded into CONFIG.openclawModel via global-config.ts
+  if (!resolved) {
+    const globalModel = CONFIG.openclawModel?.trim();
+    if (globalModel) resolved = globalModel;
+  }
 
   // Priority 5: OpenClaw primary model
-  const ocCfg = loadOpenClawConfig();
-  if (ocCfg?.primaryModel) return ocCfg.primaryModel;
+  if (!resolved) {
+    const ocCfg = loadOpenClawConfig();
+    if (ocCfg?.primaryModel) resolved = ocCfg.primaryModel;
+  }
 
-  // Priority 6 & 7: Auto-discovery handled at call site; return empty to let gateway decide
-  return "";
+  // Resolve aliases
+  if (resolved) {
+    resolved = resolveAlias(resolved);
+  }
+
+  // Validate against allowlist; if blocked, try fallback chain
+  if (resolved && !isModelAllowed(resolved)) {
+    const chain = getFallbackChain();
+    const allowed = chain.find((m) => isModelAllowed(resolveAlias(m)));
+    if (allowed) {
+      resolved = resolveAlias(allowed);
+    }
+    // If no fallback is allowed either, keep resolved (gateway may handle it)
+  }
+
+  return resolved;
 }
 
 /**
@@ -167,17 +230,63 @@ export function resetAgentModels(): void {
 }
 
 /**
+ * Set a model alias (user-defined).
+ */
+export function setAlias(alias: string, model: string): void {
+  runtimeAliases[alias.trim()] = model.trim();
+}
+
+/**
+ * Remove a model alias.
+ */
+export function removeAlias(alias: string): void {
+  delete runtimeAliases[alias.trim()];
+}
+
+/**
+ * Get all known aliases (OpenClaw + user-defined).
+ */
+export function getAliases(): Record<string, string> {
+  loadOpenClawConfig();
+  return { ...runtimeAliases };
+}
+
+/**
+ * Set the model allowlist. Empty array = allow all.
+ */
+export function setAllowlist(models: string[]): void {
+  runtimeAllowlist = models.filter(Boolean);
+}
+
+/**
+ * Get the current allowlist.
+ */
+export function getAllowlist(): string[] {
+  return [...runtimeAllowlist];
+}
+
+/**
+ * Set a runtime fallback chain override.
+ */
+export function setFallbackChain(models: string[]): void {
+  runtimeFallbackChain = models.filter(Boolean);
+}
+
+/**
  * Get the full model configuration snapshot.
  */
 export function getModelConfig(): ModelConfig {
   const ocCfg = loadOpenClawConfig();
   const cfgModels = loadConfigAgentModels();
+  const globalCfg = readGlobalConfig() ?? buildDefaultGlobalConfig();
 
   return {
     defaultModel: resolveModelForAgent("default"),
     agentModels: { ...cfgModels, ...runtimeAgentModels },
-    fallbackChain: ocCfg?.fallbackChain ?? [],
+    fallbackChain: runtimeFallbackChain ?? globalCfg.fallbackChain ?? ocCfg?.fallbackChain ?? [],
     availableModels: ocCfg?.availableModels ?? [],
+    aliases: { ...(ocCfg?.aliases ?? {}), ...(globalCfg.modelAliases ?? {}), ...runtimeAliases },
+    allowlist: runtimeAllowlist.length > 0 ? [...runtimeAllowlist] : [...(globalCfg.modelAllowlist ?? [])],
   };
 }
 
@@ -185,6 +294,13 @@ export function getModelConfig(): ModelConfig {
  * Get the fallback chain for retry logic.
  */
 export function getFallbackChain(): string[] {
+  if (runtimeFallbackChain && runtimeFallbackChain.length > 0) {
+    return runtimeFallbackChain;
+  }
+  const globalCfg = readGlobalConfig();
+  if (globalCfg?.fallbackChain && globalCfg.fallbackChain.length > 0) {
+    return globalCfg.fallbackChain;
+  }
   const ocCfg = loadOpenClawConfig();
   return ocCfg?.fallbackChain ?? [];
 }
@@ -274,4 +390,16 @@ async function discoverModelsFromApi(): Promise<string[]> {
 export function clearModelConfigCache(): void {
   configAgentModels = null;
   openclawConfigCache = null;
+
+  // Reload aliases/allowlist/fallback from global config
+  const globalCfg = readGlobalConfig();
+  if (globalCfg?.modelAliases) {
+    runtimeAliases = { ...globalCfg.modelAliases };
+  }
+  if (globalCfg?.modelAllowlist) {
+    runtimeAllowlist = [...globalCfg.modelAllowlist];
+  }
+  if (globalCfg?.fallbackChain) {
+    runtimeFallbackChain = [...globalCfg.fallbackChain];
+  }
 }

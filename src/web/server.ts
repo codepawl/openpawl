@@ -9,9 +9,7 @@ import FastifyStatic from "@fastify/static";
 import FastifyWebSocket from "@fastify/websocket";
 import WebSocket from "ws";
 import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { createTeamOrchestration } from "../core/simulation.js";
 import { buildTeamFromRoster, buildTeamFromTemplate } from "../core/team-templates.js";
 import type { ApprovalPending, ApprovalResponse } from "../agents/approval.js";
@@ -19,7 +17,6 @@ import {
   getWorkerUrlsForTeam,
   setSessionConfig,
   clearSessionConfig,
-  type SessionConfig,
 } from "../core/config.js";
 import { loadTeamConfig, clearTeamConfigCache } from "../core/team-config.js";
 import { writeFile } from "node:fs/promises";
@@ -39,70 +36,53 @@ import { ensureWorkspaceDir } from "../core/workspace-fs.js";
 import { addTerminalClient, removeTerminalClient, initTerminalBroadcast } from "../core/terminal-broadcast.js";
 import { log, note, spinner } from "@clack/prompts";
 import { findAvailablePort } from "../core/port.js";
-import { WsEventSchema } from "../interfaces/ws-events.js";
+import { WsEventSchema } from "../types/ws-events.js";
 import { humanResponseEmitter } from "../core/human-response-events.js";
 import { getDefaultGoal } from "../core/configManager.js";
+import { coordinatorEvents, type CoordinatorStep } from "../core/coordinator-events.js";
+import { workerEvents } from "../core/worker-events.js";
+import { openclawEvents, type OpenClawLogEntry } from "../core/openclaw-events.js";
+
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import {
+  clients,
+  currentSessionState,
+  broadcast,
+  updateSessionState,
+  sendStateSync,
+  cliCycles,
+  cliGenerations,
+  cliCreativity,
+  cliSessionMode,
+  cliSessionDuration,
+  getFullConfig,
+  applyConfigOverrides,
+  SERVER_START_TS,
+} from "./session-state.js";
+
+import { parseNodeEvent, buildWsValidationError, normalizeIncomingWsMessage } from "./node-events.js";
+import {
+  getModelConfig,
+  listAvailableModels,
+  setAgentModel,
+  setDefaultModel,
+  resolveAlias,
+  isModelAllowed,
+} from "../core/model-config.js";
+import {
+  persistDefaultModel,
+  persistAgentModel,
+} from "../core/model-operations.js";
+import { THREAD_REGISTRY, startTimeoutChecker } from "./timeout-checker.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
 const isProduction = process.env.NODE_ENV === "production";
-
-const clients = new Set<WebSocket>();
-
-interface SessionState {
-  activeNode: string | null;
-  cycle: number;
-  taskQueue: Record<string, unknown>[];
-  botStats: Record<string, Record<string, unknown>>;
-  isRunning: boolean;
-  generation: number;
-}
-
-let currentSessionState: SessionState = {
-  activeNode: null,
-  cycle: 0,
-  taskQueue: [],
-  botStats: {},
-  isRunning: false,
-  generation: 0,
-};
-
-function broadcast(event: object): void {
-  const data = JSON.stringify(event);
-  for (const client of clients) {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(data);
-    }
-  }
-}
-
-function updateSessionState(updates: Partial<SessionState>): void {
-  currentSessionState = { ...currentSessionState, ...updates };
-}
-
-function sendStateSync(socket: WebSocket): void {
-  socket.send(
-    JSON.stringify({
-      type: "state_sync",
-      state: {
-        activeNode: currentSessionState.activeNode,
-        cycle: currentSessionState.cycle,
-        taskQueue: currentSessionState.taskQueue,
-        botStats: currentSessionState.botStats,
-        isRunning: currentSessionState.isRunning,
-        generation: currentSessionState.generation,
-      },
-    })
-  );
-}
 
 function resolveClientDir(): string | null {
   const candidates = [
-    // Built runtime: dist/web/server.js -> dist/client
     path.join(__dirname, "..", "client"),
-    // Source runtime fallback: src/web/server.ts -> src/web/client/dist
     path.join(__dirname, "client", "dist"),
-    // Legacy fallback
     path.join(__dirname, "client"),
   ];
   for (const p of candidates) {
@@ -113,240 +93,10 @@ function resolveClientDir(): string | null {
   return null;
 }
 
-let cliCycles = CONFIG.maxCycles;
-let cliGenerations = CONFIG.maxRuns;
-let cliCreativity = CONFIG.creativity;
-
-function getFullConfig(): Record<string, number | string> {
-  return {
-    creativity: cliCreativity,
-    max_cycles: cliCycles,
-    max_generations: cliGenerations,
-    worker_url: CONFIG.openclawWorkerUrl || "",
-  };
-}
-
-function applyConfigOverrides(overrides: Partial<SessionConfig> & Record<string, unknown>): void {
-  if (typeof overrides.max_cycles === "number") cliCycles = overrides.max_cycles;
-  if (typeof overrides.max_generations === "number") cliGenerations = overrides.max_generations;
-  if (typeof overrides.creativity === "number")
-    cliCreativity = Math.max(0, Math.min(1, overrides.creativity));
-}
-
 interface SessionControl {
   speedFactor: number;
   paused: boolean;
   cancelled: boolean;
-}
-
-type ThreadRegistryEntry = {
-  orch: ReturnType<typeof createTeamOrchestration>;
-};
-
-const THREAD_REGISTRY = new Map<string, ThreadRegistryEntry>();
-let timeoutCheckerStarted = false;
-
-function startTimeoutChecker(): void {
-  if (timeoutCheckerStarted) return;
-  timeoutCheckerStarted = true;
-  const intervalMs = 10000;
-  setInterval(async () => {
-    if (THREAD_REGISTRY.size === 0) return;
-    for (const [threadId, entry] of THREAD_REGISTRY.entries()) {
-      try {
-        const config = { configurable: { thread_id: threadId } };
-        const snapshot = await entry.orch.graph.getState(config);
-        const values = (snapshot as { values?: Record<string, unknown> }).values ?? {};
-        const taskQueue = (values.task_queue ?? []) as Record<string, unknown>[];
-        if (!Array.isArray(taskQueue) || taskQueue.length === 0) continue;
-
-        const now = Date.now();
-        let updated = false;
-        const updatedQueue = taskQueue.map((task) => {
-          const status = task.status as string | undefined;
-          if (status !== "in_progress") return task;
-          const startedAtRaw = task.in_progress_at as string | null | undefined;
-          const startedAtMs =
-            typeof startedAtRaw === "string" && startedAtRaw
-              ? Date.parse(startedAtRaw)
-              : Number.NaN;
-          const rawTimebox = Number(task.timebox_minutes ?? 25);
-          const timeboxMinutes =
-            Number.isFinite(rawTimebox) && rawTimebox >= 1 ? rawTimebox : 25;
-          if (!Number.isFinite(startedAtMs)) return task;
-          const limitMs = timeboxMinutes * 60_000;
-          const elapsedMs = now - startedAtMs;
-          if (elapsedMs >= limitMs && (task.status as string) !== "TIMEOUT_WARNING") {
-            updated = true;
-            return {
-              ...task,
-              status: "TIMEOUT_WARNING",
-            };
-          }
-          return task;
-        });
-
-        if (!updated) continue;
-
-        await entry.orch.graph.updateState(config, { task_queue: updatedQueue });
-        broadcast({
-          type: "task_queue_updated",
-          task_queue: updatedQueue,
-        });
-        broadcast({
-          type: "timeout_alert",
-          task_queue: updatedQueue,
-        });
-      } catch {
-        // Best-effort timeout checking; ignore errors.
-      }
-    }
-  }, intervalMs);
-}
-
-function parseNodeEvent(
-  nodeName: string,
-  state: Record<string, unknown>
-): Record<string, unknown> {
-  const botStats = (state.bot_stats ?? {}) as Record<string, Record<string, unknown>>;
-  const totalDone = Object.values(botStats).reduce(
-    (s, x) => s + ((x?.tasks_completed as number) ?? 0),
-    0
-  );
-  const totalFailed = Object.values(botStats).reduce(
-    (s, x) => s + ((x?.tasks_failed as number) ?? 0),
-    0
-  );
-  const snapshot = {
-    cycle: state.cycle_count ?? 0,
-    tasks_completed: totalDone,
-    tasks_failed: totalFailed,
-    last_quality_score: state.last_quality_score ?? 0,
-    agent_messages: state.agent_messages ?? [],
-    task_queue: state.task_queue ?? [],
-    bot_stats: state.bot_stats ?? {},
-  };
-
-  let data: Record<string, unknown> = { message: `${nodeName} executed` };
-
-  if (nodeName === "coordinator") {
-    const taskQueue = (state.task_queue ?? []) as Record<string, unknown>[];
-    const pending = taskQueue.filter((t) => t.status === "pending").length;
-    data = {
-      message: `Coordinator processed, ${pending} tasks pending`,
-      pending_count: pending,
-    };
-  } else if (nodeName === "worker_execute") {
-    const taskQueue = (state.task_queue ?? []) as Record<string, unknown>[];
-    const lastTask =
-      [...taskQueue].reverse().find((t) =>
-        ["completed", "failed"].includes((t.status as string) ?? "")
-      ) ?? {};
-    const result = (lastTask.result ?? {}) as Record<string, unknown>;
-    data = {
-      task_id: lastTask.task_id ?? "",
-      success: result.success ?? false,
-      quality_score: result.quality_score ?? 0,
-      assigned_to: lastTask.assigned_to ?? "",
-      output: result.output ?? "",
-      description: lastTask.description ?? "",
-      message: result.success ? "✅ Task completed" : "❌ Task completed",
-    };
-  } else if (nodeName === "approval") {
-    const pending = state.approval_pending as Record<string, unknown> | null;
-    const resp = state.approval_response as Record<string, unknown> | null;
-    data = {
-      message: resp?.action ? `Approval: ${resp.action}` : "Awaiting approval",
-      approval_pending: pending,
-      approval_response: resp,
-    };
-  } else if (nodeName === "increment_cycle") {
-    data = {
-      cycle: state.cycle_count ?? 0,
-      message: `Cycle ${state.cycle_count ?? 0} completed`,
-    };
-  }
-
-  const botActions = getBotActions(nodeName, data);
-  return {
-    node: nodeName,
-    data,
-    state: snapshot,
-    bot_actions: botActions,
-    timestamp: new Date().toTimeString().slice(0, 8),
-  };
-}
-
-function getBotActions(nodeName: string, data: Record<string, unknown>): unknown[] {
-  if (nodeName === "coordinator") {
-    return [{ bot: "ceo", action: "walk_to", target: "meeting_table", then: "thinking" }];
-  }
-  if (nodeName === "worker_execute") {
-    const success = data.success ?? false;
-    const actions: unknown[] = [
-      { bot: "sparki", action: "walk_to", target: "desk", then: "working" },
-      { bot: "ceo", action: "idle", floor: 3 },
-    ];
-    if (success) {
-      actions.push({ bot: "sparki", action: "celebrate", delay: 1.5 });
-    } else {
-      actions.push({ bot: "sparki", action: "react", emotion: "worried", delay: 1.5 });
-    }
-    return actions;
-  }
-  if (nodeName === "approval") {
-    return [{ bot: "ceo", action: "wait", target: "approval" }];
-  }
-  if (nodeName === "increment_cycle") {
-    return [
-      { bot: "ceo", action: "return_to_office" },
-      { bot: "sparki", action: "idle", floor: 2 },
-    ];
-  }
-  return [];
-}
-
-function buildWsValidationError(
-  detail: string,
-  issues: unknown = null,
-): { type: "system"; payload: Record<string, unknown> } {
-  return {
-    type: "system",
-    payload: {
-      error: true,
-      code: "INVALID_WS_PAYLOAD",
-      message: detail,
-      issues,
-      timestamp: new Date().toISOString(),
-    },
-  };
-}
-
-function normalizeIncomingWsMessage(value: unknown): unknown {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
-
-  const raw = value as Record<string, unknown>;
-  const eventType = typeof raw.type === "string" ? raw.type : "";
-  const alreadyEnvelope =
-    ["telemetry", "terminal_out", "worker_status", "system"].includes(eventType) &&
-    Object.prototype.hasOwnProperty.call(raw, "payload");
-  if (alreadyEnvelope) return value;
-
-  if (typeof raw.command === "string") {
-    return {
-      type: "system",
-      payload: raw,
-    };
-  }
-
-  if (raw.type === "UPDATE_TASK") {
-    return {
-      type: "worker_status",
-      payload: raw,
-    };
-  }
-
-  return value;
 }
 
 export async function runWeb(args: string[]): Promise<void> {
@@ -358,6 +108,30 @@ export async function runWeb(args: string[]): Promise<void> {
 
   initTerminalBroadcast();
   startTimeoutChecker();
+
+  coordinatorEvents.on("progress", (data: CoordinatorStep) => {
+    broadcast({
+      type: "node_event",
+      node: "coordinator",
+      data: { message: data.detail, step: data.step },
+      state: {
+        cycle: currentSessionState.cycle,
+        task_queue: currentSessionState.taskQueue,
+        bot_stats: currentSessionState.botStats,
+      },
+      timestamp: new Date().toTimeString().slice(0, 8),
+    });
+  });
+
+  workerEvents.on("progress", (data: { taskQueue: Record<string, unknown>[] }) => {
+    broadcast({ type: "task_queue_updated", task_queue: data.taskQueue });
+    updateSessionState({ taskQueue: data.taskQueue });
+  });
+
+  openclawEvents.on("log", (entry: OpenClawLogEntry) => {
+    broadcast({ type: "openclaw_log", entry });
+  });
+
   const result = await validateStartup({ templateId: "game_dev" });
   if (!result.ok) {
     if (s) {
@@ -405,6 +179,9 @@ export async function runWeb(args: string[]): Promise<void> {
     );
   }
 
+  // ---------------------------------------------------------------------------
+  // REST endpoints
+  // ---------------------------------------------------------------------------
   fastify.get("/api/config", async () => {
     const runtime = getFullConfig();
     const teamConfig = await loadTeamConfig();
@@ -439,15 +216,43 @@ export async function runWeb(args: string[]): Promise<void> {
     const config: Record<string, unknown> = roster ? { roster, goal } : { template, goal };
     if (workerUrl) config.worker_url = workerUrl;
     if (workers && Object.keys(workers).length > 0) config.workers = workers;
+    const creativityVal = typeof body.creativity === "number" ? body.creativity : undefined;
+    const maxCyclesVal = typeof body.max_cycles === "number" ? body.max_cycles : undefined;
+    const maxGensVal = typeof body.max_generations === "number" ? body.max_generations : undefined;
+    const sessionModeVal = body.session_mode === "runs" || body.session_mode === "time" ? body.session_mode : undefined;
+    const sessionDurationVal = typeof body.session_duration === "number" ? body.session_duration : undefined;
+    if (creativityVal !== undefined) config.creativity = Math.max(0, Math.min(1, creativityVal));
+    if (maxCyclesVal !== undefined) config.max_cycles = Math.max(1, Math.floor(maxCyclesVal));
+    if (maxGensVal !== undefined) config.max_generations = Math.max(1, Math.floor(maxGensVal));
+    if (sessionModeVal !== undefined) config.session_mode = sessionModeVal;
+    if (sessionDurationVal !== undefined) config.session_duration = Math.max(1, Math.floor(sessionDurationVal));
     try {
       await writeFile(configPath, JSON.stringify(config, null, 2));
       clearTeamConfigCache();
+      applyConfigOverrides({ creativity: creativityVal, max_cycles: maxCyclesVal, max_generations: maxGensVal, session_mode: sessionModeVal, session_duration: sessionDurationVal });
+      broadcast({ type: "config_updated", config: getFullConfig() });
       return { ok: true, path: configPath };
     } catch (err) {
       return reply.status(500).send({ ok: false, error: String(err) });
     }
   });
 
+  fastify.get("/api/models", async () => {
+    const available = await listAvailableModels();
+    const config = getModelConfig();
+    return {
+      available,
+      default_model: config.defaultModel,
+      agent_models: config.agentModels,
+      fallback_chain: config.fallbackChain,
+      aliases: config.aliases,
+      allowlist: config.allowlist,
+    };
+  });
+
+  // ---------------------------------------------------------------------------
+  // WebSocket endpoint
+  // ---------------------------------------------------------------------------
   await fastify.register(FastifyWebSocket);
 
   fastify.get("/ws", { websocket: true }, async (socket) => {
@@ -480,6 +285,7 @@ export async function runWeb(args: string[]): Promise<void> {
       new Promise((resolve) => {
         approvalResolve = resolve;
         socket.send(JSON.stringify({ type: "approval_request", pending }));
+        updateSessionState({ pendingApproval: pending as unknown as Record<string, unknown> });
       });
 
     socket.on("message", async (raw: Buffer | string) => {
@@ -537,13 +343,13 @@ export async function runWeb(args: string[]): Promise<void> {
         const payload = msg as Record<string, unknown>;
         const feedback = payload.feedback as string | undefined;
         const taskId = payload.task_id as string | undefined;
-        
+
         humanResponseEmitter.emitResponse({
           action: action as "approved" | "edited" | "feedback",
           feedback,
           taskId,
         });
-        
+
         if (approvalResolve) {
           approvalResolve({
             action: action as ApprovalResponse["action"],
@@ -591,15 +397,13 @@ export async function runWeb(args: string[]): Promise<void> {
           if (urgency !== undefined) {
             const raw = Number(urgency);
             if (Number.isFinite(raw)) {
-              const clamped = Math.min(10, Math.max(1, raw));
-              updatedTask.urgency = clamped;
+              updatedTask.urgency = Math.min(10, Math.max(1, raw));
             }
           }
           if (importance !== undefined) {
             const raw = Number(importance);
             if (Number.isFinite(raw)) {
-              const clamped = Math.min(10, Math.max(1, raw));
-              updatedTask.importance = clamped;
+              updatedTask.importance = Math.min(10, Math.max(1, raw));
             }
           }
           if (timebox_minutes !== undefined) {
@@ -612,6 +416,7 @@ export async function runWeb(args: string[]): Promise<void> {
           updatedQueue[idx] = updatedTask;
           await currentOrch.graph.updateState(config, { task_queue: updatedQueue });
           broadcast({ type: "task_queue_updated", task_queue: updatedQueue });
+          updateSessionState({ taskQueue: updatedQueue });
         } catch (err) {
           socket.send(
             JSON.stringify({
@@ -620,6 +425,69 @@ export async function runWeb(args: string[]): Promise<void> {
             })
           );
         }
+      } else if (cmd === "bridge_relay") {
+        const event = msg.event as Record<string, unknown> | undefined;
+        if (event && typeof event === "object") {
+          broadcast(event);
+          if (event.type === "node_event") {
+            const state = event.state as Record<string, unknown> | undefined;
+            if (state) {
+              updateSessionState({
+                activeNode: (event.node as string) ?? null,
+                taskQueue: (state.task_queue as Record<string, unknown>[]) ?? [],
+                botStats: (state.bot_stats as Record<string, Record<string, unknown>>) ?? {},
+                cycle: (state.cycle as number) ?? 0,
+                isRunning: true,
+              });
+            }
+          } else if (event.type === "session_complete") {
+            updateSessionState({ isRunning: false, activeNode: null });
+          }
+        }
+      } else if (cmd === "model_switch") {
+        const model = (msg.model as string)?.trim();
+        const agent = (msg.agent as string)?.trim();
+        if (!model) {
+          socket.send(JSON.stringify({ type: "error", message: "model_switch requires a model field" }));
+        } else {
+          const resolved = resolveAlias(model);
+          if (!isModelAllowed(resolved)) {
+            socket.send(JSON.stringify({ type: "error", message: `Model "${resolved}" is not in the allowlist` }));
+          } else if (agent) {
+            persistAgentModel(agent, resolved);
+            const updated = getModelConfig();
+            broadcast({
+              type: "model_updated",
+              default_model: updated.defaultModel,
+              agent_models: updated.agentModels,
+              fallback_chain: updated.fallbackChain,
+              aliases: updated.aliases,
+              allowlist: updated.allowlist,
+            });
+          } else {
+            persistDefaultModel(resolved);
+            const updated = getModelConfig();
+            broadcast({
+              type: "model_updated",
+              default_model: updated.defaultModel,
+              agent_models: updated.agentModels,
+              fallback_chain: updated.fallbackChain,
+              aliases: updated.aliases,
+              allowlist: updated.allowlist,
+            });
+          }
+        }
+      } else if (cmd === "model_query") {
+        const config = getModelConfig();
+        socket.send(JSON.stringify({
+          type: "model_state",
+          default_model: config.defaultModel,
+          agent_models: config.agentModels,
+          fallback_chain: config.fallbackChain,
+          aliases: config.aliases,
+          allowlist: config.allowlist,
+          available_models: config.availableModels,
+        }));
       } else if (cmd === "start") {
         const startConfig = msg.config as Record<string, unknown> | undefined;
         if (startConfig) applyConfigOverrides(startConfig);
@@ -678,17 +546,31 @@ export async function runWeb(args: string[]): Promise<void> {
           await vectorMemory.init();
           const analyst = new PostMortemAnalyst(vectorMemory);
 
-          for (let genId = 1; genId <= cliGenerations; genId++) {
+          const effectiveMaxGenerations = cliSessionMode === "time" ? 999 : cliGenerations;
+          const effectiveTimeoutMinutes = cliSessionMode === "time" ? cliSessionDuration : 0;
+          const sessionStartMs = Date.now();
+
+          for (let genId = 1; genId <= effectiveMaxGenerations; genId++) {
+            if (cliSessionMode === "time" && effectiveTimeoutMinutes > 0) {
+              const elapsed = Date.now() - sessionStartMs;
+              if (elapsed >= effectiveTimeoutMinutes * 60_000) break;
+            }
             if (ctrl.cancelled) break;
 
             const priorLessons = await vectorMemory.getCumulativeLessons();
             broadcast({
               type: "generation_start",
               generation: genId,
-              max_generations: cliGenerations,
+              max_generations: effectiveMaxGenerations,
               lessons_count: priorLessons.length,
+              session_mode: cliSessionMode,
+              session_duration: cliSessionMode === "time" ? cliSessionDuration : undefined,
             });
-            updateSessionState({ generation: genId, isRunning: true, activeNode: null, cycle: 0 });
+            updateSessionState({
+              generation: genId, isRunning: true, activeNode: null, cycle: 0,
+              generationProgress: { generation: genId, maxGenerations: effectiveMaxGenerations, lessonsCount: priorLessons.length, startedAt: Date.now() },
+              cycleProgress: null,
+            });
 
             const team =
               teamConfig?.roster && teamConfig.roster.length > 0
@@ -702,6 +584,10 @@ export async function runWeb(args: string[]): Promise<void> {
               team,
               workerUrls,
               approvalProvider,
+            });
+            orch.configureSession({
+              maxRuns: cliCycles,
+              timeoutMinutes: effectiveTimeoutMinutes,
             });
             runThreadId = randomUUID();
             currentOrch = orch;
@@ -737,6 +623,7 @@ export async function runWeb(args: string[]): Promise<void> {
                     cycle,
                     max_cycles: cliCycles,
                   });
+                  updateSessionState({ cycleProgress: { cycle, maxCycles: cliCycles, startedAt: Date.now() } });
                 }
 
                 const parsed = parseNodeEvent(nodeName, nodeState);
@@ -839,6 +726,7 @@ export async function runWeb(args: string[]): Promise<void> {
               final_state: fs,
               gen_summary: { outcome, final_state: fs },
             });
+            updateSessionState({ generationProgress: null, cycleProgress: null });
 
             await new Promise((r) => setTimeout(r, 1000));
           }
@@ -851,7 +739,7 @@ export async function runWeb(args: string[]): Promise<void> {
           }
           runThreadId = null;
           currentOrch = null;
-          updateSessionState({ isRunning: false, activeNode: null });
+          updateSessionState({ isRunning: false, activeNode: null, generationProgress: null, cycleProgress: null, pendingApproval: null });
           clearSessionConfig();
         })();
       }
@@ -866,14 +754,18 @@ export async function runWeb(args: string[]): Promise<void> {
       generation: currentSessionState.generation,
       is_running: currentSessionState.isRunning,
     };
-    socket.send(JSON.stringify({ type: "init", config }));
+    socket.send(JSON.stringify({ type: "init", config, server_start_ts: SERVER_START_TS }));
   });
 
-  // Register SPA fallback AFTER all API/WS routes so backend endpoints keep priority.
+  // SPA fallback AFTER all API/WS routes
   if (clientDir) {
     fastify.setNotFoundHandler((request, reply) => {
       if (request.method !== "GET") return reply.status(404).send();
       if (request.url.startsWith("/api") || request.url.startsWith("/ws")) {
+        return reply.status(404).send();
+      }
+      const lastSegment = request.url.split("/").pop() ?? "";
+      if (lastSegment.includes(".")) {
         return reply.status(404).send();
       }
       return reply.sendFile("index.html", clientDir);
