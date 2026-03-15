@@ -20,13 +20,19 @@ export interface GatewayHealthReport {
   tip?: string;
 }
 
-function toHttpModelsUrl(rawUrl: string, explicitHttpUrl: string): string {
-  // For health check, just ping the root endpoint - the gateway will respond
-  // with 401 if auth is needed but that still proves connectivity
+/**
+ * Build candidate HTTP URLs to probe for gateway liveness.
+ * Newer gateways serve an SPA on the WS port, so we try multiple candidates.
+ */
+function getCandidateModelsUrls(rawUrl: string, explicitHttpUrl: string): string[] {
+  const candidates: string[] = [];
+
   if (explicitHttpUrl.trim()) {
-    return explicitHttpUrl.trim().replace(/\/$/, "");
+    candidates.push(`${explicitHttpUrl.trim().replace(/\/$/, "")}/v1/models`);
   }
-  if (!rawUrl) return "";
+
+  if (!rawUrl) return candidates;
+
   const withScheme = /^wss?:\/\//i.test(rawUrl)
     ? rawUrl
     : /^https?:\/\//i.test(rawUrl)
@@ -36,15 +42,21 @@ function toHttpModelsUrl(rawUrl: string, explicitHttpUrl: string): string {
   if (u.protocol === "ws:") u.protocol = "http:";
   if (u.protocol === "wss:") u.protocol = "https:";
 
-  // HTTP-first rule: WS gateway port hosts transport; API is port+2.
+  // API port (gateway + 2) — traditional layout
   if (u.port) {
     const basePort = Number(u.port);
     if (Number.isInteger(basePort) && basePort > 0) {
-      u.port = String(basePort + 2);
+      const apiUrl = new URL(u.href);
+      apiUrl.port = String(basePort + 2);
+      candidates.push(`${apiUrl.href.replace(/\/$/, "")}/v1/models`);
     }
   }
 
-  return u.href.replace(/\/$/, "");
+  // Gateway/WS port directly — newer gateways serve SPA here
+  candidates.push(`${u.href.replace(/\/$/, "")}/v1/models`);
+  candidates.push(u.href.replace(/\/$/, ""));
+
+  return [...new Set(candidates)];
 }
 
 function inferTip(gatewayUrl: string, message: string): string | undefined {
@@ -102,60 +114,102 @@ export async function runGatewayHealthCheck(): Promise<GatewayHealthReport> {
     };
   }
 
-  const started = Date.now();
-  const modelsUrl = toHttpModelsUrl(gatewayUrl, httpApiUrl);
-  try {
-    const headers: Record<string, string> = {};
-    if (token) headers.Authorization = `Bearer ${token}`;
-    const res = await fetch(modelsUrl, {
-      method: "GET",
-      headers,
-      signal: AbortSignal.timeout(5000),
+  const candidateUrls = getCandidateModelsUrls(gatewayUrl, httpApiUrl);
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  // Try each candidate URL until one succeeds
+  let reachable = false;
+  let successRes: Response | null = null;
+  let successUrl = "";
+
+  for (const url of candidateUrls) {
+    try {
+      const started = Date.now();
+      const res = await fetch(url, {
+        method: "GET",
+        headers,
+        signal: AbortSignal.timeout(5000),
+      });
+      latency = Date.now() - started;
+
+      // Accept any non-5xx response as proof of connectivity.
+      // Newer gateways serve an SPA (HTML) on the WS port — that's fine.
+      if (res.status < 500) {
+        reachable = true;
+        successRes = res;
+        successUrl = url;
+        break;
+      }
+
+      if (!firstError) firstError = `HTTP ${res.status} from ${url}`;
+    } catch (err) {
+      if (!firstError) firstError = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  if (!reachable || !successRes) {
+    checks.push({
+      name: "ping",
+      level: "fail",
+      message: firstError || "Gateway unreachable on all candidate URLs",
     });
-    latency = Date.now() - started;
-    // Accept any response (including 401/403) as proof of connectivity
-    // Only network errors are actual failures
-    if (res.status === 401 || res.status === 403) {
-      authStatus = "invalid";
+    const status = summarizeStatus(checks);
+    return {
+      status,
+      gatewayUrl,
+      protocol,
+      latency,
+      authStatus,
+      checks,
+      tip: firstError ? inferTip(gatewayUrl, firstError) : undefined,
+    };
+  }
+
+  // We got a response — analyze it
+  if (successRes.status === 401 || successRes.status === 403) {
+    authStatus = "invalid";
+    checks.push({
+      name: "auth",
+      level: "fail",
+      message: `Unauthorized (HTTP ${successRes.status})`,
+      latencyMs: latency,
+    });
+    checks.push({
+      name: "ping",
+      level: "pass",
+      message: "Gateway reachable (auth needed)",
+      latencyMs: latency,
+    });
+  } else if (successRes.status === 404) {
+    // 404 still proves gateway process is running (e.g. CDP service on port+2)
+    authStatus = token ? "unknown" : "unknown";
+    checks.push({
+      name: "ping",
+      level: "pass",
+      message: `Gateway process reachable (HTTP 404 at ${successUrl})`,
+      latencyMs: latency,
+    });
+  } else if (successRes.ok) {
+    authStatus = token ? "valid" : "unknown";
+    checks.push({
+      name: "ping",
+      level: "pass",
+      message: "Gateway reachable via HTTP",
+      latencyMs: latency,
+    });
+    if (token) {
       checks.push({
         name: "auth",
-        level: "fail",
-        message: `Unauthorized (HTTP ${res.status})`,
-        latencyMs: latency,
-      });
-      // Gateway is reachable even if auth failed
-      checks.push({
-        name: "ping",
         level: "pass",
-        message: "Gateway reachable (auth needed)",
-        latencyMs: latency,
+        message: "Token accepted",
       });
-    } else if (!res.ok) {
-      firstError = `HTTP ${res.status}`;
-      checks.push({
-        name: "ping",
-        level: "fail",
-        message: `Gateway/API responded with HTTP ${res.status}`,
-        latencyMs: latency,
-      });
-    } else {
-      authStatus = token ? "valid" : "unknown";
-      checks.push({
-        name: "ping",
-        level: "pass",
-        message: "Gateway reachable via HTTP",
-        latencyMs: latency,
-      });
-      if (token) {
-        checks.push({
-          name: "auth",
-          level: "pass",
-          message: "Token accepted",
-        });
-      }
-      // Try to parse models, but don't fail if it doesn't work
+    }
+    // Try to parse models from a JSON response
+    const contentType = successRes.headers.get("content-type") ?? "";
+    if (contentType.includes("application/json")) {
       try {
-        const data = (await res.json()) as { data?: Array<{ id?: string }> };
+        const data = (await successRes.json()) as { data?: Array<{ id?: string }> };
         const models =
           data.data
             ?.map((m) => (typeof m.id === "string" ? m.id.trim() : ""))
@@ -166,13 +220,13 @@ export async function runGatewayHealthCheck(): Promise<GatewayHealthReport> {
             level: "warn",
             message: "OPENCLAW_MODEL is not set",
           });
-        } else if (!models.includes(model)) {
+        } else if (models.length > 0 && !models.includes(model)) {
           checks.push({
             name: "model",
             level: "fail",
             message: `Model "${model}" not found in provider`,
           });
-        } else {
+        } else if (models.length > 0) {
           checks.push({
             name: "model",
             level: "pass",
@@ -180,22 +234,25 @@ export async function runGatewayHealthCheck(): Promise<GatewayHealthReport> {
           });
         }
       } catch {
-        // Model check optional - just skip if JSON parsing fails
-        if (!model) {
-          checks.push({
-            name: "model",
-            level: "warn",
-            message: "OPENCLAW_MODEL is not set",
-          });
-        }
+        // JSON parsing failed — skip model check
+      }
+    } else {
+      // Got HTML or other non-JSON (SPA gateway) — skip model validation
+      if (!model) {
+        checks.push({
+          name: "model",
+          level: "warn",
+          message: "OPENCLAW_MODEL is not set",
+        });
       }
     }
-  } catch (err) {
-    firstError = err instanceof Error ? err.message : String(err);
+  } else {
+    // Non-OK but < 500
     checks.push({
       name: "ping",
-      level: "fail",
-      message: firstError,
+      level: "pass",
+      message: `Gateway reachable (HTTP ${successRes.status})`,
+      latencyMs: latency,
     });
   }
 

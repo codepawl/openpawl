@@ -341,8 +341,8 @@ export async function llmHealthCheck(): Promise<boolean> {
   const workerUrl = CONFIG.openclawWorkerUrl?.trim();
   if (!workerUrl) return false;
   try {
-    // Check the base API endpoint - any response means the gateway is reachable
-    const url = buildOpenClawUrl(workerUrl, "");
+    // Hit /v1/models to validate the API endpoint, not just connectivity
+    const url = buildOpenClawUrl(workerUrl, "/v1/models");
     const headers: Record<string, string> = {};
     if (CONFIG.openclawToken) {
       headers.Authorization = `Bearer ${CONFIG.openclawToken}`;
@@ -365,8 +365,12 @@ export async function llmHealthCheck(): Promise<boolean> {
       signal: AbortSignal.timeout(5000),
     });
     const elapsedMs = Date.now() - startedAt;
-    // Any response (even 401/403) means gateway is reachable
-    const ok = res.status !== 0;
+    const contentType = res.headers.get("content-type") ?? "";
+
+    // Accept any non-5xx response as proof the gateway is alive.
+    // Newer gateways serve an SPA (HTML) on all HTTP routes — that's fine,
+    // it still proves the gateway process is running and reachable.
+    const ok = res.status < 500;
     openclawEvents.emit("log", {
       id: `health-${Date.now()}-result`,
       level: ok ? "success" : "error",
