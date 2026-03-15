@@ -43,7 +43,7 @@ teamclaw.config.json
 !teamclaw.config.example.json
 
 # External/standalone projects (not part of TeamClaw)
-client/
+/client/
 server/
 DOCS/
 
