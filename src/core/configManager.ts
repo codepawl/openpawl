@@ -55,6 +55,12 @@ function coerceJsonValue(key: string, raw: string): { ok: true; value: unknown }
     if (!Number.isInteger(n) || n < 1) return { ok: false, error: "max_cycles must be an integer >= 1" };
     return { ok: true, value: n };
   }
+  if (key === "team_mode") {
+    if (raw !== "manual" && raw !== "autonomous") {
+      return { ok: false, error: 'team_mode must be "manual" or "autonomous"' };
+    }
+    return { ok: true, value: raw };
+  }
   return { ok: true, value: raw };
 }
 

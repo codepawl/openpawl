@@ -18,6 +18,7 @@ export interface PersistConfig {
   workspaceDir?: string;
   templateId?: string;
   projectName?: string;
+  teamMode?: "manual" | "autonomous";
 }
 
 export function writeConfig(cfg: PersistConfig): void {
@@ -38,5 +39,6 @@ export function writeConfig(cfg: PersistConfig): void {
   if (cfg.workspaceDir) config.workspace_dir = cfg.workspaceDir;
   if (cfg.templateId) config.template = cfg.templateId;
   if (cfg.projectName) config.project_name = cfg.projectName;
+  if (cfg.teamMode) config.team_mode = cfg.teamMode;
   writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n", "utf-8");
 }

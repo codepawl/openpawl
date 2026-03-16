@@ -22,6 +22,7 @@ export interface TeamConfig {
   openclaw_model?: string;
   openclaw_token?: string;
   agent_models?: Record<string, string>;
+  team_mode?: "manual" | "autonomous";
   webhooks?: {
     on_task_complete?: string;
     on_cycle_end?: string;
@@ -81,9 +82,15 @@ export async function loadTeamConfig(): Promise<TeamConfig | null> {
             })()
           : undefined;
 
+    const team_mode =
+      parsed.team_mode === "manual" || parsed.team_mode === "autonomous"
+        ? parsed.team_mode
+        : undefined;
+
     _cached = {
       template,
       roster,
+      team_mode,
       worker_url: typeof parsed.worker_url === "string" ? parsed.worker_url : undefined,
       gateway_url: typeof parsed.gateway_url === "string" ? parsed.gateway_url : undefined,
       team_model: typeof parsed.team_model === "string" ? parsed.team_model : undefined,

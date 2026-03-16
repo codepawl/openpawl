@@ -48,6 +48,8 @@ import { promptPath } from "../utils/path-autocomplete.js";
 import { handleCancel, stepConnection, type WizardState } from "./setup/connection.js";
 import { stepGoal } from "./setup/goal-input.js";
 import { stepTeam } from "./setup/team-builder.js";
+import { stepCompositionMode } from "./setup/composition-mode.js";
+import type { CompositionWizardState } from "./setup/composition-mode.js";
 import { randomPhrase } from "../utils/spinner-phrases.js";
 
 // ---------------------------------------------------------------------------
@@ -294,6 +296,7 @@ function persistAllConfig(state: WizardState): string {
         workspaceDir: state.workspaceDir,
         templateId: state.templateId,
         projectName: state.projectName,
+        teamMode: state.teamMode,
     });
 
     setOpenClawWorkerUrl(wsUrl);
@@ -318,7 +321,7 @@ export async function runSetup(): Promise<void> {
         logger.info("TeamClaw Setup Wizard");
     }
 
-    const state: WizardState = {
+    const state: CompositionWizardState = {
         ip: "127.0.0.1",
         port: "18789",
         token: "",
@@ -333,29 +336,33 @@ export async function runSetup(): Promise<void> {
         managed: true,
     };
 
-    // Step 1/6: Connection
-    note("Step 1/6", pc.bold("Connection"));
+    // Step 1/7: Connection
+    note("Step 1/7", pc.bold("Connection"));
     await stepConnection(state);
 
-    // Step 2/6: Workspace
-    note("Step 2/6", pc.bold("Workspace"));
+    // Step 2/7: Workspace
+    note("Step 2/7", pc.bold("Workspace"));
     await stepWorkspace(state);
 
-    // Step 3/6: Project
-    note("Step 3/6", pc.bold("Project"));
+    // Step 3/7: Project
+    note("Step 3/7", pc.bold("Project"));
     await stepProject(state);
 
-    // Step 4/6: Model
-    note("Step 4/6", pc.bold("Model Selection"));
+    // Step 4/7: Model
+    note("Step 4/7", pc.bold("Model Selection"));
     await stepModel(state);
 
-    // Step 5/6: Goal
-    note("Step 5/6", pc.bold("Goal"));
+    // Step 5/7: Goal
+    note("Step 5/7", pc.bold("Goal"));
     await stepGoal(state);
 
-    // Step 6/6: Team
-    note("Step 6/6", pc.bold("Team"));
+    // Step 6/7: Team
+    note("Step 6/7", pc.bold("Team"));
     await stepTeam(state);
+
+    // Step 7/7: Composition Mode
+    note("Step 7/7", pc.bold("Composition Mode"));
+    await stepCompositionMode(state);
 
     // Summary
     const rosterSummary = state.roster.length > 0
@@ -379,6 +386,7 @@ export async function runSetup(): Promise<void> {
             `Goal      : ${trunc(state.goal)}`,
             `Team      : ${trunc(rosterSummary)}`,
             `Template  : ${state.templateId || "custom"}`,
+            `Team Mode : ${state.teamMode || "manual"}`,
         ].join("\n"),
         "Configuration Summary",
     );
