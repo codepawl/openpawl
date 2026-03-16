@@ -30,7 +30,7 @@ export const DEFAULT_CONFIDENCE_THRESHOLDS: ConfidenceThresholds = {
 
 export type RoutingDecision = "auto_approved" | "qa_review" | "rework" | "escalated";
 
-export const KNOWN_FLAGS: ReadonlySet<string> = new Set<string>([
+const _knownFlags = new Set<string>([
   "missing_context",
   "ambiguous_requirements",
   "untested_approach",
@@ -38,3 +38,10 @@ export const KNOWN_FLAGS: ReadonlySet<string> = new Set<string>([
   "external_dependency",
   "high_complexity",
 ]);
+
+export const KNOWN_FLAGS: ReadonlySet<string> = _knownFlags;
+
+/** Register additional confidence flags (used by custom agents). */
+export function registerConfidenceFlags(flags: string[]): void {
+  for (const f of flags) _knownFlags.add(f);
+}

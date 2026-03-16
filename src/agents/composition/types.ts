@@ -15,14 +15,17 @@ export type AgentRole =
   | "post_mortem"
   | "retrospective";
 
+/** Accepts built-in AgentRole or any custom agent role string. */
+export type AnyAgentRole = AgentRole | (string & {});
+
 export interface ActiveAgent {
-  role: AgentRole;
+  role: AnyAgentRole;
   reason: string;
   confidence: number;
 }
 
 export interface ExcludedAgent {
-  role: AgentRole;
+  role: AnyAgentRole;
   reason: string;
 }
 
@@ -36,7 +39,7 @@ export interface TeamComposition {
 }
 
 export interface CompositionOverride {
-  role: AgentRole;
+  role: AnyAgentRole;
   action: "include" | "exclude";
 }
 

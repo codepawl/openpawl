@@ -148,6 +148,7 @@ export class UniversalOpenClawAdapter implements WorkerAdapter {
   private configuredModel: string;
   private authToken: string;
   private botId: string;
+  private systemPromptOverride: string | undefined;
   tasksProcessed = 0;
   onStreamChunk: StreamChunkCallback | undefined;
   onStreamDone: StreamDoneCallback | undefined;
@@ -155,7 +156,7 @@ export class UniversalOpenClawAdapter implements WorkerAdapter {
   onReasoning: ReasoningCallback | undefined;
   private lastReasoning = "";
 
-  constructor(options: { workerUrl?: string; authToken?: string | null; timeout?: number; workspacePath?: string; model?: string; botId?: string; onStreamChunk?: StreamChunkCallback; onStreamDone?: StreamDoneCallback; onTokenUsage?: TokenUsageCallback; onReasoning?: ReasoningCallback } = {}) {
+  constructor(options: { workerUrl?: string; authToken?: string | null; timeout?: number; workspacePath?: string; model?: string; botId?: string; systemPromptOverride?: string; onStreamChunk?: StreamChunkCallback; onStreamDone?: StreamDoneCallback; onTokenUsage?: TokenUsageCallback; onReasoning?: ReasoningCallback } = {}) {
     const baseWsUrl = (options.workerUrl ?? CONFIG.openclawWorkerUrl ?? "").trim();
     if (!baseWsUrl) {
       throw new Error("OPENCLAW_WORKER_URL is not configured. Run `teamclaw setup`.");
@@ -181,6 +182,7 @@ export class UniversalOpenClawAdapter implements WorkerAdapter {
     this.onStreamChunk = options.onStreamChunk;
     this.onStreamDone = options.onStreamDone;
     this.onTokenUsage = options.onTokenUsage;
+    this.systemPromptOverride = options.systemPromptOverride;
     this.onReasoning = options.onReasoning;
     openclawEvents.emit("log", {
       id: `wa-${Date.now()}-init`,
@@ -436,10 +438,10 @@ export class UniversalOpenClawAdapter implements WorkerAdapter {
       const archBlock = hasArchDoc
         ? `\nCRITICAL: Before performing any task, you MUST read docs/ARCHITECTURE.md.\nYour code MUST strictly follow the architecture, folder structure, and tech stack\ndefined by the Tech Lead in docs/ARCHITECTURE.md.\n`
         : "";
-      const systemPrompt = `You are a helpful AI assistant (Maker/Software Engineer). Execute the given task and return the result.
-You are working in a strictly defined workspace. Treat this workspace as your root directory.
-WORKSPACE PATH: ${this.workspacePath}
-${archBlock}
+      const basePrompt = this.systemPromptOverride
+        ? `${this.systemPromptOverride}\n\nYou are working in a strictly defined workspace. Treat this workspace as your root directory.\nWORKSPACE PATH: ${this.workspacePath}\n${archBlock}`
+        : `You are a helpful AI assistant (Maker/Software Engineer). Execute the given task and return the result.\nYou are working in a strictly defined workspace. Treat this workspace as your root directory.\nWORKSPACE PATH: ${this.workspacePath}\n${archBlock}`;
+      const systemPrompt = `${basePrompt}
 IMPORTANT: Do NOT create arbitrary subdirectories unless explicitly specified in the task.
 Output files directly to the root of the provided workspace path unless the task explicitly requires a specific structure (like 'assets/' or 'src/components/').
 
