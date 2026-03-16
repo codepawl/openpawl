@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Pre-commit quality gate — blocks commits that break tsc, eslint, or tests.
+# Install: make install-hooks
+# Skip once: git commit --no-verify
+
+set -e
+
+echo "pre-commit: typecheck..."
+pnpm exec tsc --noEmit
+
+echo "pre-commit: lint..."
+pnpm exec eslint src/ --ext .ts,.tsx
+
+echo "pre-commit: tests..."
+pnpm exec vitest run
+
+echo "pre-commit: all checks passed"
