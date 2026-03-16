@@ -72,6 +72,7 @@ function printHelp(): void {
         "  " + cmd(pad("web")) + desc("Start web dashboard (default port from config)"),
         "  " + cmd(pad("check")) + desc("Check gateway connectivity"),
         "",
+        "  " + cmd(pad("audit")) + desc("Export audit trail (markdown, PDF)"),
         "  " + cmd(pad("replay")) + desc("Replay past sessions (list, play, diff, export)"),
         "  " + cmd(pad("agent")) + desc("Manage custom agents (add, list, remove)"),
         "  " + cmd(pad("logs")) + desc("View session and gateway logs"),
@@ -271,6 +272,10 @@ async function main(): Promise<void> {
     } else if (cmd === "memory") {
         const { runMemoryCommand } = await import("./commands/memory.js");
         await runMemoryCommand(args.slice(1));
+
+    } else if (cmd === "audit") {
+        const { runAuditCommand } = await import("./commands/audit.js");
+        await runAuditCommand(args.slice(1));
 
     } else if (cmd === "replay") {
         const { runReplayCommand } = await import("./commands/replay.js");

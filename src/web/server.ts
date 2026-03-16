@@ -9,6 +9,7 @@ import FastifyCors from "@fastify/cors";
 import FastifyStatic from "@fastify/static";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
+import os from "node:os";
 import { createTeamOrchestration } from "../core/simulation.js";
 import { buildTeamFromRoster, buildTeamFromTemplate } from "../core/team-templates.js";
 import type { ApprovalResponse } from "../agents/approval.js";
@@ -1233,6 +1234,50 @@ document.getElementById('msg').textContent=r.ok?'Rejection submitted!':'Error: '
       return reply.status(404).send({ error: `Agent not found: ${role}` });
     }
     return { ok: true, role };
+  });
+
+  // Audit trails
+  fastify.get<{ Params: { sessionId: string } }>("/api/audit/:sessionId", async (req, reply) => {
+    const { sessionId } = req.params;
+    const { getSession } = await import("../replay/index.js");
+    const session = getSession(sessionId);
+    if (!session) return reply.status(404).send({ error: "Session not found" });
+
+    const { buildAuditTrail, renderAuditMarkdown } = await import("../audit/index.js");
+    const audit = await buildAuditTrail(sessionId, 0, {
+      user_goal: session.goal,
+      average_confidence: session.averageConfidence,
+    }, session.createdAt, session.completedAt, []);
+    const markdown = renderAuditMarkdown(audit);
+    return { audit, markdown };
+  });
+
+  fastify.post<{ Params: { sessionId: string } }>("/api/audit/:sessionId/export", async (req, reply) => {
+    const { sessionId } = req.params;
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const format = (body.format as string) ?? "markdown";
+
+    const { getSession } = await import("../replay/index.js");
+    const session = getSession(sessionId);
+    if (!session) return reply.status(404).send({ error: "Session not found" });
+
+    const { buildAuditTrail, renderAuditMarkdown } = await import("../audit/index.js");
+    const audit = await buildAuditTrail(sessionId, 0, {
+      user_goal: session.goal,
+      average_confidence: session.averageConfidence,
+    }, session.createdAt, session.completedAt, []);
+
+    if (format === "markdown") {
+      const md = renderAuditMarkdown(audit, { includePrompts: body.includePrompts as boolean ?? false });
+      const { writeFile, mkdir } = await import("node:fs/promises");
+      const sessionDir = path.join(os.homedir(), ".teamclaw", "sessions", sessionId);
+      await mkdir(sessionDir, { recursive: true });
+      const outPath = path.join(sessionDir, "audit.md");
+      await writeFile(outPath, md, "utf-8");
+      return { ok: true, path: outPath, format: "markdown" };
+    }
+
+    return reply.status(400).send({ error: "Unsupported format. Use: markdown" });
   });
 
   // Replay sessions

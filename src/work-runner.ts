@@ -9,6 +9,8 @@ import type { AgentInclusionRule } from "./agents/composition/rules.js";
 import { renderCompositionTable, promptCompositionAction, applyOverrides } from "./cli/composition-preview.js";
 import { AgentRegistryStore } from "./agents/registry/index.js";
 import { SessionRecorder, setActiveRecorder, createSession, finalizeSession } from "./replay/index.js";
+import { buildAuditTrail, renderAuditMarkdown, DEFAULT_AUDIT_CONFIG } from "./audit/index.js";
+import type { BotDefinition } from "./core/bot-definitions.js";
 import {
     buildTeamFromRoster,
     buildTeamFromTemplate,
@@ -127,6 +129,26 @@ async function withConsoleRedirect<T>(fn: () => Promise<T> | T): Promise<T> {
         console.warn = originalWarn;
         console.error = originalError;
     }
+}
+
+/** Auto-export audit trail to markdown after run completes. Never blocks. */
+async function autoExportAudit(
+  sessionId: string,
+  runIndex: number,
+  finalState: Record<string, unknown>,
+  startTime: number,
+  team: BotDefinition[],
+): Promise<void> {
+  try {
+    const audit = await buildAuditTrail(sessionId, runIndex, finalState, startTime, Date.now(), team);
+    const md = renderAuditMarkdown(audit);
+    const { writeFile, mkdir } = await import("node:fs/promises");
+    const sessionDir = path.join(os.homedir(), ".teamclaw", "sessions", sessionId);
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(path.join(sessionDir, "audit.md"), md, "utf-8");
+  } catch {
+    // Non-critical — auto-export failure should never affect the session
+  }
 }
 
 /** Build composition inclusion rules from registered custom agents. */
@@ -482,7 +504,8 @@ export async function runWork(
     }
 
     // Session recording — always on, async, never blocks
-    const replaySessionId = `work-${Date.now()}`;
+    const sessionRecordStart = Date.now();
+    const replaySessionId = `work-${sessionRecordStart}`;
     const recorder = new SessionRecorder(replaySessionId);
     setActiveRecorder(recorder);
     createSession(replaySessionId, effectiveGoal || "(no goal)", []);
@@ -1087,6 +1110,11 @@ export async function runWork(
       totalCostUSD: 0,
       averageConfidence: 0,
     }).catch(() => {});
+
+    // Auto-export audit trail (async, non-blocking)
+    if (lastFinalState) {
+      autoExportAudit(replaySessionId, maxRuns, lastFinalState as Record<string, unknown>, sessionRecordStart, []).catch(() => {});
+    }
 
     const shouldRunRetro = !lastTeamComposition || lastTeamComposition.activeAgents.some(a => a.role === "retrospective");
     if (lastTotalReworks > 0 && lastFinalState && shouldRunRetro) {

@@ -15,7 +15,7 @@ interface PDFDoc {
   addPage(): PDFDoc;
   end(): void;
   pipe(stream: NodeJS.WritableStream): PDFDoc;
-  on(event: string, fn: (...args: unknown[]) => void): PDFDoc;
+  on(event: string, fn: (...args: never[]) => void): PDFDoc;
   y: number;
   page: { height: number; margins: { bottom: number } };
 }
