@@ -41,6 +41,7 @@ import { findAvailablePort } from "../core/port.js";
 import { proxyPlugin } from "../proxy/plugin.js";
 import { humanResponseEmitter } from "../core/human-response-events.js";
 import { getDefaultGoal } from "../core/configManager.js";
+import { ProfileStore } from "../agents/profiles/store.js";
 import { coordinatorEvents, type CoordinatorStep } from "../core/coordinator-events.js";
 import { workerEvents } from "../core/worker-events.js";
 import { openclawEvents, type OpenClawLogEntry } from "../core/openclaw-events.js";
@@ -1145,6 +1146,60 @@ document.getElementById('msg').textContent=r.ok?'Rejection submitted!':'Error: '
       const { gm, embedder } = await getGlobalManager();
       const result = await importGlobalMemory(gm, data, embedder);
       return result;
+    } catch (err) {
+      return reply.status(500).send({ error: String(err) });
+    }
+  });
+
+  // -----------------------------------------------------------------------
+  // Agent Performance Profiles API
+  // -----------------------------------------------------------------------
+  async function getProfileStore() {
+    const { gm } = await getGlobalManager();
+    const db = gm.getDb();
+    if (!db) throw new Error("Global database not available");
+    const store = new ProfileStore();
+    await store.init(db);
+    return store;
+  }
+
+  fastify.get("/api/profiles", async (_req, reply) => {
+    try {
+      const store = await getProfileStore();
+      return { profiles: await store.getAll() };
+    } catch (err) {
+      return reply.status(500).send({ error: String(err) });
+    }
+  });
+
+  fastify.get("/api/profiles/routing-decisions", async (_req, reply) => {
+    try {
+      const state = currentSessionState();
+      const decisions = (state as Record<string, unknown>)?.routing_decisions ?? [];
+      return { decisions };
+    } catch (err) {
+      return reply.status(500).send({ error: String(err) });
+    }
+  });
+
+  fastify.get("/api/profiles/:role", async (req, reply) => {
+    const { role } = req.params as { role: string };
+    try {
+      const store = await getProfileStore();
+      const profile = await store.getByRole(role);
+      if (!profile) return reply.status(404).send({ error: "Profile not found" });
+      return profile;
+    } catch (err) {
+      return reply.status(500).send({ error: String(err) });
+    }
+  });
+
+  fastify.delete("/api/profiles/:role", async (req, reply) => {
+    const { role } = req.params as { role: string };
+    try {
+      const store = await getProfileStore();
+      const ok = await store.delete(role);
+      return ok ? { ok: true } : reply.status(404).send({ error: "Profile not found" });
     } catch (err) {
       return reply.status(500).send({ error: String(err) });
     }

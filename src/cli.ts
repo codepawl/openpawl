@@ -75,6 +75,7 @@ function printHelp(): void {
         "  " + cmd(pad("logs")) + desc("View session and gateway logs"),
         "  " + cmd(pad("lessons")) + desc("Export lessons learned"),
         "  " + cmd(pad("memory")) + desc("Global memory: health, promote, export/import"),
+        "  " + cmd(pad("profile")) + desc("Agent performance profiles: list, show, reset"),
         "  " + cmd(pad("clean")) + desc("Remove session data (preserves global memory)"),
         "  " + cmd(pad("run openclaw")) + desc("Start OpenClaw gateway"),
         "  " + cmd(pad("demo")) + desc("Run a synthetic demo (no gateway needed)"),
@@ -268,6 +269,10 @@ async function main(): Promise<void> {
     } else if (cmd === "memory") {
         const { runMemoryCommand } = await import("./commands/memory.js");
         await runMemoryCommand(args.slice(1));
+
+    } else if (cmd === "profile") {
+        const { runProfileCommand } = await import("./commands/profile.js");
+        await runProfileCommand(args.slice(1));
 
     } else if (cmd === "clean") {
         const { runClean } = await import("./commands/clean.js");
