@@ -1205,6 +1205,36 @@ document.getElementById('msg').textContent=r.ok?'Rejection submitted!':'Error: '
     }
   });
 
+  // Custom agents
+  fastify.get("/api/agents/custom", async () => {
+    const { AgentRegistryStore } = await import("../agents/registry/index.js");
+    const store = new AgentRegistryStore();
+    const agents = store.list();
+    const defs = store.loadAllSync();
+    return {
+      agents: agents.map((a) => {
+        const def = defs.find((d) => d.role === a.role);
+        return {
+          ...a,
+          taskTypes: def?.taskTypes ?? [],
+          compositionRules: def?.compositionRules ?? null,
+          confidenceConfig: def?.confidenceConfig ?? null,
+        };
+      }),
+    };
+  });
+
+  fastify.delete<{ Params: { role: string } }>("/api/agents/custom/:role", async (req, reply) => {
+    const { role } = req.params;
+    const { AgentRegistryStore } = await import("../agents/registry/index.js");
+    const store = new AgentRegistryStore();
+    const removed = store.unregister(role);
+    if (!removed) {
+      return reply.status(404).send({ error: `Agent not found: ${role}` });
+    }
+    return { ok: true, role };
+  });
+
   // Composition history
   fastify.get("/api/composition-history", async (_req, reply) => {
     try {

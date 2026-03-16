@@ -7,6 +7,7 @@ import { NotificationSettings } from "./settings/NotificationSettings";
 import { PaletteSettings } from "./settings/PaletteSettings";
 import { WebhookSettings } from "./settings/WebhookSettings";
 import { CompositionSettings } from "./settings/CompositionSettings";
+import { CustomAgentsSettings } from "./settings/CustomAgentsSettings";
 
 export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const config = useWsStore((s) => s.config);
@@ -46,7 +47,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
     "idle"
   );
   const [saveMessage, setSaveMessage] = useState("");
-  const [activeTab, setActiveTab] = useState<"general" | "models" | "integrations">("general");
+  const [activeTab, setActiveTab] = useState<"general" | "models" | "agents" | "integrations">("general");
 
   useEffect(() => {
     if (config) {
@@ -176,6 +177,9 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
             </button>
             <button type="button" className={activeTab === "models" ? tabActive : tabInactive} onClick={() => setActiveTab("models")}>
               <i className="bi bi-cpu mr-1" />Models
+            </button>
+            <button type="button" className={activeTab === "agents" ? tabActive : tabInactive} onClick={() => setActiveTab("agents")}>
+              <i className="bi bi-robot mr-1" />Agents
             </button>
             <button type="button" className={activeTab === "integrations" ? tabActive : tabInactive} onClick={() => setActiveTab("integrations")}>
               <i className="bi bi-plug mr-1" />Integrations
@@ -322,6 +326,10 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
 
             {activeTab === "models" && (
               <ModelSettings />
+            )}
+
+            {activeTab === "agents" && (
+              <CustomAgentsSettings />
             )}
 
             {activeTab === "integrations" && (
