@@ -93,6 +93,11 @@ import { THREAD_REGISTRY, startTimeoutChecker } from "./timeout-checker.js";
 import { SuccessPatternStore } from "../memory/success/store.js";
 import { LearningCurveStore } from "../memory/success/learning-curve.js";
 import { PatternQualityStore } from "../memory/success/quality.js";
+import { GlobalMemoryManager } from "../memory/global/store.js";
+import { PromotionEngine } from "../memory/global/promoter.js";
+import { computeHealth } from "../memory/global/health.js";
+import { exportGlobalMemory, importGlobalMemory } from "../memory/global/portability.js";
+import type { MemoryExport } from "../memory/global/types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isProduction = process.env.NODE_ENV === "production";
@@ -1037,6 +1042,112 @@ document.getElementById('msg').textContent=r.ok?'Rejection submitted!':'Error: '
     if (!db) return { qualities: [] };
     // Pattern quality doesn't have a getAll, return empty for now
     return { qualities: [] };
+  });
+
+  // -----------------------------------------------------------------------
+  // Global Memory API
+  // -----------------------------------------------------------------------
+  async function getGlobalManager() {
+    const teamConfig = await loadTeamConfig();
+    const vectorMemory = new VectorMemory(
+      CONFIG.vectorStorePath,
+      teamConfig?.memory_backend ?? CONFIG.memoryBackend,
+    );
+    await vectorMemory.init();
+    const embedder = vectorMemory.getEmbedder();
+    const db = vectorMemory.getDb();
+    if (!embedder) throw new Error("Embedder not available");
+    const gm = new GlobalMemoryManager();
+    await gm.init(embedder);
+    return { gm, embedder, db, vectorMemory };
+  }
+
+  fastify.get("/api/memory/health", async (_req, reply) => {
+    try {
+      const { gm } = await getGlobalManager();
+      return await computeHealth(gm);
+    } catch (err) {
+      return reply.status(500).send({ error: String(err) });
+    }
+  });
+
+  fastify.get("/api/memory/global/patterns", async (_req, reply) => {
+    try {
+      const { gm } = await getGlobalManager();
+      const store = gm.getPatternStore();
+      return { patterns: store ? await store.getAll() : [] };
+    } catch (err) {
+      return reply.status(500).send({ error: String(err) });
+    }
+  });
+
+  fastify.get("/api/memory/global/lessons", async (_req, reply) => {
+    try {
+      const { gm } = await getGlobalManager();
+      return { lessons: await gm.getAllLessons() };
+    } catch (err) {
+      return reply.status(500).send({ error: String(err) });
+    }
+  });
+
+  fastify.get("/api/memory/global/knowledge-graph", async (_req, reply) => {
+    try {
+      const { gm } = await getGlobalManager();
+      const kg = gm.getKnowledgeGraph();
+      return kg ? await kg.getGraph(200) : { nodes: [], edges: [] };
+    } catch (err) {
+      return reply.status(500).send({ error: String(err) });
+    }
+  });
+
+  fastify.post("/api/memory/global/promote/:id", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    try {
+      const { gm, embedder, db } = await getGlobalManager();
+      if (!db) return reply.status(500).send({ error: "LanceDB not available" });
+      const sessionStore = new SuccessPatternStore(db, embedder);
+      await sessionStore.init();
+      const qualityStore = new PatternQualityStore(db);
+      await qualityStore.init();
+      const promoter = new PromotionEngine(gm, sessionStore, qualityStore, embedder);
+      const ok = await promoter.promoteById(id);
+      return ok ? { ok: true } : reply.status(404).send({ error: "Pattern not found" });
+    } catch (err) {
+      return reply.status(500).send({ error: String(err) });
+    }
+  });
+
+  fastify.post("/api/memory/global/demote/:id", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    try {
+      const { gm } = await getGlobalManager();
+      const store = gm.getPatternStore();
+      if (!store) return reply.status(500).send({ error: "Global store not available" });
+      const ok = await store.delete(id);
+      return ok ? { ok: true } : reply.status(404).send({ error: "Pattern not found" });
+    } catch (err) {
+      return reply.status(500).send({ error: String(err) });
+    }
+  });
+
+  fastify.post("/api/memory/global/export", async (_req, reply) => {
+    try {
+      const { gm } = await getGlobalManager();
+      return await exportGlobalMemory(gm);
+    } catch (err) {
+      return reply.status(500).send({ error: String(err) });
+    }
+  });
+
+  fastify.post("/api/memory/global/import", async (req, reply) => {
+    try {
+      const data = req.body as MemoryExport;
+      const { gm, embedder } = await getGlobalManager();
+      const result = await importGlobalMemory(gm, data, embedder);
+      return result;
+    } catch (err) {
+      return reply.status(500).send({ error: String(err) });
+    }
   });
 
   // SPA fallback AFTER all API routes
