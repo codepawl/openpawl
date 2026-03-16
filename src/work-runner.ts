@@ -67,6 +67,8 @@ import { startDashboard } from "./work-runner/dashboard-setup.js";
 import { parseWorkArgs, promptSessionConfig, promptPreLaunchConfirmation } from "./work-runner/session-config.js";
 import { workerEvents } from "./core/worker-events.js";
 import { startGatewayLogTailer } from "./core/gateway-log-tailer.js";
+import { ProfileBuilder, ProfileStore, checkDegradation } from "./agents/profiles/index.js";
+import type { CompletedTaskResult } from "./agents/profiles/types.js";
 import { createWebhookApprovalProvider } from "./webhook/provider.js";
 import type { WebhookApprovalConfig } from "./webhook/types.js";
 import { SuccessPatternStore } from "./memory/success/store.js";
@@ -881,6 +883,45 @@ export async function runWork(
                             }
                         } catch (promoErr) {
                             log("warn", `Global memory promotion failed: ${promoErr}`);
+                        }
+
+                        // Build/update agent performance profiles
+                        try {
+                            const pStore = orchestration.profileStore;
+                            const profileBuilder = new ProfileBuilder(pStore);
+                            const taskQueue = ((finalState as Record<string, unknown>).task_queue ?? []) as Array<Record<string, unknown>>;
+                            const completedResults: CompletedTaskResult[] = [];
+                            for (const t of taskQueue) {
+                                const status = t.status as string;
+                                if (status !== "completed" && status !== "failed") continue;
+                                const result = t.result as Record<string, unknown> | null;
+                                const botId = (t.assigned_to as string) ?? "";
+                                const bot = team.find((b) => b.id === botId);
+                                const roleId = bot?.role_id ?? botId;
+                                const conf = result?.confidence as Record<string, unknown> | undefined;
+                                completedResults.push({
+                                    taskId: (t.task_id as string) ?? "",
+                                    agentRole: roleId,
+                                    description: (t.description as string) ?? "",
+                                    success: status === "completed",
+                                    confidence: typeof conf?.score === "number" ? (conf.score as number) : (result?.quality_score as number ?? 0),
+                                    reworkCount: (t.retry_count as number) ?? 0,
+                                });
+                            }
+                            if (completedResults.length > 0) {
+                                const updatedProfiles = await profileBuilder.buildFromTaskResults(completedResults);
+                                for (const profile of updatedProfiles) {
+                                    const alert = checkDegradation(profile);
+                                    if (alert && canRenderSpinner) {
+                                        logger.warn(`⚠️ Performance degradation: ${alert.agentRole} score dropped from ${(alert.previousScore * 100).toFixed(0)}% to ${(alert.currentScore * 100).toFixed(0)}%`);
+                                    }
+                                }
+                                if (canRenderSpinner) {
+                                    logger.success(`📊 Updated ${updatedProfiles.length} agent profile(s)`);
+                                }
+                            }
+                        } catch (profileErr) {
+                            log("warn", `Agent profile update failed: ${profileErr}`);
                         }
                     } catch (err) {
                         log("warn", `Failed to persist success patterns: ${err}`);
