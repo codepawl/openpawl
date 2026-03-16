@@ -35,6 +35,7 @@ import type { AgentProfile } from "../agents/profiles/types.js";
 import type { TeamComposition } from "../agents/composition/types.js";
 import { withCompositionGate } from "../agents/composition/wiring.js";
 import { getCanvasTelemetry } from "./canvas-telemetry.js";
+import { getActiveRecorder, wrapWithRecording, wrapSyncWithRecording } from "../replay/recorder.js";
 import { AgentRegistryStore, createCustomWorkerBots } from "../agents/registry/index.js";
 import { createPreviewNode } from "../graph/nodes/preview.js";
 import { createConfidenceRouterNode } from "../graph/nodes/confidence-router.js";
@@ -211,6 +212,12 @@ export class TeamOrchestration {
       nodeName: string,
       fn: (s: GraphState) => Promise<Partial<GraphState>>
     ): ((s: GraphState) => Promise<Partial<GraphState>>) => {
+      let wrapped = fn;
+      // Wrap with recording if a recorder is active
+      const recorder = getActiveRecorder();
+      if (recorder) {
+        wrapped = wrapWithRecording(recorder, nodeName, wrapped);
+      }
       return async (s: GraphState): Promise<Partial<GraphState>> => {
         try {
           const telemetry = getCanvasTelemetry();
@@ -218,7 +225,7 @@ export class TeamOrchestration {
         } catch {
           // Non-critical, ignore telemetry errors
         }
-        return fn(s);
+        return wrapped(s);
       };
     };
 
@@ -254,28 +261,32 @@ export class TeamOrchestration {
       .addNode("confidence_router", telemetryConfidenceRouterNode)
       .addNode("worker_collect", telemetryCollectNode)
       .addNode("partial_approval", telemetryPartialApprovalNode)
-      .addNode("increment_cycle", (s): Partial<GraphState> => {
-        const taskQueue = s.task_queue ?? [];
-        const totalTasks = (s.total_tasks as number) ?? taskQueue.length;
-        const completedTasks = taskQueue.filter((t) =>
-          t.status === "completed" || t.status === "waiting_for_human" || t.status === "auto_approved_pending"
-        ).length;
-        const alreadyReported = s.mid_sprint_reported ?? false;
-        
-        const updates: Partial<GraphState> = {
-          cycle_count: (s.cycle_count ?? 0) + 1,
-          completed_tasks: completedTasks,
-          __node__: "increment_cycle",
+      .addNode("increment_cycle", (() => {
+        const incrementFn = (s: GraphState): Partial<GraphState> => {
+          const taskQueue = s.task_queue ?? [];
+          const totalTasks = (s.total_tasks as number) ?? taskQueue.length;
+          const completedTasks = taskQueue.filter((t) =>
+            t.status === "completed" || t.status === "waiting_for_human" || t.status === "auto_approved_pending"
+          ).length;
+          const alreadyReported = s.mid_sprint_reported ?? false;
+
+          const updates: Partial<GraphState> = {
+            cycle_count: (s.cycle_count ?? 0) + 1,
+            completed_tasks: completedTasks,
+            __node__: "increment_cycle",
+          };
+
+          if (totalTasks > 0 && !alreadyReported && (completedTasks / totalTasks) >= 0.5) {
+            const summary = generateMidSprintSummary(s);
+              updates.messages = [summary];
+            updates.mid_sprint_reported = true;
+          }
+
+          return updates;
         };
-        
-        if (totalTasks > 0 && !alreadyReported && (completedTasks / totalTasks) >= 0.5) {
-          const summary = generateMidSprintSummary(s);
-            updates.messages = [summary];
-          updates.mid_sprint_reported = true;
-        }
-        
-        return updates;
-      })
+        const recorder = getActiveRecorder();
+        return recorder ? wrapSyncWithRecording(recorder, "increment_cycle", incrementFn) : incrementFn;
+      })())
       .addEdge(START, "memory_retrieval")
       .addEdge("memory_retrieval", "sprint_planning")
       .addEdge("sprint_planning", "system_design")

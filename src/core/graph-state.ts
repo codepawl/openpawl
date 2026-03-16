@@ -133,6 +133,12 @@ export const GameStateAnnotation = Annotation.Root({
     lastValue<Record<string, unknown>[]>(() => [])
   ),
 
+  // Replay mode fields
+  replayMode: Annotation<boolean>(lastValue(() => false)),
+  replaySessionId: Annotation<string | null>(lastValue<string | null>(() => null)),
+  replaySpeed: Annotation<number>(lastValue(() => 1)),
+  replayFromNode: Annotation<string | null>(lastValue<string | null>(() => null)),
+
   // Send-payload fields: transient, set by Send() args during parallel worker superstep
   _send_task: Annotation<Record<string, unknown> | null>(lastValue<Record<string, unknown> | null>(() => null)),
   _send_bot_id: Annotation<string>(lastValue(() => "")),

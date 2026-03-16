@@ -21,6 +21,13 @@ export interface SseClient {
 export const sseClients = new Set<SseClient>();
 let eventCounter = 0;
 
+/** Optional recorder reference for capturing broadcasts. Set by work-runner. */
+let _activeRecorderRef: { recordBroadcast: (event: Record<string, unknown>) => void } | null = null;
+
+export function setBroadcastRecorder(recorder: { recordBroadcast: (event: Record<string, unknown>) => void } | null): void {
+  _activeRecorderRef = recorder;
+}
+
 interface ReplayEntry {
   id: number;
   data: string;
@@ -45,6 +52,10 @@ export function broadcast(event: object): void {
   }
   for (const client of sseClients) {
     writeEvent(client.res, eventCounter, data);
+  }
+  // Record broadcast for replay (async, non-blocking)
+  if (_activeRecorderRef) {
+    _activeRecorderRef.recordBroadcast(event as Record<string, unknown>);
   }
 }
 

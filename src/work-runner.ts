@@ -8,6 +8,7 @@ import type { TeamComposition } from "./agents/composition/types.js";
 import type { AgentInclusionRule } from "./agents/composition/rules.js";
 import { renderCompositionTable, promptCompositionAction, applyOverrides } from "./cli/composition-preview.js";
 import { AgentRegistryStore } from "./agents/registry/index.js";
+import { SessionRecorder, setActiveRecorder, createSession, finalizeSession } from "./replay/index.js";
 import {
     buildTeamFromRoster,
     buildTeamFromTemplate,
@@ -480,9 +481,16 @@ export async function runWork(
       }
     }
 
+    // Session recording — always on, async, never blocks
+    const replaySessionId = `work-${Date.now()}`;
+    const recorder = new SessionRecorder(replaySessionId);
+    setActiveRecorder(recorder);
+    createSession(replaySessionId, effectiveGoal || "(no goal)", []);
+
     // Main run loop
     // ---------------------------------------------------------------------------
     for (let runId = 1; runId <= maxRuns; runId++) {
+        recorder.setRunIndex(runId);
         try {
             const teamConfig = await loadTeamConfig();
             const goal =
@@ -1070,6 +1078,15 @@ export async function runWork(
             log("info", "Work session finished.");
         }
     }
+
+    // Finalize recording
+    recorder.stop();
+    setActiveRecorder(null);
+    finalizeSession(replaySessionId, {
+      totalRuns: maxRuns,
+      totalCostUSD: 0,
+      averageConfidence: 0,
+    }).catch(() => {});
 
     const shouldRunRetro = !lastTeamComposition || lastTeamComposition.activeAgents.some(a => a.role === "retrospective");
     if (lastTotalReworks > 0 && lastFinalState && shouldRunRetro) {
