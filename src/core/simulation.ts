@@ -16,8 +16,10 @@ import { buildTeamFromTemplate } from "./team-templates.js";
 import type { BotDefinition } from "./bot-definitions.js";
 import { CoordinatorAgent } from "../agents/coordinator.js";
 import { createWorkerBots, createTaskDispatcher, createWorkerTaskNode, createWorkerCollectNode } from "../agents/worker-bot.js";
-import { getFirstTaskNeedingApproval, createApprovalNode, createHumanApprovalNode } from "../agents/approval.js";
+import { getFirstTaskNeedingApproval, createApprovalNode } from "../agents/approval.js";
 import type { ApprovalProvider } from "../agents/approval.js";
+import { createPartialApprovalNode } from "../agents/partial-approval.js";
+import type { PerTaskApprovalProvider } from "../agents/partial-approval.js";
 import { UniversalOpenClawAdapter } from "../adapters/worker-adapter.js";
 import { resolveModelForAgent } from "./model-config.js";
 import { logger, isDebugMode } from "./logger.js";
@@ -42,10 +44,10 @@ function generateMidSprintSummary(state: GraphState): string {
   const taskQueue = state.task_queue ?? [];
   const totalTasks = (state.total_tasks as number) ?? taskQueue.length;
   
-  const completedTasks = taskQueue.filter((t) => 
-    t.status === "completed" || t.status === "waiting_for_human"
+  const completedTasks = taskQueue.filter((t) =>
+    t.status === "completed" || t.status === "waiting_for_human" || t.status === "auto_approved_pending"
   );
-  const remainingTasks = taskQueue.filter((t) => 
+  const remainingTasks = taskQueue.filter((t) =>
     t.status === "pending" || t.status === "reviewing" || t.status === "needs_rework" || t.status === "rfc_pending"
   );
   
@@ -104,6 +106,7 @@ export class TeamOrchestration {
     teamTemplateId?: string;
     workerUrls?: Record<string, string>;
     approvalProvider?: ApprovalProvider | null;
+    partialApprovalProvider?: PerTaskApprovalProvider | null;
     previewProvider?: PreviewProvider | null;
     workspacePath?: string;
     autoApprove?: boolean;
@@ -111,7 +114,7 @@ export class TeamOrchestration {
     signal?: AbortSignal;
     costConfig?: Partial<CostConfig>;
   } = {}) {
-    const { team, teamTemplateId = "game_dev", workerUrls = {}, approvalProvider = null, previewProvider = null, workspacePath, autoApprove = false, vectorMemory, signal, costConfig } = options;
+    const { team, teamTemplateId = "game_dev", workerUrls = {}, approvalProvider = null, partialApprovalProvider = null, previewProvider = null, workspacePath, autoApprove = false, vectorMemory, signal, costConfig } = options;
     this.team = team ?? buildTeamFromTemplate(teamTemplateId);
     this.workerBots = createWorkerBots(this.team, workerUrls, workspacePath);
     const sharedLlmAdapter =
@@ -128,7 +131,10 @@ export class TeamOrchestration {
     const workerTaskNode = createWorkerTaskNode(this.workerBots, this.team);
     const collectNode = createWorkerCollectNode();
     const approvalNode = createApprovalNode(approvalProvider);
-    const humanApprovalNode = createHumanApprovalNode(autoApprove);
+    const partialApprovalNode = createPartialApprovalNode({
+      autoApprove,
+      approvalProvider: partialApprovalProvider,
+    });
     const sprintPlanningNode = createSprintPlanningNode(workspacePath ?? "", sharedLlmAdapter, signal);
     const systemDesignNode = createSystemDesignNode(workspacePath ?? "", sharedLlmAdapter, signal);
     const rfcNode = createRFCNode(workspacePath ?? "", this.team, sharedLlmAdapter, signal);
@@ -154,7 +160,7 @@ export class TeamOrchestration {
     const telemetryWorkerTaskNode = wrapWithTelemetry("worker_task", workerTaskNode);
     const telemetryCollectNode = wrapWithTelemetry("worker_collect", async (s) => collectNode(s));
     const telemetryApprovalNode = wrapWithTelemetry("approval", approvalNode);
-    const telemetryHumanApprovalNode = wrapWithTelemetry("human_approval", humanApprovalNode);
+    const telemetryPartialApprovalNode = wrapWithTelemetry("partial_approval", partialApprovalNode);
     const telemetrySprintPlanningNode = wrapWithTelemetry("sprint_planning", sprintPlanningNode);
     const telemetrySystemDesignNode = wrapWithTelemetry("system_design", systemDesignNode);
     const telemetryRfcNode = wrapWithTelemetry("rfc_phase", rfcNode);
@@ -179,12 +185,12 @@ export class TeamOrchestration {
       .addNode("worker_task", telemetryWorkerTaskNode)
       .addNode("confidence_router", telemetryConfidenceRouterNode)
       .addNode("worker_collect", telemetryCollectNode)
-      .addNode("human_approval", telemetryHumanApprovalNode)
+      .addNode("partial_approval", telemetryPartialApprovalNode)
       .addNode("increment_cycle", (s): Partial<GraphState> => {
         const taskQueue = s.task_queue ?? [];
         const totalTasks = (s.total_tasks as number) ?? taskQueue.length;
-        const completedTasks = taskQueue.filter((t) => 
-          t.status === "completed" || t.status === "waiting_for_human"
+        const completedTasks = taskQueue.filter((t) =>
+          t.status === "completed" || t.status === "waiting_for_human" || t.status === "auto_approved_pending"
         ).length;
         const alreadyReported = s.mid_sprint_reported ?? false;
         
@@ -239,7 +245,7 @@ export class TeamOrchestration {
           const tIds = new Set<string>();
           for (const t of tq) {
             const st = t.status as string;
-            if (st === "completed" || st === "failed" || st === "waiting_for_human") {
+            if (st === "completed" || st === "failed" || st === "waiting_for_human" || st === "auto_approved_pending" || st === "escalated") {
               tIds.add(t.task_id as string);
             }
           }
@@ -255,11 +261,23 @@ export class TeamOrchestration {
           if (hasReady) {
             return taskDispatcher(s);
           }
-          return "human_approval";
+          return "partial_approval";
         },
-        { human_approval: "human_approval", worker_collect: "worker_collect", worker_task: "worker_task" }
+        { partial_approval: "partial_approval", worker_collect: "worker_collect", worker_task: "worker_task" }
       )
-      .addEdge("human_approval", "increment_cycle")
+      .addConditionalEdges(
+        "partial_approval",
+        (s) => {
+          const tq = s.task_queue ?? [];
+          const hasRework = tq.some((t) => {
+            const st = t.status as string;
+            return st === "needs_rework";
+          });
+          if (hasRework) return taskDispatcher(s);
+          return "increment_cycle";
+        },
+        { increment_cycle: "increment_cycle", worker_collect: "worker_collect", worker_task: "worker_task" }
+      )
       .addConditionalEdges(
         "increment_cycle",
         (s) => {
@@ -295,8 +313,8 @@ export class TeamOrchestration {
           }
           
           const taskQueue = s.task_queue ?? [];
-          const active = taskQueue.filter((t) => 
-            t.status === "pending" || t.status === "reviewing" || t.status === "needs_rework" || t.status === "in_progress" || t.status === "waiting_for_human" || t.status === "rfc_pending"
+          const active = taskQueue.filter((t) =>
+            t.status === "pending" || t.status === "reviewing" || t.status === "needs_rework" || t.status === "in_progress" || t.status === "auto_approved_pending" || t.status === "rfc_pending"
           );
           if (active.length > 0 || s.user_goal) return "continue";
           return "__end__";
@@ -474,6 +492,7 @@ export function createTeamOrchestration(options: {
   teamTemplateId?: string;
   workerUrls?: Record<string, string>;
   approvalProvider?: ApprovalProvider | null;
+  partialApprovalProvider?: PerTaskApprovalProvider | null;
   previewProvider?: PreviewProvider | null;
   workspacePath?: string;
   autoApprove?: boolean;

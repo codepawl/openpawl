@@ -117,6 +117,7 @@ interface WsStore {
   lastError: string | null;
   alerts: AlertItem[];
   pendingApproval: Record<string, unknown> | null;
+  pendingTaskApprovals: Record<string, unknown>[];
   pendingPreview: Record<string, unknown> | null;
   activeNode: string | null;
   completedNodes: string[];
@@ -149,6 +150,8 @@ interface WsStore {
   setNotificationPrefs: (prefs: Partial<NotificationPreferences>) => void;
   toggleNotificationType: (type: AlertType) => void;
   setPendingApproval: (pending: Record<string, unknown> | null) => void;
+  setPendingTaskApprovals: (tasks: Record<string, unknown>[]) => void;
+  resolveTaskApproval: (taskId: string) => void;
   setPendingPreview: (preview: Record<string, unknown> | null) => void;
   clearPendingPreview: () => void;
   setActiveNode: (node: string | null) => void;
@@ -182,6 +185,7 @@ const COMMAND_ROUTES: Record<string, { method: string; path: string | ((body: Re
   speed: { method: "POST", path: "/api/session/speed" },
   config: { method: "POST", path: "/api/session/config" },
   approval_response: { method: "POST", path: "/api/approval/respond" },
+  task_approval_respond: { method: "POST", path: "/api/approval/task-respond" },
   preview_response: { method: "POST", path: "/api/preview/respond" },
   update_task: { method: "POST", path: (body) => `/api/tasks/${encodeURIComponent(String(body.taskId ?? ""))}` },
   model_switch: { method: "POST", path: "/api/models/switch" },
@@ -216,6 +220,7 @@ export const useWsStore = create<WsStore>((set) => ({
   alerts: [],
   notificationPrefs: loadNotifPrefs(),
   pendingApproval: null,
+  pendingTaskApprovals: [],
   pendingPreview: null,
   activeNode: null,
   completedNodes: [],
@@ -301,6 +306,13 @@ export const useWsStore = create<WsStore>((set) => ({
       return { notificationPrefs: next };
     }),
   setPendingApproval: (pending) => set({ pendingApproval: pending }),
+  setPendingTaskApprovals: (tasks) => set({ pendingTaskApprovals: tasks }),
+  resolveTaskApproval: (taskId) =>
+    set((prev) => ({
+      pendingTaskApprovals: prev.pendingTaskApprovals.filter(
+        (t) => (t.task_id as string) !== taskId,
+      ),
+    })),
   setPendingPreview: (preview) => set({ pendingPreview: preview }),
   clearPendingPreview: () => set({ pendingPreview: null }),
   setActiveNode: (node) => set({ activeNode: node }),

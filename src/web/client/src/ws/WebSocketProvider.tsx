@@ -137,6 +137,24 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
               read: false,
             });
           }
+        } else if (type === "partial_approval_request" && payload.tasks) {
+          const { setPendingTaskApprovals } = useWsStore.getState();
+          setPendingTaskApprovals(payload.tasks as Record<string, unknown>[]);
+          const prefs = useWsStore.getState().notificationPrefs;
+          if (prefs.enabled && prefs.types.approval_request) {
+            const taskCount = (payload.tasks as unknown[]).length;
+            pushAlert({
+              id: `partial-approval-${Date.now()}`,
+              type: "approval_request",
+              message: `${taskCount} task(s) ready for review.`,
+              details: payload as Record<string, unknown>,
+              created_at: new Date().toISOString(),
+              read: false,
+            });
+          }
+        } else if (type === "partial_approval_resolved" && payload.task_id) {
+          const { resolveTaskApproval } = useWsStore.getState();
+          resolveTaskApproval(payload.task_id as string);
         } else if (type === "preview_request" && payload.preview) {
           const { setPendingPreview } = useWsStore.getState();
           setPendingPreview(payload.preview as Record<string, unknown>);

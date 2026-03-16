@@ -92,6 +92,13 @@ export const GameStateAnnotation = Annotation.Root({
     default: () => [],
   }),
 
+  // Partial approval — escalated tasks deferred to next sprint
+  next_sprint_backlog: Annotation<Record<string, unknown>[]>({
+    reducer: (left, right) => left.concat(Array.isArray(right) ? right : [right]),
+    default: () => [],
+  }),
+  approval_stats: Annotation<Record<string, unknown>>(lastValue<Record<string, unknown>>(() => ({}))),
+
   // Send-payload fields: transient, set by Send() args during parallel worker superstep
   _send_task: Annotation<Record<string, unknown> | null>(lastValue<Record<string, unknown> | null>(() => null)),
   _send_bot_id: Annotation<string>(lastValue(() => "")),

@@ -46,8 +46,17 @@ export function TaskCard({ task }: TaskCardProps) {
   const { remainingSeconds, isExpired } = useTimeboxCountdown(task);
   const reasoning = useWsStore((s) => s.reasoning[taskId]);
   const streamingEntry = useWsStore((s) => s.streamingText[assignedTo]);
+  const pendingTaskApprovals = useWsStore((s) => s.pendingTaskApprovals);
+  const sendCommand = useWsStore((s) => s.sendCommand);
   const [showReasoning, setShowReasoning] = useState(false);
   const [showStreaming, setShowStreaming] = useState(true);
+  const [showFeedbackInput, setShowFeedbackInput] = useState(false);
+  const [feedbackText, setFeedbackText] = useState("");
+
+  const isPendingApproval = pendingTaskApprovals.some(
+    (t) => (t.task_id as string) === taskId,
+  );
+  const isAutoApproved = status === "auto_approved_pending";
 
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: taskId,
@@ -97,7 +106,79 @@ export function TaskCard({ task }: TaskCardProps) {
           {assignedTo.slice(-1).toUpperCase() || "?"}
         </span>
         <span className="text-xs text-stone-500 dark:text-stone-400">{assignedTo}</span>
+        {isAutoApproved && (
+          <span className="ml-auto rounded-md bg-emerald-100 dark:bg-emerald-900/50 px-1.5 py-0.5 text-xs font-medium text-emerald-700 dark:text-emerald-300">
+            Auto
+          </span>
+        )}
       </div>
+      {isPendingApproval && (
+        <div className="mt-2" onPointerDown={(e) => e.stopPropagation()}>
+          {!showFeedbackInput ? (
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => sendCommand("task_approval_respond", { task_id: taskId, action: "approve" })}
+                className="rounded-md bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-emerald-700 transition-colors"
+              >
+                <i className="bi bi-check-lg mr-1" />Approve
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowFeedbackInput(true)}
+                className="rounded-md bg-rose-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-rose-700 transition-colors"
+              >
+                <i className="bi bi-x-lg mr-1" />Reject
+              </button>
+              <button
+                type="button"
+                onClick={() => sendCommand("task_approval_respond", { task_id: taskId, action: "escalate" })}
+                className="rounded-md bg-stone-500 px-2.5 py-1 text-xs font-medium text-white hover:bg-stone-600 transition-colors"
+              >
+                <i className="bi bi-arrow-right-circle mr-1" />Defer
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5">
+              <input
+                type="text"
+                value={feedbackText}
+                onChange={(e) => setFeedbackText(e.target.value)}
+                placeholder="Feedback required..."
+                className="flex-1 rounded-md border border-stone-300 dark:border-stone-600 bg-white dark:bg-stone-800 px-2 py-1 text-xs text-stone-800 dark:text-stone-200 placeholder-stone-400"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && feedbackText.trim()) {
+                    sendCommand("task_approval_respond", { task_id: taskId, action: "reject", feedback: feedbackText.trim() });
+                    setShowFeedbackInput(false);
+                    setFeedbackText("");
+                  }
+                }}
+              />
+              <button
+                type="button"
+                disabled={!feedbackText.trim()}
+                onClick={() => {
+                  if (feedbackText.trim()) {
+                    sendCommand("task_approval_respond", { task_id: taskId, action: "reject", feedback: feedbackText.trim() });
+                    setShowFeedbackInput(false);
+                    setFeedbackText("");
+                  }
+                }}
+                className="rounded-md bg-rose-600 px-2 py-1 text-xs font-medium text-white hover:bg-rose-700 disabled:opacity-50 transition-colors"
+              >
+                Send
+              </button>
+              <button
+                type="button"
+                onClick={() => { setShowFeedbackInput(false); setFeedbackText(""); }}
+                className="rounded-md bg-stone-400 px-2 py-1 text-xs font-medium text-white hover:bg-stone-500 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+        </div>
+      )}
       {status === "in_progress" && remainingSeconds !== null && (
         <div className="mt-2 flex items-center justify-between">
           <span className="text-xs text-stone-500 dark:text-stone-400"><i className="bi bi-hourglass-split mr-1" />Timebox</span>

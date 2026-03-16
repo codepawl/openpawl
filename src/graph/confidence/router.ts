@@ -27,7 +27,7 @@ export function mapRoutingToStatus(
 ): string {
   switch (decision) {
     case "auto_approved":
-      return "waiting_for_human";
+      return "auto_approved_pending";
     case "qa_review":
       return hasReviewer ? "reviewing" : "waiting_for_human";
     case "rework":

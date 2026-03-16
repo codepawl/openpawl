@@ -39,9 +39,9 @@ describe("getRoutingDecision", () => {
 });
 
 describe("mapRoutingToStatus", () => {
-  it("maps auto_approved to waiting_for_human", () => {
-    expect(mapRoutingToStatus("auto_approved", true)).toBe("waiting_for_human");
-    expect(mapRoutingToStatus("auto_approved", false)).toBe("waiting_for_human");
+  it("maps auto_approved to auto_approved_pending", () => {
+    expect(mapRoutingToStatus("auto_approved", true)).toBe("auto_approved_pending");
+    expect(mapRoutingToStatus("auto_approved", false)).toBe("auto_approved_pending");
   });
 
   it("maps qa_review to reviewing when reviewer exists", () => {
@@ -148,7 +148,7 @@ describe("createConfidenceRouterNode", () => {
     });
     const result = router(state);
     const updatedTask = (result.task_queue as Record<string, unknown>[])?.[0];
-    expect(updatedTask?.status).toBe("waiting_for_human");
+    expect(updatedTask?.status).toBe("auto_approved_pending");
     const taskResult = updatedTask?.result as Record<string, unknown>;
     expect(taskResult?.routing_decision).toBe("auto_approved");
   });
@@ -199,7 +199,7 @@ describe("createConfidenceRouterNode", () => {
     });
     const result = router(state);
     const updatedTask = (result.task_queue as Record<string, unknown>[])?.[0];
-    expect(updatedTask?.status).toBe("waiting_for_human");
+    expect(updatedTask?.status).toBe("auto_approved_pending");
     const taskResult = updatedTask?.result as Record<string, unknown>;
     expect(taskResult?.routing_decision).toBe("auto_approved");
   });

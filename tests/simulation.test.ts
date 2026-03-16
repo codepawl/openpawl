@@ -24,7 +24,7 @@ const {
   mockWorkerExecuteNode,
   mockTaskDispatcher,
   mockApprovalNode,
-  mockHumanApprovalNode,
+  mockPartialApprovalNode,
   mockSendNodeActive,
   mockSendSessionTimeout,
 } = vi.hoisted(() => ({
@@ -38,7 +38,7 @@ const {
   mockWorkerExecuteNode: vi.fn(),
   mockTaskDispatcher: vi.fn(),
   mockApprovalNode: vi.fn(),
-  mockHumanApprovalNode: vi.fn(),
+  mockPartialApprovalNode: vi.fn(),
   mockSendNodeActive: vi.fn(),
   mockSendSessionTimeout: vi.fn(),
 }));
@@ -109,7 +109,10 @@ vi.mock("../src/agents/worker-bot.js", () => ({
 vi.mock("../src/agents/approval.js", () => ({
   getFirstTaskNeedingApproval: vi.fn().mockReturnValue(null),
   createApprovalNode: vi.fn().mockReturnValue(mockApprovalNode),
-  createHumanApprovalNode: vi.fn().mockReturnValue(mockHumanApprovalNode),
+}));
+
+vi.mock("../src/agents/partial-approval.js", () => ({
+  createPartialApprovalNode: vi.fn().mockReturnValue(mockPartialApprovalNode),
 }));
 
 vi.mock("../src/agents/planning.js", () => ({
@@ -218,7 +221,7 @@ describe("simulation.ts — TeamOrchestration", () => {
     mockCoordinateNode.mockResolvedValue({ __node__: "coordinator" });
     mockWorkerExecuteNode.mockResolvedValue({ __node__: "worker_execute" });
     mockApprovalNode.mockResolvedValue({ __node__: "approval" });
-    mockHumanApprovalNode.mockResolvedValue({ __node__: "human_approval" });
+    mockPartialApprovalNode.mockResolvedValue({ __node__: "partial_approval" });
     mockSendNodeActive.mockReturnValue(undefined);
     mockSendSessionTimeout.mockReturnValue(undefined);
     // Re-wire mocked module exports (cleared by clearAllMocks)
@@ -244,11 +247,11 @@ describe("simulation.ts — TeamOrchestration", () => {
     const approvalMod = await import("../src/agents/approval.js") as {
       getFirstTaskNeedingApproval: ReturnType<typeof vi.fn>;
       createApprovalNode: ReturnType<typeof vi.fn>;
-      createHumanApprovalNode: ReturnType<typeof vi.fn>;
     };
     approvalMod.getFirstTaskNeedingApproval.mockReturnValue(null);
     approvalMod.createApprovalNode.mockReturnValue(mockApprovalNode);
-    approvalMod.createHumanApprovalNode.mockReturnValue(mockHumanApprovalNode);
+    const partialApprovalMod = await import("../src/agents/partial-approval.js") as { createPartialApprovalNode: ReturnType<typeof vi.fn> };
+    partialApprovalMod.createPartialApprovalNode.mockReturnValue(mockPartialApprovalNode);
 
     const planningMod = await import("../src/agents/planning.js") as { createSprintPlanningNode: ReturnType<typeof vi.fn> };
     planningMod.createSprintPlanningNode.mockReturnValue(vi.fn().mockResolvedValue({ __node__: "sprint_planning" }));
@@ -310,7 +313,7 @@ describe("simulation.ts — TeamOrchestration", () => {
       expect(registeredNodes).toContain("approval");
       expect(registeredNodes).toContain("worker_task");
       expect(registeredNodes).toContain("worker_collect");
-      expect(registeredNodes).toContain("human_approval");
+      expect(registeredNodes).toContain("partial_approval");
       expect(registeredNodes).toContain("increment_cycle");
     });
 
@@ -327,8 +330,7 @@ describe("simulation.ts — TeamOrchestration", () => {
       expect(edges).toContainEqual(["coordinator", "preview"]);
       expect(edges).toContainEqual(["worker_task", "confidence_router"]);
       expect(edges).toContainEqual(["confidence_router", "worker_collect"]);
-      // worker_collect → human_approval is now a conditional edge (wave loop)
-      expect(edges).toContainEqual(["human_approval", "increment_cycle"]);
+      // partial_approval → increment_cycle is now a conditional edge (rework loop)
     });
 
     it("registers conditional edges for preview, approval, and increment_cycle", () => {
@@ -339,6 +341,7 @@ describe("simulation.ts — TeamOrchestration", () => {
       expect(conditionalSources).toContain("preview");
       expect(conditionalSources).toContain("approval");
       expect(conditionalSources).toContain("worker_collect");
+      expect(conditionalSources).toContain("partial_approval");
       expect(conditionalSources).toContain("increment_cycle");
     });
 
@@ -793,7 +796,7 @@ describe("simulation.ts — TeamOrchestration", () => {
       });
 
       it("recognizes all active statuses for continuation", () => {
-        const activeStatuses = ["pending", "reviewing", "needs_rework", "in_progress", "waiting_for_human", "rfc_pending"];
+        const activeStatuses = ["pending", "reviewing", "needs_rework", "in_progress", "auto_approved_pending", "rfc_pending"];
         for (const status of activeStatuses) {
           const result = incrementRoute({
             cycle_count: 1,

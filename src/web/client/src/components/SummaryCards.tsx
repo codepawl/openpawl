@@ -32,11 +32,23 @@ export function SummaryCards() {
         )
       : -1;
 
+  const autoApproved = task_queue.filter((t) => {
+    const r = t.result as Record<string, unknown> | null;
+    return r?.routing_decision === "auto_approved" && (t.status as string) === "completed";
+  }).length;
+  const deferred = task_queue.filter((t) => (t.status as string) === "escalated").length;
+
   const cards = [
     { label: "Total", value: total, accent: false, icon: "bi-list-task" },
     { label: "Active", value: active, accent: false, icon: "bi-lightning-charge-fill" },
     { label: "Attention", value: attention, accent: attention > 0, icon: "bi-exclamation-triangle-fill" },
     { label: "Done", value: done, accent: false, icon: "bi-check-circle-fill" },
+    ...(autoApproved > 0
+      ? [{ label: "Auto-Approved", value: autoApproved, accent: false, icon: "bi-robot" }]
+      : []),
+    ...(deferred > 0
+      ? [{ label: "Deferred", value: deferred, accent: deferred > 0, icon: "bi-clock-history" }]
+      : []),
     ...(avgConfidence >= 0
       ? [{ label: "Confidence", value: `${avgConfidence}%`, accent: avgConfidence < 60, icon: "bi-speedometer2" }]
       : []),
@@ -54,7 +66,7 @@ export function SummaryCards() {
 
   return (
     <motion.div
-      className={`grid grid-cols-2 gap-3 ${cards.length > 4 ? "sm:grid-cols-5" : "sm:grid-cols-4"}`}
+      className={`grid grid-cols-2 gap-3 ${cards.length >= 7 ? "sm:grid-cols-7" : cards.length >= 6 ? "sm:grid-cols-6" : cards.length > 4 ? "sm:grid-cols-5" : "sm:grid-cols-4"}`}
       variants={containerVariants}
       initial="hidden"
       animate="visible"

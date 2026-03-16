@@ -189,7 +189,7 @@ export function createTaskDispatcher(
     const terminalIds = new Set<string>();
     for (const t of taskQueue) {
       const status = t.status as string;
-      if (status === "completed" || status === "failed" || status === "waiting_for_human") {
+      if (status === "completed" || status === "failed" || status === "waiting_for_human" || status === "auto_approved_pending" || status === "escalated") {
         terminalIds.add(t.task_id as string);
       }
     }
@@ -516,7 +516,7 @@ export function createWorkerCollectNode(): (state: GraphState) => Partial<GraphS
 
     const actionableTasks = taskQueue.filter(
       (t) => t.status === "completed" || t.status === "failed" || t.status === "reviewing" ||
-             t.status === "needs_rework" || t.status === "waiting_for_human"
+             t.status === "needs_rework" || t.status === "waiting_for_human" || t.status === "auto_approved_pending"
     );
 
     return {

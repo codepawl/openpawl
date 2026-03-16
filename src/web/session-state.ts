@@ -5,6 +5,7 @@
 import type { ServerResponse } from "node:http";
 import type { ApprovalPending, ApprovalResponse } from "../agents/approval.js";
 import type { PreviewState, PreviewResponse } from "../graph/preview/types.js";
+import type { PartialApprovalTask, PartialApprovalDecision } from "../agents/partial-approval.js";
 import { CONFIG, type SessionConfig } from "../core/config.js";
 import { getModelConfig } from "../core/model-config.js";
 
@@ -155,6 +156,64 @@ export function previewProvider(preview: PreviewState): Promise<PreviewResponse>
   return new Promise((resolve) => {
     previewResolve = resolve;
     broadcast({ type: "preview_request", preview });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Per-task partial approval resolvers (dashboard → partial_approval node)
+// ---------------------------------------------------------------------------
+const taskApprovalResolvers = new Map<string, (r: PartialApprovalDecision) => void>();
+
+export function setTaskApprovalResolver(taskId: string, fn: (r: PartialApprovalDecision) => void): void {
+  taskApprovalResolvers.set(taskId, fn);
+}
+
+export function getTaskApprovalResolver(taskId: string): ((r: PartialApprovalDecision) => void) | null {
+  return taskApprovalResolvers.get(taskId) ?? null;
+}
+
+export function clearTaskApprovalResolver(taskId: string): void {
+  taskApprovalResolvers.delete(taskId);
+}
+
+export function clearAllTaskApprovalResolvers(): void {
+  taskApprovalResolvers.clear();
+}
+
+export function partialApprovalProvider(tasks: PartialApprovalTask[]): Promise<Map<string, PartialApprovalDecision>> {
+  return new Promise((resolve) => {
+    const decisions = new Map<string, PartialApprovalDecision>();
+    let remaining = tasks.filter((t) => !t.is_auto_approved).length;
+
+    // If all tasks are auto-approved, resolve immediately
+    if (remaining <= 0) {
+      for (const task of tasks) {
+        decisions.set(task.task_id, { action: "approve" });
+      }
+      resolve(decisions);
+      return;
+    }
+
+    for (const task of tasks) {
+      if (task.is_auto_approved) {
+        // Auto-approved tasks default to approve, but can be overridden
+        decisions.set(task.task_id, { action: "approve" });
+      }
+      setTaskApprovalResolver(task.task_id, (decision) => {
+        decisions.set(task.task_id, decision);
+        // Only count manual tasks toward the remaining counter
+        if (!task.is_auto_approved) {
+          remaining--;
+        }
+        if (remaining <= 0) {
+          clearAllTaskApprovalResolvers();
+          resolve(decisions);
+        }
+      });
+    }
+
+    broadcast({ type: "partial_approval_request", tasks });
+    updateSessionState({ pendingApproval: { type: "partial", tasks } as unknown as Record<string, unknown> });
   });
 }
 

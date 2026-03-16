@@ -9,9 +9,10 @@ const COLUMNS: { id: string; title: string; statuses: string[] }[] = [
   {
     id: "needs_approval",
     title: "Needs Approval",
-    statuses: ["needs_approval", "waiting_for_human", "TIMEOUT_WARNING"],
+    statuses: ["needs_approval", "waiting_for_human", "auto_approved_pending", "TIMEOUT_WARNING"],
   },
   { id: "done", title: "Done", statuses: ["completed", "failed"] },
+  { id: "deferred", title: "Deferred", statuses: ["escalated"] },
 ];
 
 const COLUMN_ID_TO_STATUS: Record<string, string> = {
@@ -20,6 +21,7 @@ const COLUMN_ID_TO_STATUS: Record<string, string> = {
   in_progress: "in_progress",
   needs_approval: "needs_approval",
   done: "completed",
+  deferred: "escalated",
 };
 
 function statusToColumnId(status: string): string {

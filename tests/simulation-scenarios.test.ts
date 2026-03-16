@@ -27,7 +27,7 @@ const {
   mockWorkerExecuteNode,
   mockTaskDispatcher,
   mockApprovalNode,
-  mockHumanApprovalNode,
+  mockPartialApprovalNode,
   mockSendNodeActive,
   mockSendSessionTimeout,
   mockSendStreamChunk,
@@ -47,7 +47,7 @@ const {
   mockWorkerExecuteNode: vi.fn(),
   mockTaskDispatcher: vi.fn(),
   mockApprovalNode: vi.fn(),
-  mockHumanApprovalNode: vi.fn(),
+  mockPartialApprovalNode: vi.fn(),
   mockSendNodeActive: vi.fn(),
   mockSendSessionTimeout: vi.fn(),
   mockSendStreamChunk: vi.fn(),
@@ -124,7 +124,10 @@ vi.mock("../src/agents/worker-bot.js", () => ({
 vi.mock("../src/agents/approval.js", () => ({
   getFirstTaskNeedingApproval: mockGetFirstTaskNeedingApproval,
   createApprovalNode: vi.fn().mockReturnValue(mockApprovalNode),
-  createHumanApprovalNode: vi.fn().mockReturnValue(mockHumanApprovalNode),
+}));
+
+vi.mock("../src/agents/partial-approval.js", () => ({
+  createPartialApprovalNode: vi.fn().mockReturnValue(mockPartialApprovalNode),
 }));
 
 vi.mock("../src/agents/planning.js", () => ({
@@ -382,7 +385,7 @@ beforeEach(() => {
   mockCoordinateNode.mockResolvedValue({ __node__: "coordinator" });
   mockWorkerExecuteNode.mockResolvedValue({ __node__: "worker_execute" });
   mockApprovalNode.mockResolvedValue({ __node__: "approval" });
-  mockHumanApprovalNode.mockResolvedValue({ __node__: "human_approval" });
+  mockPartialApprovalNode.mockResolvedValue({ __node__: "partial_approval" });
   mockGetFirstTaskNeedingApproval.mockReturnValue(null);
   mockTaskDispatcher.mockReturnValue("worker_task");
 });
@@ -417,14 +420,14 @@ describe("Scenario: SUCCESS_PATH", () => {
     });
 
     // Human auto-approves → completed
-    mockHumanApprovalNode.mockResolvedValueOnce({
+    mockPartialApprovalNode.mockResolvedValueOnce({
       task_queue: [
         makeTask({ task_id: "TASK-001", status: "completed", result: { success: true, output: "Page built" } }),
         makeTask({ task_id: "TASK-002", status: "completed", result: { success: true, output: "Tests written" }, assigned_to: "bot_1" }),
       ],
       bot_stats: { bot_0: { tasks_completed: 1 }, bot_1: { tasks_completed: 1 } },
       messages: ["Tasks approved"],
-      __node__: "human_approval",
+      __node__: "partial_approval",
     });
 
     const orch = createTeamOrchestration({ team: makeTeam() });
@@ -448,10 +451,10 @@ describe("Scenario: SUCCESS_PATH", () => {
       bot_stats: {},
       __node__: "worker_execute",
     });
-    mockHumanApprovalNode.mockResolvedValueOnce({
+    mockPartialApprovalNode.mockResolvedValueOnce({
       task_queue: [makeTask({ task_id: "TASK-001", status: "completed" })],
       bot_stats: { bot_0: { tasks_completed: 1, tasks_failed: 0, reworks_triggered: 0 } },
-      __node__: "human_approval",
+      __node__: "partial_approval",
     });
 
     const orch = createTeamOrchestration({ team: makeTeam() });
@@ -471,9 +474,9 @@ describe("Scenario: SUCCESS_PATH", () => {
       task_queue: [makeTask({ task_id: "TASK-001", status: "completed" })],
       __node__: "worker_execute",
     });
-    mockHumanApprovalNode.mockResolvedValueOnce({
+    mockPartialApprovalNode.mockResolvedValueOnce({
       task_queue: [makeTask({ task_id: "TASK-001", status: "completed" })],
-      __node__: "human_approval",
+      __node__: "partial_approval",
     });
 
     const orch = createTeamOrchestration({ team: makeTeam() });
@@ -494,9 +497,9 @@ describe("Scenario: SUCCESS_PATH", () => {
       task_queue: [makeTask({ task_id: "TASK-001", status: "completed" })],
       __node__: "worker_execute",
     });
-    mockHumanApprovalNode.mockResolvedValueOnce({
+    mockPartialApprovalNode.mockResolvedValueOnce({
       task_queue: [makeTask({ task_id: "TASK-001", status: "completed" })],
-      __node__: "human_approval",
+      __node__: "partial_approval",
     });
 
     const orch = createTeamOrchestration({ team: makeTeam() });
@@ -522,12 +525,12 @@ describe("Scenario: SUCCESS_PATH", () => {
       ],
       __node__: "worker_execute",
     });
-    mockHumanApprovalNode.mockResolvedValueOnce({
+    mockPartialApprovalNode.mockResolvedValueOnce({
       task_queue: [
         makeTask({ task_id: "TASK-001", status: "completed" }),
         makeTask({ task_id: "TASK-002", status: "completed" }),
       ],
-      __node__: "human_approval",
+      __node__: "partial_approval",
     });
 
     const orch = createTeamOrchestration({ team: makeTeam() });
@@ -561,7 +564,7 @@ describe("Scenario: HUMAN_REJECTION", () => {
       task_queue: [makeTask({ task_id: "TASK-001", status: "waiting_for_human" })],
       __node__: "worker_execute",
     });
-    mockHumanApprovalNode.mockResolvedValueOnce({
+    mockPartialApprovalNode.mockResolvedValueOnce({
       task_queue: [
         makeTask({
           task_id: "TASK-001",
@@ -571,7 +574,7 @@ describe("Scenario: HUMAN_REJECTION", () => {
         }),
       ],
       messages: ["Rejected by human"],
-      __node__: "human_approval",
+      __node__: "partial_approval",
     });
 
     // Cycle 2: coordinator re-queues as pending → worker reworks → human approves
@@ -590,10 +593,10 @@ describe("Scenario: HUMAN_REJECTION", () => {
       task_queue: [makeTask({ task_id: "TASK-001", status: "waiting_for_human", retry_count: 1 })],
       __node__: "worker_execute",
     });
-    mockHumanApprovalNode.mockResolvedValueOnce({
+    mockPartialApprovalNode.mockResolvedValueOnce({
       task_queue: [makeTask({ task_id: "TASK-001", status: "completed", retry_count: 1 })],
       bot_stats: { bot_0: { tasks_completed: 1 } },
-      __node__: "human_approval",
+      __node__: "partial_approval",
     });
 
     const orch = createTeamOrchestration({ team: makeTeam() });
@@ -615,7 +618,7 @@ describe("Scenario: HUMAN_REJECTION", () => {
       task_queue: [makeTask({ task_id: "TASK-001", status: "waiting_for_human" })],
       __node__: "worker_execute",
     });
-    mockHumanApprovalNode.mockResolvedValueOnce({
+    mockPartialApprovalNode.mockResolvedValueOnce({
       task_queue: [
         makeTask({
           task_id: "TASK-001",
@@ -623,7 +626,7 @@ describe("Scenario: HUMAN_REJECTION", () => {
           reviewer_feedback: "HUMAN FEEDBACK: Colors are wrong. Please fix this.",
         }),
       ],
-      __node__: "human_approval",
+      __node__: "partial_approval",
     });
 
     // Coordinator doesn't re-queue → graph ends with needs_rework (expected)
@@ -646,9 +649,9 @@ describe("Scenario: HUMAN_REJECTION", () => {
       task_queue: [makeTask({ task_id: "TASK-001", status: "waiting_for_human" })],
       __node__: "worker_execute",
     });
-    mockHumanApprovalNode.mockResolvedValueOnce({
+    mockPartialApprovalNode.mockResolvedValueOnce({
       task_queue: [makeTask({ task_id: "TASK-001", status: "needs_rework", retry_count: 0 })],
-      __node__: "human_approval",
+      __node__: "partial_approval",
     });
 
     // Coordinator re-queues as pending so routing continues to worker_execute
@@ -662,9 +665,9 @@ describe("Scenario: HUMAN_REJECTION", () => {
       task_queue: [makeTask({ task_id: "TASK-001", status: "completed", retry_count: 1 })],
       __node__: "worker_execute",
     });
-    mockHumanApprovalNode.mockResolvedValueOnce({
+    mockPartialApprovalNode.mockResolvedValueOnce({
       task_queue: [makeTask({ task_id: "TASK-001", status: "completed", retry_count: 1 })],
-      __node__: "human_approval",
+      __node__: "partial_approval",
     });
 
     const orch = createTeamOrchestration({ team: makeTeam() });
@@ -687,9 +690,9 @@ describe("Scenario: HUMAN_REJECTION", () => {
       __node__: "worker_execute",
     });
     // First rejection
-    mockHumanApprovalNode.mockResolvedValueOnce({
+    mockPartialApprovalNode.mockResolvedValueOnce({
       task_queue: [makeTask({ task_id: "TASK-001", status: "needs_rework", retry_count: 0, max_retries: 1 })],
-      __node__: "human_approval",
+      __node__: "partial_approval",
     });
     // Coordinator re-queues as pending
     mockCoordinateNode.mockResolvedValueOnce({
@@ -701,10 +704,10 @@ describe("Scenario: HUMAN_REJECTION", () => {
       __node__: "worker_execute",
     });
     // Second rejection — exceeds max_retries → failed
-    mockHumanApprovalNode.mockResolvedValueOnce({
+    mockPartialApprovalNode.mockResolvedValueOnce({
       task_queue: [makeTask({ task_id: "TASK-001", status: "failed", retry_count: 2, max_retries: 1 })],
       bot_stats: { bot_0: { tasks_failed: 1 } },
-      __node__: "human_approval",
+      __node__: "partial_approval",
     });
 
     const orch = createTeamOrchestration({ team: makeTeam() });
@@ -732,12 +735,12 @@ describe("Scenario: HUMAN_REJECTION", () => {
       __node__: "worker_execute",
     });
     // TASK-001 rejected, TASK-002 approved
-    mockHumanApprovalNode.mockResolvedValueOnce({
+    mockPartialApprovalNode.mockResolvedValueOnce({
       task_queue: [
         makeTask({ task_id: "TASK-001", status: "needs_rework", reviewer_feedback: "HUMAN FEEDBACK: fix" }),
         makeTask({ task_id: "TASK-002", status: "completed", assigned_to: "bot_1" }),
       ],
-      __node__: "human_approval",
+      __node__: "partial_approval",
     });
     // Coordinator re-queues TASK-001 as pending
     mockCoordinateNode.mockResolvedValueOnce({
@@ -754,12 +757,12 @@ describe("Scenario: HUMAN_REJECTION", () => {
       ],
       __node__: "worker_execute",
     });
-    mockHumanApprovalNode.mockResolvedValueOnce({
+    mockPartialApprovalNode.mockResolvedValueOnce({
       task_queue: [
         makeTask({ task_id: "TASK-001", status: "completed", retry_count: 1 }),
         makeTask({ task_id: "TASK-002", status: "completed", assigned_to: "bot_1" }),
       ],
-      __node__: "human_approval",
+      __node__: "partial_approval",
     });
 
     const orch = createTeamOrchestration({ team: makeTeam() });
@@ -783,10 +786,10 @@ describe("Scenario: HUMAN_REJECTION", () => {
       __node__: "worker_execute",
     });
     // Human rejects and worker-bot logic marks as failed (max_retries exceeded)
-    mockHumanApprovalNode.mockResolvedValueOnce({
+    mockPartialApprovalNode.mockResolvedValueOnce({
       task_queue: [makeTask({ task_id: "TASK-001", status: "failed", max_retries: 0, retry_count: 1 })],
       bot_stats: { bot_0: { tasks_failed: 1 } },
-      __node__: "human_approval",
+      __node__: "partial_approval",
     });
 
     const orch = createTeamOrchestration({ team: makeTeam() });
@@ -866,9 +869,9 @@ describe("Scenario: GATEWAY_FAILURE", () => {
       bot_stats: { bot_0: { tasks_failed: 1 } },
       __node__: "worker_execute",
     });
-    mockHumanApprovalNode.mockResolvedValueOnce({
+    mockPartialApprovalNode.mockResolvedValueOnce({
       task_queue: [makeTask({ task_id: "TASK-001", status: "failed" })],
-      __node__: "human_approval",
+      __node__: "partial_approval",
     });
 
     const orch = createTeamOrchestration({ team: makeTeam() });
@@ -964,9 +967,9 @@ describe("Scenario: SESSION_TIMEOUT", () => {
       task_queue: [makeTask({ task_id: "TASK-001", status: "completed" })],
       __node__: "worker_execute",
     });
-    mockHumanApprovalNode.mockResolvedValueOnce({
+    mockPartialApprovalNode.mockResolvedValueOnce({
       task_queue: [makeTask({ task_id: "TASK-001", status: "pending" })],  // still pending to force re-loop
-      __node__: "human_approval",
+      __node__: "partial_approval",
     });
 
     const orch = createTeamOrchestration({ team: makeTeam() });
@@ -998,9 +1001,9 @@ describe("Scenario: SESSION_TIMEOUT", () => {
       task_queue: [makeTask({ task_id: "TASK-001", status: "pending" })],
       __node__: "worker_execute",
     });
-    mockHumanApprovalNode.mockResolvedValueOnce({
+    mockPartialApprovalNode.mockResolvedValueOnce({
       task_queue: [makeTask({ task_id: "TASK-001", status: "pending" })],
-      __node__: "human_approval",
+      __node__: "partial_approval",
     });
 
     const orch = createTeamOrchestration({ team: makeTeam() });
@@ -1045,9 +1048,9 @@ describe("Scenario: SESSION_TIMEOUT", () => {
       task_queue: [makeTask({ task_id: "TASK-001", status: "pending" })],
       __node__: "worker_execute",
     });
-    mockHumanApprovalNode.mockResolvedValue({
+    mockPartialApprovalNode.mockResolvedValue({
       task_queue: [makeTask({ task_id: "TASK-001", status: "pending" })],
-      __node__: "human_approval",
+      __node__: "partial_approval",
     });
 
     const orch = createTeamOrchestration({ team: makeTeam() });
@@ -1081,12 +1084,12 @@ describe("Scenario: SESSION_TIMEOUT", () => {
       ],
       __node__: "worker_execute",
     });
-    mockHumanApprovalNode.mockResolvedValueOnce({
+    mockPartialApprovalNode.mockResolvedValueOnce({
       task_queue: [
         makeTask({ task_id: "TASK-001", status: "completed" }),
         makeTask({ task_id: "TASK-002", status: "in_progress", assigned_to: "bot_1" }),
       ],
-      __node__: "human_approval",
+      __node__: "partial_approval",
     });
 
     const orch = createTeamOrchestration({ team: makeTeam() });

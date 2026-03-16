@@ -57,10 +57,13 @@ import {
   sessionControl,
   resetSessionControl,
   approvalProvider,
+  partialApprovalProvider,
   getApprovalResolve,
   setApprovalResolve,
   getPreviewResolve,
   setPreviewResolve,
+  getTaskApprovalResolver,
+  clearTaskApprovalResolver,
   cliCycles,
   cliGenerations,
   cliCreativity,
@@ -445,6 +448,7 @@ export async function runWeb(args: string[]): Promise<void> {
           team,
           workerUrls,
           approvalProvider,
+          partialApprovalProvider,
         });
         orch.configureSession({
           maxRuns: cliCycles,
@@ -661,6 +665,28 @@ export async function runWeb(args: string[]): Promise<void> {
         feedback,
       });
       setApprovalResolve(null);
+    }
+    return { ok: true };
+  });
+
+  // -----------------------------------------------------------------------
+  // Per-task partial approval response (dashboard → partial_approval node)
+  // -----------------------------------------------------------------------
+  fastify.post("/api/approval/task-respond", async (req, reply) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const taskId = body.task_id as string;
+    const action = body.action as string;
+    const feedback = body.feedback as string | undefined;
+
+    if (action === "reject" && (!feedback || !feedback.trim())) {
+      return reply.status(400).send({ type: "error", message: "Feedback required for rejection" });
+    }
+
+    const resolver = getTaskApprovalResolver(taskId);
+    if (resolver) {
+      resolver({ action: action as "approve" | "reject" | "escalate", feedback });
+      clearTaskApprovalResolver(taskId);
+      broadcast({ type: "partial_approval_resolved", task_id: taskId, action });
     }
     return { ok: true };
   });
