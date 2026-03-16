@@ -1235,6 +1235,69 @@ document.getElementById('msg').textContent=r.ok?'Rejection submitted!':'Error: '
     return { ok: true, role };
   });
 
+  // Replay sessions
+  fastify.get("/api/replay/sessions", async (req) => {
+    const { listSessions } = await import("../replay/index.js");
+    const limit = parseInt((req.query as Record<string, string>).limit ?? "0", 10) || undefined;
+    return { sessions: listSessions(limit) };
+  });
+
+  fastify.get<{ Params: { sessionId: string } }>("/api/replay/sessions/:sessionId", async (req, reply) => {
+    const { getSession } = await import("../replay/index.js");
+    const session = getSession(req.params.sessionId);
+    if (!session) return reply.status(404).send({ error: "Session not found" });
+    return session;
+  });
+
+  fastify.post<{ Params: { sessionId: string } }>("/api/replay/sessions/:sessionId/start", async (req, reply) => {
+    const { ReplayEngine } = await import("../replay/index.js");
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const options = {
+      sessionId: req.params.sessionId,
+      runIndex: body.runIndex as number | undefined,
+      fromNode: body.fromNode as string | undefined,
+      speed: (body.speed as number) ?? 1,
+    };
+    const engine = new ReplayEngine(options, { emit: (event) => broadcast(event) });
+    const loadResult = await engine.load();
+    if (!loadResult.ok) return reply.status(400).send({ error: loadResult.error });
+
+    // Run replay in background — don't block the HTTP response
+    engine.play().catch(() => {});
+    return { ok: true, sessionId: req.params.sessionId };
+  });
+
+  fastify.delete<{ Params: { sessionId: string } }>("/api/replay/sessions/:sessionId", async (req, reply) => {
+    const { deleteSession } = await import("../replay/index.js");
+    const ok = deleteSession(req.params.sessionId);
+    if (!ok) return reply.status(404).send({ error: "Session not found" });
+    return { ok: true };
+  });
+
+  fastify.post<{ Params: { sessionId: string } }>("/api/replay/sessions/:sessionId/tag", async (req, reply) => {
+    const { tagSession } = await import("../replay/index.js");
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const label = (body.label as string) ?? "";
+    if (!label.trim()) return reply.status(400).send({ error: "Label required" });
+    const ok = tagSession(req.params.sessionId, label.trim());
+    if (!ok) return reply.status(404).send({ error: "Session not found" });
+    return { ok: true };
+  });
+
+  fastify.delete<{ Params: { sessionId: string } }>("/api/replay/sessions/:sessionId/tag", async (req, reply) => {
+    const { untagSession } = await import("../replay/index.js");
+    const ok = untagSession(req.params.sessionId);
+    if (!ok) return reply.status(404).send({ error: "Session not found" });
+    return { ok: true };
+  });
+
+  fastify.get<{ Params: { sessionId: string } }>("/api/replay/sessions/:sessionId/export", async (req, reply) => {
+    const { exportSession } = await import("../replay/index.js");
+    const data = await exportSession(req.params.sessionId);
+    if (!data.session) return reply.status(404).send({ error: "Session not found" });
+    return data;
+  });
+
   // Composition history
   fastify.get("/api/composition-history", async (_req, reply) => {
     try {
