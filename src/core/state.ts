@@ -18,6 +18,12 @@ export const TaskResultSchema = z.object({
   success: z.boolean(),
   output: z.string(),
   quality_score: z.number().default(0.5),
+  confidence: z.object({
+    score: z.number(),
+    reasoning: z.string(),
+    flags: z.array(z.string()),
+  }).optional(),
+  routing_decision: z.enum(["auto_approved", "qa_review", "rework", "escalated"]).optional(),
 });
 export type TaskResult = z.infer<typeof TaskResultSchema>;
 

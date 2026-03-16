@@ -70,6 +70,30 @@ export const CONFIG = {
     webhookOnTaskComplete: getGlobalString("webhookOnTaskComplete", ""),
     webhookOnCycleEnd: getGlobalString("webhookOnCycleEnd", ""),
     webhookSecret: getGlobalString("webhookSecret", ""),
+
+    confidenceScoringEnabled: (() => {
+        const cs = (globalCfg as Record<string, unknown>).confidenceScoring;
+        if (cs && typeof cs === "object" && !Array.isArray(cs)) {
+            return (cs as Record<string, unknown>).enabled === true;
+        }
+        return false;
+    })(),
+    confidenceThresholds: (() => {
+        const defaults = { autoApprove: 0.85, reviewRequired: 0.60, reworkRequired: 0.40 };
+        const cs = (globalCfg as Record<string, unknown>).confidenceScoring;
+        if (cs && typeof cs === "object" && !Array.isArray(cs)) {
+            const th = (cs as Record<string, unknown>).thresholds;
+            if (th && typeof th === "object" && !Array.isArray(th)) {
+                const t = th as Record<string, unknown>;
+                return {
+                    autoApprove: typeof t.autoApprove === "number" ? t.autoApprove : defaults.autoApprove,
+                    reviewRequired: typeof t.reviewRequired === "number" ? t.reviewRequired : defaults.reviewRequired,
+                    reworkRequired: typeof t.reworkRequired === "number" ? t.reworkRequired : defaults.reworkRequired,
+                };
+            }
+        }
+        return defaults;
+    })(),
 } as const;
 
 type MutableOpenClawRuntimeConfig = {

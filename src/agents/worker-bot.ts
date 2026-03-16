@@ -9,6 +9,7 @@ import type { BotDefinition } from "../core/bot-definitions.js";
 import type { WorkerAdapter, StreamChunkCallback, StreamDoneCallback, TokenUsageCallback, ReasoningCallback } from "../adapters/worker-adapter.js";
 import { createRoutingAdapters } from "../adapters/worker-adapter.js";
 import type { TaskRequest, TaskResult } from "../core/state.js";
+import { CONFIG } from "../core/config.js";
 import { logger, isDebugMode } from "../core/logger.js";
 import { getCanvasTelemetry } from "../core/canvas-telemetry.js";
 import { workerEvents } from "../core/worker-events.js";
@@ -19,6 +20,7 @@ import {
   buildReviewPrompt,
   buildReworkPrompt,
 } from "./review-workflow.js";
+import { withConfidenceScoring } from "../graph/confidence/prompt.js";
 
 const OPENCLAW_UNAVAILABLE_MSG = "OpenClaw required but service unavailable";
 
@@ -340,6 +342,11 @@ export function createWorkerTaskNode(
         ),
       });
 
+      // Wrap with confidence scoring instructions when enabled
+      if (CONFIG.confidenceScoringEnabled) {
+        taskDescription = withConfidenceScoring(taskDescription);
+      }
+
       // Execute
       const worker_tier = (taskItem.worker_tier as WorkerTier) ?? "light";
       const result = await worker.executeTask(
@@ -481,6 +488,29 @@ export function createWorkerCollectNode(): (state: GraphState) => Partial<GraphS
           )
         : 0;
 
+    // Compute average confidence from tasks with confidence scores
+    const tasksWithConfidence = taskQueue.filter((t) => {
+      const r = t.result as Record<string, unknown> | null;
+      if (!r) return false;
+      const conf = r.confidence as Record<string, unknown> | undefined;
+      return conf && typeof conf.score === "number";
+    });
+    const averageConfidence =
+      tasksWithConfidence.length > 0
+        ? tasksWithConfidence.reduce((sum, t) => {
+            const r = t.result as Record<string, unknown>;
+            const conf = r.confidence as Record<string, unknown>;
+            return sum + (conf.score as number);
+          }, 0) / tasksWithConfidence.length
+        : 0;
+
+    const lowConfidenceTasks = taskQueue
+      .filter((t) => {
+        const r = t.result as Record<string, unknown> | null;
+        return r?.routing_decision === "escalated";
+      })
+      .map((t) => t.task_id as string);
+
     // Emit final progress with the full merged queue
     workerEvents.emit("progress", { taskQueue: [...taskQueue] });
 
@@ -494,6 +524,8 @@ export function createWorkerCollectNode(): (state: GraphState) => Partial<GraphS
       last_quality_score: avgQuality,
       deep_work_mode: true,
       parallelism_depth: (state.parallelism_depth ?? 0) + 1,
+      average_confidence: averageConfidence,
+      low_confidence_tasks: lowConfidenceTasks,
       __node__: "worker_collect",
     };
   };

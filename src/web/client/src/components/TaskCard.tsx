@@ -15,12 +15,33 @@ function getPriorityBadgeColor(priority: string): string {
   return "bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300";
 }
 
+function getConfidenceBadgeColor(score: number): string {
+  if (score >= 0.85) return "bg-emerald-100 dark:bg-emerald-900/50 text-emerald-800 dark:text-emerald-300";
+  if (score >= 0.60) return "bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300";
+  if (score >= 0.40) return "bg-orange-100 dark:bg-orange-900/50 text-orange-800 dark:text-orange-300";
+  return "bg-rose-100 dark:bg-rose-900/50 text-rose-800 dark:text-rose-300";
+}
+
+function getRoutingLabel(decision: string): string {
+  switch (decision) {
+    case "auto_approved": return "Auto-approved";
+    case "qa_review": return "QA Review";
+    case "rework": return "Rework";
+    case "escalated": return "Escalated";
+    default: return decision;
+  }
+}
+
 export function TaskCard({ task }: TaskCardProps) {
   const taskId = (task.task_id as string) ?? "?";
   const description = (task.description as string) ?? "";
   const assignedTo = (task.assigned_to as string) ?? "";
   const priority = (task.priority as string) ?? "MEDIUM";
   const status = (task.status as string) ?? "pending";
+
+  const result = task.result as Record<string, unknown> | null;
+  const confidence = result?.confidence as { score: number; reasoning: string; flags: string[] } | undefined;
+  const routingDecision = result?.routing_decision as string | undefined;
 
   const { remainingSeconds, isExpired } = useTimeboxCountdown(task);
   const reasoning = useWsStore((s) => s.reasoning[taskId]);
@@ -53,12 +74,22 @@ export function TaskCard({ task }: TaskCardProps) {
     >
       <div className="mb-1 flex items-center justify-between gap-2">
         <span className="text-xs font-mono text-stone-500 dark:text-stone-400">{taskId}</span>
-        <span
-          className={`rounded-md px-2 py-0.5 text-xs font-medium ${getPriorityBadgeColor(priority)}`}
-        >
-          <i className={`bi ${priority.toUpperCase() === "HIGH" ? "bi-arrow-up-circle-fill" : priority.toUpperCase() === "LOW" ? "bi-arrow-down-circle-fill" : "bi-dash-circle-fill"} mr-1`} />
-          {priority}
-        </span>
+        <div className="flex items-center gap-1.5">
+          {confidence && (
+            <span
+              className={`rounded-md px-2 py-0.5 text-xs font-medium ${getConfidenceBadgeColor(confidence.score)}`}
+              title={`${confidence.reasoning}${confidence.flags.length > 0 ? `\nFlags: ${confidence.flags.join(", ")}` : ""}${routingDecision ? `\nRouting: ${getRoutingLabel(routingDecision)}` : ""}`}
+            >
+              {Math.round(confidence.score * 100)}%
+            </span>
+          )}
+          <span
+            className={`rounded-md px-2 py-0.5 text-xs font-medium ${getPriorityBadgeColor(priority)}`}
+          >
+            <i className={`bi ${priority.toUpperCase() === "HIGH" ? "bi-arrow-up-circle-fill" : priority.toUpperCase() === "LOW" ? "bi-arrow-down-circle-fill" : "bi-dash-circle-fill"} mr-1`} />
+            {priority}
+          </span>
+        </div>
       </div>
       <p className="line-clamp-2 text-sm text-stone-800 dark:text-stone-200">{description || "(no description)"}</p>
       <div className="mt-2 flex items-center gap-1.5">

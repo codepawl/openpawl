@@ -28,6 +28,7 @@ import { createMemoryRetrievalNode } from "../agents/memory-retrieval.js";
 import type { VectorMemory } from "./knowledge-base.js";
 import { getCanvasTelemetry } from "./canvas-telemetry.js";
 import { createPreviewNode } from "../graph/nodes/preview.js";
+import { createConfidenceRouterNode } from "../graph/nodes/confidence-router.js";
 import type { PreviewProvider } from "../graph/preview/types.js";
 import type { CostConfig } from "../graph/preview/estimator.js";
 
@@ -161,6 +162,11 @@ export class TeamOrchestration {
     const telemetryCoordinatorNode = wrapWithTelemetry("coordinator", (s) => this.coordinator.coordinateNode(s, signal));
     const previewNode = createPreviewNode({ previewProvider, costConfig });
     const telemetryPreviewNode = wrapWithTelemetry("preview", previewNode);
+    const confidenceRouterNode = createConfidenceRouterNode({
+      thresholds: CONFIG.confidenceScoringEnabled ? CONFIG.confidenceThresholds : undefined,
+      team: this.team,
+    });
+    const telemetryConfidenceRouterNode = wrapWithTelemetry("confidence_router", async (s) => confidenceRouterNode(s));
 
     const workflow = new StateGraph(GameStateAnnotation)
       .addNode("memory_retrieval", telemetryMemoryRetrievalNode)
@@ -171,6 +177,7 @@ export class TeamOrchestration {
       .addNode("preview", telemetryPreviewNode)
       .addNode("approval", telemetryApprovalNode)
       .addNode("worker_task", telemetryWorkerTaskNode)
+      .addNode("confidence_router", telemetryConfidenceRouterNode)
       .addNode("worker_collect", telemetryCollectNode)
       .addNode("human_approval", telemetryHumanApprovalNode)
       .addNode("increment_cycle", (s): Partial<GraphState> => {
@@ -223,7 +230,8 @@ export class TeamOrchestration {
         },
         { coordinator: "coordinator", worker_collect: "worker_collect", worker_task: "worker_task" }
       )
-      .addEdge("worker_task", "worker_collect")
+      .addEdge("worker_task", "confidence_router")
+      .addEdge("confidence_router", "worker_collect")
       .addConditionalEdges(
         "worker_collect",
         (s) => {

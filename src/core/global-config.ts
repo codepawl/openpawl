@@ -19,6 +19,10 @@ export interface TeamClawGlobalConfig {
   modelAliases?: Record<string, string>;
   modelAllowlist?: string[];
   fallbackChain?: string[];
+  confidenceScoring?: {
+    enabled?: boolean;
+    thresholds?: { autoApprove?: number; reviewRequired?: number; reworkRequired?: number };
+  };
   workspaceDir?: string;
   proxy?: {
     path?: string;

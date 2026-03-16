@@ -325,7 +325,8 @@ describe("simulation.ts — TeamOrchestration", () => {
       expect(edges).toContainEqual(["system_design", "rfc_phase"]);
       expect(edges).toContainEqual(["rfc_phase", "coordinator"]);
       expect(edges).toContainEqual(["coordinator", "preview"]);
-      expect(edges).toContainEqual(["worker_task", "worker_collect"]);
+      expect(edges).toContainEqual(["worker_task", "confidence_router"]);
+      expect(edges).toContainEqual(["confidence_router", "worker_collect"]);
       // worker_collect → human_approval is now a conditional edge (wave loop)
       expect(edges).toContainEqual(["human_approval", "increment_cycle"]);
     });

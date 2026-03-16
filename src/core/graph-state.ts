@@ -84,6 +84,14 @@ export const GameStateAnnotation = Annotation.Root({
   aborted: Annotation<boolean>(lastValue(() => false)),
   skip_preview: Annotation<boolean>(lastValue(() => false)),
 
+  // Confidence scoring
+  average_confidence: Annotation<number>(lastValue(() => 0)),
+  low_confidence_tasks: Annotation<string[]>(lastValue<string[]>(() => [])),
+  confidence_history: Annotation<Record<string, unknown>[]>({
+    reducer: (left, right) => left.concat(Array.isArray(right) ? right : [right]),
+    default: () => [],
+  }),
+
   // Send-payload fields: transient, set by Send() args during parallel worker superstep
   _send_task: Annotation<Record<string, unknown> | null>(lastValue<Record<string, unknown> | null>(() => null)),
   _send_bot_id: Annotation<string>(lastValue(() => "")),

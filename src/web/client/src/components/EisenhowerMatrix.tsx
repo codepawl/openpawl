@@ -198,9 +198,21 @@ function MatrixQuadrant({
             <span className="text-xs text-stone-400 dark:text-stone-500">{config.emptyMessage}</span>
           </div>
         ) : (
-          tasks.map((t) => (
-            <TaskCard key={(t.task_id as string) ?? Math.random()} task={t} />
-          ))
+          tasks.map((t) => {
+            const r = t.result as Record<string, unknown> | null;
+            const conf = r?.confidence as { score: number } | undefined;
+            const confidenceScore = conf?.score;
+            let ringClass = "";
+            if (typeof confidenceScore === "number") {
+              if (confidenceScore < 0.4) ringClass = "ring-2 ring-rose-500 dark:ring-rose-400";
+              else if (confidenceScore < 0.6) ringClass = "ring-2 ring-orange-400 dark:ring-orange-400";
+            }
+            return (
+              <div key={(t.task_id as string) ?? Math.random()} className={`rounded-xl ${ringClass}`}>
+                <TaskCard task={t} />
+              </div>
+            );
+          })
         )}
       </div>
     </div>
