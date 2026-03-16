@@ -9,6 +9,7 @@ import os from "node:os";
 import path from "node:path";
 import { SuccessPatternStore } from "../success/store.js";
 import type { HttpEmbeddingFunction } from "../../core/knowledge-base.js";
+import { KnowledgeGraphStore } from "./knowledge-graph.js";
 import type { GlobalFailureLesson, MemoryHealth } from "./types.js";
 import { logger, isDebugMode } from "../../core/logger.js";
 
@@ -26,6 +27,7 @@ export class GlobalMemoryManager {
   private db: lancedb.Connection | null = null;
   private patternStore: SuccessPatternStore | null = null;
   private lessonsTable: lancedb.Table | null = null;
+  private knowledgeGraph: KnowledgeGraphStore | null = null;
 
   constructor(dbPath?: string) {
     this.dbPath = dbPath ?? DEFAULT_DB_PATH;
@@ -42,6 +44,8 @@ export class GlobalMemoryManager {
     if (tableNames.includes(LESSONS_TABLE)) {
       this.lessonsTable = await this.db.openTable(LESSONS_TABLE);
     }
+    this.knowledgeGraph = new KnowledgeGraphStore(this.db);
+    await this.knowledgeGraph.init();
     log(`GlobalMemoryManager initialized at ${this.dbPath}`);
   }
 
@@ -51,6 +55,10 @@ export class GlobalMemoryManager {
 
   getPatternStore(): SuccessPatternStore | null {
     return this.patternStore;
+  }
+
+  getKnowledgeGraph(): KnowledgeGraphStore | null {
+    return this.knowledgeGraph;
   }
 
   async upsertLesson(lesson: GlobalFailureLesson): Promise<boolean> {
@@ -163,7 +171,7 @@ export class GlobalMemoryManager {
       averagePatternAge: avgAge,
       averageQualityScore: avgQuality,
       stalePatternsCount: staleCount,
-      knowledgeGraphEdges: 0, // Updated when knowledge graph is added
+      knowledgeGraphEdges: (await this.knowledgeGraph?.countEdges()) ?? 0,
       oldestPattern: oldest,
       newestPattern: newest,
     };
