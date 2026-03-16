@@ -11,6 +11,8 @@ import { UniversalOpenClawAdapter } from "../adapters/worker-adapter.js";
 import { resolveModelForAgent } from "../core/model-config.js";
 import { ensureWorkspaceDir, writeTextFile } from "../core/workspace-fs.js";
 import { getCanvasTelemetry } from "../core/canvas-telemetry.js";
+import type { AgentProfile } from "./profiles/types.js";
+import { formatProfilesForPrompt } from "./profiles/prompt.js";
 
 function log(msg: string): void {
   if (isDebugMode()) {
@@ -27,9 +29,10 @@ interface SprintPlan {
 export class SprintPlanningNode {
   private readonly llmAdapter: WorkerAdapter;
   private readonly workspacePath: string;
+  private readonly profiles: AgentProfile[];
   private static readonly PLANNING_TIMEOUT_MS = CONFIG.llmTimeoutMs || 120_000;
 
-  constructor(options: { llmAdapter?: WorkerAdapter; workspacePath?: string } = {}) {
+  constructor(options: { llmAdapter?: WorkerAdapter; workspacePath?: string; profiles?: AgentProfile[] } = {}) {
     this.llmAdapter =
       options.llmAdapter ??
       new UniversalOpenClawAdapter({
@@ -39,6 +42,7 @@ export class SprintPlanningNode {
         botId: "planner",
       });
     this.workspacePath = options.workspacePath ?? process.cwd();
+    this.profiles = options.profiles ?? [];
     log(`📋 SprintPlanningNode initialized (workspace: ${this.workspacePath})`);
   }
 
@@ -118,6 +122,7 @@ export class SprintPlanningNode {
         : "";
 
     const memoryBlock = memoriesContext ? `\n\n${memoriesContext}` : "";
+    const profileBlock = formatProfilesForPrompt(this.profiles);
 
     const prompt = `You are a Scrum Master conducting Sprint Planning.
 
@@ -126,7 +131,7 @@ ${goal}
 
 ## Team Roster
 ${teamLines}
-${lessonsBlock}${memoryBlock}
+${lessonsBlock}${memoryBlock}${profileBlock ? `\n\n${profileBlock}` : ""}
 
 ## Your Task
 Create a Sprint Plan with:
@@ -275,8 +280,9 @@ ${assignmentTable}
 export function createSprintPlanningNode(
   workspacePath: string,
   llmAdapter?: WorkerAdapter,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  profiles?: AgentProfile[],
 ): (state: GraphState) => Promise<Partial<GraphState>> {
-  const node = new SprintPlanningNode({ llmAdapter, workspacePath });
+  const node = new SprintPlanningNode({ llmAdapter, workspacePath, profiles });
   return (state: GraphState) => node.createSprintPlan(state, signal);
 }

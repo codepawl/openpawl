@@ -114,6 +114,17 @@ export const GameStateAnnotation = Annotation.Root({
     default: () => [],
   }),
 
+  // Agent performance profiles
+  agent_profiles: Annotation<Record<string, unknown>[]>(lastValue<Record<string, unknown>[]>(() => [])),
+  routing_decisions: Annotation<Record<string, unknown>[]>({
+    reducer: (left, right) => left.concat(Array.isArray(right) ? right : [right]),
+    default: () => [],
+  }),
+  profile_alerts: Annotation<Record<string, unknown>[]>({
+    reducer: (left, right) => left.concat(Array.isArray(right) ? right : [right]),
+    default: () => [],
+  }),
+
   // Send-payload fields: transient, set by Send() args during parallel worker superstep
   _send_task: Annotation<Record<string, unknown> | null>(lastValue<Record<string, unknown> | null>(() => null)),
   _send_bot_id: Annotation<string>(lastValue(() => "")),

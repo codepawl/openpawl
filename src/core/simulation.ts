@@ -30,6 +30,8 @@ import { createMemoryRetrievalNode } from "../agents/memory-retrieval.js";
 import type { VectorMemory } from "./knowledge-base.js";
 import { SuccessPatternStore } from "../memory/success/store.js";
 import { GlobalMemoryManager } from "../memory/global/store.js";
+import { ProfileStore } from "../agents/profiles/store.js";
+import type { AgentProfile } from "../agents/profiles/types.js";
 import { getCanvasTelemetry } from "./canvas-telemetry.js";
 import { createPreviewNode } from "../graph/nodes/preview.js";
 import { createConfidenceRouterNode } from "../graph/nodes/confidence-router.js";
@@ -92,6 +94,7 @@ export class TeamOrchestration {
     Partial<GraphState>,
     string
   >;
+  readonly profileStore: ProfileStore;
   private sessionStartTime: number = 0;
   private sessionTimeoutMs: number = 0;
   private sessionMaxRuns: number = 0;
@@ -129,17 +132,6 @@ export class TeamOrchestration {
       });
     this.coordinator = new CoordinatorAgent({ llmAdapter: sharedLlmAdapter, workspacePath });
 
-    const taskDispatcher = createTaskDispatcher(this.workerBots, this.team);
-    const workerTaskNode = createWorkerTaskNode(this.workerBots, this.team);
-    const collectNode = createWorkerCollectNode();
-    const approvalNode = createApprovalNode(approvalProvider);
-    const partialApprovalNode = createPartialApprovalNode({
-      autoApprove,
-      approvalProvider: partialApprovalProvider,
-    });
-    const sprintPlanningNode = createSprintPlanningNode(workspacePath ?? "", sharedLlmAdapter, signal);
-    const systemDesignNode = createSystemDesignNode(workspacePath ?? "", sharedLlmAdapter, signal);
-    const rfcNode = createRFCNode(workspacePath ?? "", this.team, sharedLlmAdapter, signal);
     // Wire success pattern store into memory retrieval if LanceDB is available
     let successStore: SuccessPatternStore | null = null;
     const vmDb = vectorMemory?.getDb?.();
@@ -159,6 +151,36 @@ export class TeamOrchestration {
         globalManager = null;
       }
     }
+
+    // Initialize profile store for agent performance tracking
+    this.profileStore = new ProfileStore();
+    const loadedProfiles: AgentProfile[] = [];
+    const globalDb = globalManager?.getDb() ?? null;
+    if (globalDb) {
+      void this.profileStore.init(globalDb).then(async () => {
+        try {
+          const profiles = await this.profileStore.getAll();
+          loadedProfiles.push(...profiles);
+          if (loadedProfiles.length > 0) {
+            log(`Loaded ${loadedProfiles.length} agent profile(s)`);
+          }
+        } catch {
+          // non-critical
+        }
+      }).catch(() => { /* non-critical */ });
+    }
+
+    const taskDispatcher = createTaskDispatcher(this.workerBots, this.team, loadedProfiles);
+    const workerTaskNode = createWorkerTaskNode(this.workerBots, this.team);
+    const collectNode = createWorkerCollectNode();
+    const approvalNode = createApprovalNode(approvalProvider);
+    const partialApprovalNode = createPartialApprovalNode({
+      autoApprove,
+      approvalProvider: partialApprovalProvider,
+    });
+    const sprintPlanningNode = createSprintPlanningNode(workspacePath ?? "", sharedLlmAdapter, signal, loadedProfiles);
+    const systemDesignNode = createSystemDesignNode(workspacePath ?? "", sharedLlmAdapter, signal);
+    const rfcNode = createRFCNode(workspacePath ?? "", this.team, sharedLlmAdapter, signal);
 
     const memoryRetrievalNode = vectorMemory
       ? createMemoryRetrievalNode(vectorMemory, 5, 2, successStore, vmEmbedder, globalManager)

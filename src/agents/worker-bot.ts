@@ -21,8 +21,20 @@ import {
   buildReworkPrompt,
 } from "./review-workflow.js";
 import { withConfidenceScoring } from "../graph/confidence/prompt.js";
+import type { AgentProfile, RoutingDecision } from "./profiles/types.js";
+import { ProfileRouter } from "./profiles/router.js";
 
 const OPENCLAW_UNAVAILABLE_MSG = "OpenClaw required but service unavailable";
+
+/** Module-level accumulator for routing decisions made during task dispatch */
+let pendingRoutingDecisions: RoutingDecision[] = [];
+
+/** Flush and return accumulated routing decisions */
+export function flushRoutingDecisions(): RoutingDecision[] {
+  const decisions = pendingRoutingDecisions;
+  pendingRoutingDecisions = [];
+  return decisions;
+}
 
 function log(msg: string): void {
   if (isDebugMode()) {
@@ -177,10 +189,14 @@ export function createWorkerBots(
  */
 export function createTaskDispatcher(
   workerBots: Record<string, WorkerBot>,
-  team?: BotDefinition[]
+  team?: BotDefinition[],
+  profiles?: AgentProfile[],
 ): (state: GraphState) => Send[] | string {
   const makerBot = team ? team.find((b) => b.role_id === "software_engineer") : null;
   const reviewerBot = team ? team.find((b) => b.role_id === "qa_reviewer") : null;
+  const router = profiles && profiles.length > 0 && team
+    ? new ProfileRouter(profiles, team)
+    : null;
 
   return (state: GraphState): Send[] | string => {
     const taskQueue = state.task_queue ?? [];
@@ -221,6 +237,24 @@ export function createTaskDispatcher(
       if (!worker) {
         targetBotId = (taskItem.assigned_to as string) ?? "";
       }
+
+      // Profile-based routing override
+      if (router && team) {
+        const decision = router.route({
+          taskId: (taskItem.task_id as string) ?? "",
+          description: (taskItem.description as string) ?? "",
+          assignedTo: targetBotId,
+        });
+        pendingRoutingDecisions.push(decision);
+        if (decision.reason === "profile_suggests_reroute") {
+          const reroutedBot = team.find((b) => b.role_id === decision.assignedAgent);
+          if (reroutedBot && workerBots[reroutedBot.id]) {
+            log(`📊 Profile routing: ${taskItem.task_id} → ${decision.assignedAgent} (was ${targetBotId})`);
+            targetBotId = reroutedBot.id;
+          }
+        }
+      }
+
       sends.push(new Send("worker_task", { _send_task: taskItem, _send_bot_id: targetBotId }));
     }
 
@@ -519,6 +553,9 @@ export function createWorkerCollectNode(): (state: GraphState) => Partial<GraphS
              t.status === "needs_rework" || t.status === "waiting_for_human" || t.status === "auto_approved_pending"
     );
 
+    // Flush accumulated routing decisions into state
+    const routingDecisions = flushRoutingDecisions();
+
     return {
       last_action: `Dispatched ${actionableTasks.length} task(s) via parallel Send`,
       last_quality_score: avgQuality,
@@ -526,6 +563,9 @@ export function createWorkerCollectNode(): (state: GraphState) => Partial<GraphS
       parallelism_depth: (state.parallelism_depth ?? 0) + 1,
       average_confidence: averageConfidence,
       low_confidence_tasks: lowConfidenceTasks,
+      routing_decisions: routingDecisions.length > 0
+        ? routingDecisions.map((d) => ({ ...d }) as Record<string, unknown>)
+        : [],
       __node__: "worker_collect",
     };
   };
