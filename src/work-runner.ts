@@ -75,6 +75,7 @@ import { PatternQualityStore, pruneStalePatterns } from "./memory/success/qualit
 import type { SuccessPattern } from "./memory/success/types.js";
 import { GlobalMemoryManager } from "./memory/global/store.js";
 import { PromotionEngine } from "./memory/global/promoter.js";
+import { GlobalPruner } from "./memory/global/pruner.js";
 
 let DEBUG_LOG_PATH = "";
 let WORK_HISTORY_LOG_PATH = "";
@@ -432,6 +433,25 @@ export async function runWork(
         }
     };
     workerEvents.on("reasoning", reasoningListener);
+
+    // ---------------------------------------------------------------------------
+    // Global memory maintenance — prune stale patterns on startup
+    // ---------------------------------------------------------------------------
+    const vmEmbedderForPrune = vectorMemory.getEmbedder();
+    if (vmEmbedderForPrune) {
+      try {
+        const globalMgr = new GlobalMemoryManager();
+        await globalMgr.init(vmEmbedderForPrune);
+        const pruner = new GlobalPruner(globalMgr);
+        const pruneResult = await pruner.prune();
+        const total = pruneResult.patternsRemoved + pruneResult.lessonsRemoved + pruneResult.edgesRemoved;
+        if (total > 0) {
+          log("info", `Global memory pruned: ${pruneResult.patternsRemoved} patterns, ${pruneResult.lessonsRemoved} lessons, ${pruneResult.edgesRemoved} edges`);
+        }
+      } catch (pruneErr) {
+        log("warn", `Global memory pruning failed: ${pruneErr}`);
+      }
+    }
 
     // Main run loop
     // ---------------------------------------------------------------------------
