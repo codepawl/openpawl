@@ -9,7 +9,7 @@ import { logger } from "../core/logger.js";
 import type {
   TeamComposition,
   CompositionOverride,
-  AgentRole,
+  AnyAgentRole,
   ActiveAgent,
   ExcludedAgent,
 } from "../agents/composition/types.js";
@@ -27,7 +27,7 @@ export function renderCompositionTable(composition: TeamComposition): void {
   logger.plain(pc.green("  Active Agents:"));
   for (const agent of composition.activeAgents) {
     const conf = `${(agent.confidence * 100).toFixed(0)}%`;
-    const required = REQUIRED_AGENTS.includes(agent.role) ? pc.dim(" (required)") : "";
+    const required = (REQUIRED_AGENTS as readonly string[]).includes(agent.role) ? pc.dim(" (required)") : "";
     logger.plain(`    ${pc.green("+")} ${agent.role}${required} — ${agent.reason} ${pc.dim(`[${conf}]`)}`);
   }
 
@@ -90,7 +90,7 @@ async function promptEditAgents(
 
   // Show active optional agents that could be excluded
   for (const agent of composition.activeAgents) {
-    if (REQUIRED_AGENTS.includes(agent.role)) continue;
+    if ((REQUIRED_AGENTS as readonly string[]).includes(agent.role)) continue;
     toggleOptions.push({
       value: `exclude:${agent.role}`,
       label: `Exclude ${agent.role}`,
@@ -115,7 +115,7 @@ async function promptEditAgents(
   for (const val of selected as string[]) {
     const [actionStr, role] = val.split(":");
     if (actionStr === "include" || actionStr === "exclude") {
-      overrides.push({ role: role as AgentRole, action: actionStr });
+      overrides.push({ role: role as AnyAgentRole, action: actionStr });
     }
   }
 
@@ -130,16 +130,16 @@ export function applyOverrides(
   composition: TeamComposition,
   overrides: CompositionOverride[],
 ): TeamComposition {
-  const active = new Map<AgentRole, ActiveAgent>(
+  const active = new Map<AnyAgentRole, ActiveAgent>(
     composition.activeAgents.map((a) => [a.role, a]),
   );
-  const excluded = new Map<AgentRole, ExcludedAgent>(
+  const excluded = new Map<AnyAgentRole, ExcludedAgent>(
     composition.excludedAgents.map((a) => [a.role, a]),
   );
 
   for (const override of overrides) {
     // Never exclude required agents
-    if (override.action === "exclude" && REQUIRED_AGENTS.includes(override.role)) {
+    if (override.action === "exclude" && (REQUIRED_AGENTS as readonly string[]).includes(override.role)) {
       continue;
     }
 

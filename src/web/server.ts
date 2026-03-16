@@ -1175,8 +1175,8 @@ document.getElementById('msg').textContent=r.ok?'Rejection submitted!':'Error: '
 
   fastify.get("/api/profiles/routing-decisions", async (_req, reply) => {
     try {
-      const state = currentSessionState();
-      const decisions = (state as Record<string, unknown>)?.routing_decisions ?? [];
+      const state = currentSessionState;
+      const decisions = (state as unknown as Record<string, unknown>)?.routing_decisions ?? [];
       return { decisions };
     } catch (err) {
       return reply.status(500).send({ error: String(err) });

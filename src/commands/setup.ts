@@ -296,7 +296,7 @@ function persistAllConfig(state: WizardState): string {
         workspaceDir: state.workspaceDir,
         templateId: state.templateId,
         projectName: state.projectName,
-        teamMode: state.teamMode,
+        teamMode: state.teamMode as "manual" | "autonomous" | undefined,
     });
 
     setOpenClawWorkerUrl(wsUrl);

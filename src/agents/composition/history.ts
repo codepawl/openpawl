@@ -87,9 +87,9 @@ export class CompositionHistoryStore {
     try {
       const row = entryToRow(entry);
       if (!this.table) {
-        this.table = await this.db.createTable(HISTORY_TABLE, [row]);
+        this.table = await this.db.createTable(HISTORY_TABLE, [row as unknown as Record<string, unknown>]);
       } else {
-        await this.table.add([row]);
+        await this.table.add([row as unknown as Record<string, unknown>]);
       }
       return true;
     } catch (err) {

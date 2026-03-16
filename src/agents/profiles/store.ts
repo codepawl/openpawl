@@ -105,14 +105,14 @@ export class ProfileStore {
       const row = profileToRow(profile);
 
       if (!this.table) {
-        this.table = await this.db.createTable(PROFILES_TABLE, [row]);
+        this.table = await this.db.createTable(PROFILES_TABLE, [row as unknown as Record<string, unknown>]);
       } else {
         try {
           await this.table.delete(`role = '${profile.agentRole.replace(/'/g, "''")}'`);
         } catch {
           // May not exist yet
         }
-        await this.table.add([row]);
+        await this.table.add([row as unknown as Record<string, unknown>]);
       }
       return true;
     } catch (err) {

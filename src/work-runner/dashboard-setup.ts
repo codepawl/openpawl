@@ -37,6 +37,7 @@ export async function startDashboard(
 
         // Auto-open dashboard in browser
         try {
+            // @ts-expect-error — optional peer dependency, may not be installed
             const { default: open } = await import("open");
             await open(dashboardUrl);
         } catch {

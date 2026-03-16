@@ -326,10 +326,11 @@ export async function generate(prompt: string, options?: GenerateOptions & { bot
       }
 
       trafficController.release(botId);
-      throw new Error(
+      const wrapped = new Error(
         `LLM OpenClaw request failed (url=${url}, model=${currentModel}, timeoutMs=${timeoutMs}, elapsedMs=${elapsedMs}): ${shortErr(err)}`,
-        { cause: err },
       );
+      (wrapped as unknown as { cause: unknown }).cause = err;
+      throw wrapped;
     }
   }
 

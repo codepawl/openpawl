@@ -29,6 +29,7 @@ export interface WizardState {
     roster: import("../../core/team-templates.js").RosterEntry[];
     templateId: string;
     managed: boolean;
+    teamMode?: string;
 }
 
 export function handleCancel<T>(v: T): T {
