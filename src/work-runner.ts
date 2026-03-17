@@ -505,6 +505,124 @@ export async function runWork(
     }
 
     // ---------------------------------------------------------------------------
+    // Goal clarity check — challenge ambiguous goals before sprint planning
+    // ---------------------------------------------------------------------------
+    if (effectiveGoal && canRenderSpinner) {
+        try {
+            const { analyzeClarity } = await import("./clarity/analyzer.js");
+            const { generateQuestions } = await import("./clarity/questioner.js");
+            const { rewriteGoal } = await import("./clarity/rewriter.js");
+            const { suggestSplits } = await import("./clarity/breadth-analyzer.js");
+
+            const clarityResult = analyzeClarity(effectiveGoal);
+
+            if (clarityResult.isClear) {
+                logger.plain(pc.green("✓ Goal is clear."));
+            } else {
+                const { select, text: clackText, isCancel: clackIsCancel } = await import("@clack/prompts");
+                const icon = clarityResult.score < 0.5 ? "🚨" : "🔍";
+                const label = clarityResult.score < 0.5
+                    ? "This goal needs clarification before the team can plan"
+                    : "This goal could be clearer";
+
+                logger.plain(`\n${icon} ${pc.yellow("Goal clarity check...")}`);
+                logger.plain(pc.dim("┌─────────────────────────────────────────────────────────────┐"));
+                logger.plain(`│ ${label}`);
+                logger.plain(pc.dim("├─────────────────────────────────────────────────────────────┤"));
+                for (const issue of clarityResult.issues) {
+                    const badge = issue.severity === "blocking"
+                        ? pc.red("[blocking]")
+                        : pc.yellow("[advisory]");
+                    logger.plain(`│ ${badge} ${issue.question}`);
+                }
+                logger.plain(pc.dim("└─────────────────────────────────────────────────────────────┘"));
+
+                if (clarityResult.suggestions.length > 0) {
+                    logger.plain(pc.dim("Suggestions:"));
+                    for (const s of clarityResult.suggestions) {
+                        logger.plain(pc.dim(`  → ${s}`));
+                    }
+                }
+
+                const hasTooWide = clarityResult.issues.some((i) => i.type === "too_broad");
+                const options: Array<{ label: string; value: string }> = [
+                    { label: "Answer the questions — I'll clarify the goal", value: "clarify" },
+                    { label: "Proceed anyway — I want the team to interpret it", value: "proceed" },
+                    { label: "Rephrase my goal", value: "rephrase" },
+                ];
+                if (hasTooWide) {
+                    options.push({ label: "Split into focused goals", value: "split" });
+                }
+
+                const choice = await select({ message: "How would you like to proceed?", options });
+
+                if (clackIsCancel(choice)) {
+                    cancel("Work session cancelled.");
+                    process.exit(0);
+                }
+
+                if (choice === "clarify") {
+                    const questions = generateQuestions(clarityResult.issues);
+                    const answers: Array<{ issue: (typeof questions)[0]["issue"]; answer: string }> = [];
+                    for (const q of questions) {
+                        const answer = await clackText({
+                            message: q.question,
+                            placeholder: q.placeholder,
+                        });
+                        if (clackIsCancel(answer)) {
+                            cancel("Work session cancelled.");
+                            process.exit(0);
+                        }
+                        answers.push({ issue: q.issue, answer: String(answer).trim() });
+                    }
+                    const clarified = rewriteGoal(effectiveGoal, answers);
+                    logger.plain(pc.bold("Clarified goal:"));
+                    logger.plain(pc.green(`"${clarified}"`));
+                    effectiveGoal = clarified;
+                    logger.plain(pc.green("✓ Goal is clear. Proceeding to decomposition."));
+                } else if (choice === "rephrase") {
+                    const newGoal = await clackText({
+                        message: "Enter your rephrased goal:",
+                        placeholder: effectiveGoal,
+                    });
+                    if (clackIsCancel(newGoal) || !newGoal) {
+                        cancel("Work session cancelled.");
+                        process.exit(0);
+                    }
+                    effectiveGoal = String(newGoal).trim();
+                    logger.plain(pc.green("✓ Goal updated. Proceeding to decomposition."));
+                } else if (choice === "split") {
+                    const breadthIssue = clarityResult.issues.find((i) => i.type === "too_broad");
+                    const domains = breadthIssue
+                        ? breadthIssue.question.match(/domains?:\s*(.+?)\./)?.[1]?.split(", ") ?? []
+                        : [];
+                    const splits = suggestSplits(effectiveGoal, domains);
+                    if (splits.length > 0) {
+                        logger.plain(pc.bold("Suggested sub-goals:"));
+                        const splitOptions = splits.map((s, i) => ({
+                            label: s,
+                            value: String(i),
+                        }));
+                        const picked = await select({
+                            message: "Pick one to run now (others saved to backlog):",
+                            options: splitOptions,
+                        });
+                        if (!clackIsCancel(picked)) {
+                            const idx = Number(picked);
+                            effectiveGoal = splits[idx] ?? effectiveGoal;
+                            logger.plain(pc.green(`✓ Running: "${effectiveGoal}"`));
+                        }
+                    }
+                }
+                // choice === "proceed" → continue with original goal
+            }
+        } catch {
+            // Clarity check must never crash work session
+            logger.warn("Clarity check failed — proceeding without it.");
+        }
+    }
+
+    // ---------------------------------------------------------------------------
     // Dashboard auto-start
     // ---------------------------------------------------------------------------
     if (!noWebFlag) {

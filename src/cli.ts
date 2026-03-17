@@ -84,6 +84,7 @@ function printHelp(): void {
         "  " + cmd(pad("lessons")) + desc("Export lessons learned"),
         "  " + cmd(pad("memory")) + desc("Global memory: health, promote, export/import"),
         "  " + cmd(pad("profile")) + desc("Agent performance profiles: list, show, reset"),
+        "  " + cmd(pad("clarity")) + desc("Check goal clarity before sprinting"),
         "  " + cmd(pad("drift")) + desc("Check goal for conflicts with past decisions"),
         "  " + cmd(pad("journal")) + desc("Decision journal: list, search, show, export"),
         "  " + cmd(pad("clean")) + desc("Remove session data (preserves global memory)"),
@@ -353,6 +354,10 @@ async function main(): Promise<void> {
             logger.error("Usage: teamclaw run openclaw [--port PORT]");
             process.exit(1);
         }
+
+    } else if (cmd === "clarity") {
+        const { runClarityCommand } = await import("./commands/clarity.js");
+        await runClarityCommand(args.slice(1));
 
     } else if (cmd === "drift") {
         const { runDriftCommand } = await import("./commands/drift.js");

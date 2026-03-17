@@ -144,6 +144,11 @@ export const GameStateAnnotation = Annotation.Root({
   drift_resolution: Annotation<string | null>(lastValue<string | null>(() => null)),
   drift_reconsidered: Annotation<string[]>(lastValue<string[]>(() => [])),
 
+  // Goal clarity checking
+  clarity_result: Annotation<Record<string, unknown> | null>(lastValue<Record<string, unknown> | null>(() => null)),
+  clarified_goal: Annotation<string | null>(lastValue<string | null>(() => null)),
+  goal_splits: Annotation<string[]>(lastValue<string[]>(() => [])),
+
   // Send-payload fields: transient, set by Send() args during parallel worker superstep
   _send_task: Annotation<Record<string, unknown> | null>(lastValue<Record<string, unknown> | null>(() => null)),
   _send_bot_id: Annotation<string>(lastValue(() => "")),
