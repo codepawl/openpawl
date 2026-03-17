@@ -1,0 +1,43 @@
+/**
+ * Types for session briefing data.
+ */
+
+export interface LastSessionInfo {
+  sessionId: string;
+  goal: string;
+  completedAt: number;
+  daysAgo: number;
+  totalCostUSD: number;
+  tasksCompleted: number;
+}
+
+export interface LeftOpenItem {
+  taskDescription: string;
+  reason: "escalated" | "deferred" | "failed";
+  sessionId: string;
+}
+
+export interface TeamPerformanceEntry {
+  agentRole: string;
+  trend: "improving" | "stable" | "degrading";
+  confidenceDelta: number;
+  alert: boolean;
+}
+
+export interface BriefingData {
+  lastSession: LastSessionInfo | null;
+  whatWasBuilt: string[];
+  teamLearnings: string[];
+  leftOpen: LeftOpenItem[];
+  teamPerformance: TeamPerformanceEntry[];
+  newGlobalPatterns: number;
+  openRFCs: string[];
+}
+
+export interface InterRunSummary {
+  completedRun: number;
+  nextRun: number;
+  averageConfidence: number;
+  targetConfidence: number;
+  newLessons: number;
+}

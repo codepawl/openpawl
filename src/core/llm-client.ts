@@ -7,6 +7,7 @@ import { logger, isDebugMode } from "./logger.js";
 import { getTrafficController } from "./traffic-control.js";
 import { resolveModelForAgent, getFallbackChain } from "./model-config.js";
 import { openclawEvents } from "./openclaw-events.js";
+import { getLlmCache } from "./llm-cache.js";
 
 export interface GenerateOptions {
   temperature?: number;
@@ -193,6 +194,29 @@ export async function generate(prompt: string, options?: GenerateOptions & { bot
     throw new Error("❌ OpenClaw Gateway not found. TeamClaw requires OpenClaw to function.");
   }
 
+  // Cache check: skip streaming requests
+  const isStreaming = !!options?.onChunk;
+  if (!isStreaming) {
+    const llmCache = getLlmCache();
+    const cacheKey = llmCache.buildKey(prompt, model, temperature);
+    const cached = llmCache.get(cacheKey);
+    if (cached !== null) {
+      openclawEvents.emit("log", {
+        id: `llm-cache-hit-${Date.now()}`,
+        level: "success",
+        source: "llm-client",
+        action: "cache_hit",
+        model,
+        botId,
+        message: `Cache hit for ${botId} (${promptChars} chars saved)`,
+        meta: { promptChars },
+        timestamp: Date.now(),
+      });
+      trafficController.release(botId);
+      return cached;
+    }
+  }
+
   const url = buildOpenClawUrl(workerUrl, CONFIG.openclawChatEndpoint);
 
   // Build model chain: primary model + fallback models (max 2 retries)
@@ -298,8 +322,15 @@ export async function generate(prompt: string, options?: GenerateOptions & { bot
         return sseResult.text.trim();
       }
       const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+      const responseText = (data.choices?.[0]?.message?.content ?? "").trim();
+      // Cache successful non-streaming responses
+      if (responseText) {
+        const llmCache = getLlmCache();
+        const storageKey = llmCache.buildKey(prompt, currentModel, temperature);
+        llmCache.set(storageKey, responseText, promptChars, currentModel);
+      }
       trafficController.release(botId);
-      return (data.choices?.[0]?.message?.content ?? "").trim();
+      return responseText;
     } catch (err) {
       const elapsedMs = Date.now() - startedAt;
       openclawEvents.emit("log", {

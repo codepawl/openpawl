@@ -1,0 +1,152 @@
+/**
+ * Briefing data collector — gathers data from session index, recordings,
+ * global memory, and agent profiles for the session briefing.
+ *
+ * No LLM calls. All data comes from local storage.
+ */
+
+import type { BriefingData, LeftOpenItem, TeamPerformanceEntry } from "./types.js";
+import { summarizeTasks } from "./summarizer.js";
+import { listSessions } from "../replay/session-index.js";
+import { readRecordingEvents } from "../replay/storage.js";
+import type { RecordingEvent } from "../replay/types.js";
+
+/**
+ * Collect briefing data from all available sources.
+ * Returns BriefingData with whatever data is available — never throws.
+ */
+export async function collectBriefingData(): Promise<BriefingData> {
+  const empty: BriefingData = {
+    lastSession: null,
+    whatWasBuilt: [],
+    teamLearnings: [],
+    leftOpen: [],
+    teamPerformance: [],
+    newGlobalPatterns: 0,
+    openRFCs: [],
+  };
+
+  // 1. Find last completed session
+  const sessions = listSessions(5);
+  const lastCompleted = sessions.find((s) => s.completedAt > 0);
+  if (!lastCompleted) return empty;
+
+  const now = Date.now();
+  const daysAgo = Math.floor((now - lastCompleted.completedAt) / (1000 * 60 * 60 * 24));
+
+  // 2. Read recording events for the last session
+  let events: RecordingEvent[] = [];
+  try {
+    events = await readRecordingEvents(lastCompleted.sessionId);
+  } catch {
+    // Recording may be corrupted or missing
+  }
+
+  // 3. Extract completed tasks from final state
+  const exitEvents = events.filter((e) => e.phase === "exit");
+  const lastExitEvent = exitEvents[exitEvents.length - 1];
+  const finalState = lastExitEvent?.stateAfter ?? {};
+
+  const taskQueue = (finalState.task_queue ?? []) as Array<Record<string, unknown>>;
+  const completedTasks = taskQueue.filter((t) => t.status === "completed");
+  const failedTasks = taskQueue.filter((t) => t.status === "failed");
+  const completedDescriptions = completedTasks
+    .map((t) => (t.description as string) ?? "")
+    .filter(Boolean);
+
+  // 4. Summarize what was built
+  const whatWasBuilt = summarizeTasks(completedDescriptions, 5);
+
+  // 5. Extract team learnings from ancestral_lessons or promoted patterns
+  const ancestralLessons = (finalState.ancestral_lessons ?? []) as string[];
+  const promotedThisRun = (finalState.promoted_this_run ?? []) as string[];
+  const teamLearnings = [
+    ...promotedThisRun.slice(0, 2),
+    ...ancestralLessons.slice(0, 3 - Math.min(promotedThisRun.length, 2)),
+  ].slice(0, 3);
+
+  // 6. Extract left-open items
+  const leftOpen: LeftOpenItem[] = [];
+  const nextSprintBacklog = (finalState.next_sprint_backlog ?? []) as Array<Record<string, unknown>>;
+  for (const item of nextSprintBacklog.slice(0, 3)) {
+    const desc = (item.description as string) ?? (item.task_id as string) ?? "Unknown task";
+    const reason = (item.reason as string) ?? "deferred";
+    leftOpen.push({
+      taskDescription: desc,
+      reason: reason === "escalated" ? "escalated" : reason === "failed" ? "failed" : "deferred",
+      sessionId: lastCompleted.sessionId,
+    });
+  }
+
+  // Add failed tasks if we have room
+  if (leftOpen.length < 3) {
+    for (const task of failedTasks.slice(0, 3 - leftOpen.length)) {
+      leftOpen.push({
+        taskDescription: (task.description as string) ?? (task.task_id as string) ?? "Unknown task",
+        reason: "failed",
+        sessionId: lastCompleted.sessionId,
+      });
+    }
+  }
+
+  // 7. Extract team performance from agent profiles in final state
+  const teamPerformance: TeamPerformanceEntry[] = [];
+  const agentProfiles = (finalState.agent_profiles ?? []) as Array<Record<string, unknown>>;
+  for (const profile of agentProfiles) {
+    const role = (profile.agentRole as string) ?? (profile.role as string) ?? "";
+    if (!role) continue;
+
+    const scoreHistory = (profile.scoreHistory as number[]) ?? [];
+    const overallScore = (profile.overallScore as number) ?? 0;
+
+    // Determine trend from score history
+    let trend: "improving" | "stable" | "degrading" = "stable";
+    let confidenceDelta = 0;
+    if (scoreHistory.length >= 2) {
+      const recent = scoreHistory[scoreHistory.length - 1]!;
+      const previous = scoreHistory[scoreHistory.length - 2]!;
+      confidenceDelta = recent - previous;
+      if (confidenceDelta > 0.03) trend = "improving";
+      else if (confidenceDelta < -0.03) trend = "degrading";
+    }
+
+    // Check taskTypeScores for trends
+    const taskTypeScores = (profile.taskTypeScores ?? []) as Array<Record<string, unknown>>;
+    const hasDegradingType = taskTypeScores.some((t) => t.trend === "degrading");
+    if (hasDegradingType && trend === "stable") trend = "degrading";
+
+    const alert = trend === "degrading" || overallScore < 0.5;
+
+    teamPerformance.push({ agentRole: role, trend, confidenceDelta, alert });
+  }
+
+  // 8. Count new global patterns
+  const newGlobalPatterns = promotedThisRun.length;
+
+  // 9. Check for open RFCs
+  const openRFCs: string[] = [];
+  const rfcDoc = finalState.rfc_document as string | null;
+  if (rfcDoc && rfcDoc.trim()) {
+    // Extract title from RFC (first heading or first line)
+    const firstLine = rfcDoc.trim().split("\n")[0] ?? "RFC draft";
+    const title = firstLine.replace(/^#+\s*/, "").trim();
+    openRFCs.push(title);
+  }
+
+  return {
+    lastSession: {
+      sessionId: lastCompleted.sessionId,
+      goal: lastCompleted.goal,
+      completedAt: lastCompleted.completedAt,
+      daysAgo,
+      totalCostUSD: lastCompleted.totalCostUSD,
+      tasksCompleted: completedTasks.length,
+    },
+    whatWasBuilt,
+    teamLearnings,
+    leftOpen: leftOpen.slice(0, 3),
+    teamPerformance,
+    newGlobalPatterns,
+    openRFCs,
+  };
+}

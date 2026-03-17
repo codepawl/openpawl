@@ -58,6 +58,7 @@ import { getTrafficController } from "./core/traffic-control.js";
 import { promptPath } from "./utils/path-autocomplete.js";
 import { randomPhrase } from "./utils/spinner-phrases.js";
 
+import { collectBriefingData, renderBriefing, renderInterRunSummary } from "./briefing/index.js";
 import { resolveGoalFromFile, checkWorkspaceContent, promptGoalChoice } from "./work-runner/goal-resolver.js";
 import {
     getBotName,
@@ -180,7 +181,7 @@ export async function runWork(
     let { maxRuns } = parsed;
     let timeoutMinutes = parsed.timeoutMinutes ?? 0;
     let sessionMode = parsed.sessionMode;
-    const { clearLegacy, autoApprove, noPreview, asyncMode, asyncTimeout } = parsed;
+    const { clearLegacy, autoApprove, noPreview, asyncMode, asyncTimeout, noBriefing } = parsed;
     let noWebFlag = parsed.noWebFlag || noWebFromInput;
 
     // Raise listener limit — @clack/prompts adds keypress/readline listeners
@@ -247,6 +248,27 @@ export async function runWork(
     }
 
     setDebugMode(setupConfig.debugMode ?? CONFIG.debugMode ?? false);
+
+    // ---------------------------------------------------------------------------
+    // Session briefing — show "previously on TeamClaw" before goal prompt
+    // ---------------------------------------------------------------------------
+    const briefingDisabledInConfig = (() => {
+        try {
+            const rawCfg = persistedGlobalConfig as unknown as Record<string, unknown>;
+            const briefingCfg = rawCfg?.briefing as Record<string, unknown> | undefined;
+            return briefingCfg?.enabled === false;
+        } catch { return false; }
+    })();
+    if (!noBriefing && !briefingDisabledInConfig && canRenderSpinner) {
+        try {
+            const briefingData = await collectBriefingData();
+            const briefingOutput = renderBriefing(briefingData);
+            logger.plain(briefingOutput);
+            await new Promise((r) => setTimeout(r, 300));
+        } catch {
+            // Briefing must never crash work session — skip silently
+        }
+    }
 
     // ---------------------------------------------------------------------------
     // Goal resolution
@@ -1029,6 +1051,24 @@ export async function runWork(
                 }
 
                 log("info", "");
+
+                // Inter-run summary for multi-run sessions
+                if (maxRuns > 1 && runId < maxRuns && canRenderSpinner) {
+                    try {
+                        const avgConf = (finalState as Record<string, unknown>).average_confidence as number ?? 0;
+                        const newLessonsCount = ((finalState as Record<string, unknown>).new_success_patterns as string[] ?? []).length;
+                        logger.plain(renderInterRunSummary({
+                            completedRun: runId,
+                            nextRun: runId + 1,
+                            averageConfidence: avgConf,
+                            targetConfidence: 0.87,
+                            newLessons: newLessonsCount,
+                        }));
+                    } catch {
+                        // Never block on inter-run summary failure
+                    }
+                }
+
                 if (maxRuns === 1) break;
             }
         } catch (err) {

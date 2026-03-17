@@ -5,6 +5,7 @@
 import pc from "picocolors";
 import { logger } from "../core/logger.js";
 import { getTrafficController } from "../core/traffic-control.js";
+import { getLlmCache } from "../core/llm-cache.js";
 import type { BotDefinition } from "../core/bot-definitions.js";
 
 export function getBotName(botId: string, team: BotDefinition[]): string {
@@ -149,6 +150,19 @@ export function printWorkSummary(
             pc.cyan("TRAFFIC CONTROL"),
             `• Max concurrent: ${trafficStats.maxRequests}`,
             `• Requests used: ${trafficStats.totalRequests}/${trafficStats.maxRequests}`,
+            ...(() => {
+                const cs = getLlmCache().getStats();
+                const total = cs.hits + cs.misses;
+                const hitRate = total > 0 ? Math.round((cs.hits / total) * 100) : 0;
+                return [
+                    "",
+                    pc.cyan("LLM CACHE"),
+                    `• Hits: ${cs.hits}`,
+                    `• Misses: ${cs.misses}`,
+                    `• Hit rate: ${hitRate}%`,
+                    `• Estimated prompt chars saved: ${cs.estimatedSavedChars}`,
+                ];
+            })(),
             "",
             pc.cyan("LESSONS ACCUMULATED"),
             `• Oldest: "${oldest}"`,

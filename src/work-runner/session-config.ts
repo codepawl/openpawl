@@ -18,6 +18,7 @@ export type ParsedWorkArgs = {
     asyncMode: boolean;
     asyncTimeout: number;
     teamMode: "manual" | "autonomous" | undefined;
+    noBriefing: boolean;
 };
 
 export function parseWorkArgs(args: string[]): ParsedWorkArgs {
@@ -31,6 +32,7 @@ export function parseWorkArgs(args: string[]): ParsedWorkArgs {
     let asyncMode = false;
     let asyncTimeout = 0;
     let teamMode: "manual" | "autonomous" | undefined = undefined;
+    let noBriefing = false;
     let warnedInfraFlag = false;
 
     for (let i = 0; i < args.length; i++) {
@@ -58,6 +60,8 @@ export function parseWorkArgs(args: string[]): ParsedWorkArgs {
             noWebFlag = true;
         } else if (args[i] === "--no-preview") {
             noPreview = true;
+        } else if (args[i] === "--no-briefing") {
+            noBriefing = true;
         } else if (args[i] === "--async") {
             asyncMode = true;
         } else if (args[i] === "--team" && args[i + 1]) {
@@ -86,7 +90,7 @@ export function parseWorkArgs(args: string[]): ParsedWorkArgs {
         }
     }
 
-    return { maxRuns, timeoutMinutes, sessionMode, clearLegacy, autoApprove, noWebFlag, noPreview, asyncMode, asyncTimeout, teamMode };
+    return { maxRuns, timeoutMinutes, sessionMode, clearLegacy, autoApprove, noWebFlag, noPreview, asyncMode, asyncTimeout, teamMode, noBriefing };
 }
 
 export async function promptSessionConfig(
