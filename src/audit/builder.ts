@@ -79,6 +79,27 @@ export async function buildAuditTrail(
     }
   }
 
+  // Build vibe score for this run (best-effort)
+  let vibeScore: import("./types.js").AuditTrail["vibeScore"];
+  try {
+    const { calculateScore, buildScoreInputFromState, detectPatterns, selectTip } = await import("../score/index.js");
+    const scoreInput = buildScoreInputFromState(finalState, [], [], []);
+    const scoreResult = calculateScore(scoreInput);
+    const patterns = detectPatterns(scoreResult, scoreInput);
+    const tip = selectTip(scoreResult, scoreInput);
+    vibeScore = {
+      overall: scoreResult.overall,
+      teamTrust: scoreResult.dimensions.team_trust.score,
+      reviewEngagement: scoreResult.dimensions.review_engagement.score,
+      warningResponse: scoreResult.dimensions.warning_response.score,
+      confidenceAlignment: scoreResult.dimensions.confidence_alignment.score,
+      patterns: patterns.map((p) => p.label),
+      tip,
+    };
+  } catch {
+    // Score calculation non-critical
+  }
+
   return {
     sessionId,
     runIndex,
@@ -94,6 +115,7 @@ export async function buildAuditTrail(
     memoryUsage,
     agentPerformance,
     ...(personalityEvents?.length ? { personalityEvents } : {}),
+    ...(vibeScore ? { vibeScore } : {}),
   };
 }
 

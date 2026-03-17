@@ -1490,6 +1490,42 @@ export async function runWork(
       ).catch(() => {});
     }
 
+    // Non-blocking vibe score calculation
+    if (lastFinalState) {
+      (async () => {
+        try {
+          const { calculateScore, buildScoreInputFromState, detectPatterns, selectTip, VibeScoreStore } = await import("./score/index.js");
+          const scoreInput = buildScoreInputFromState(lastFinalState as Record<string, unknown>, [], [], []);
+          const result = calculateScore(scoreInput);
+          const patterns = detectPatterns(result, scoreInput);
+          const tip = selectTip(result, scoreInput);
+          const todayStr = new Date().toISOString().slice(0, 10);
+
+          const vmDb = vectorMemory.getDb?.();
+          if (vmDb) {
+            const store = new VibeScoreStore();
+            await store.init(vmDb);
+            await store.upsert({
+              id: `score-${todayStr}`,
+              date: todayStr,
+              overall: result.overall,
+              teamTrust: result.dimensions.team_trust.score,
+              reviewEngagement: result.dimensions.review_engagement.score,
+              warningResponse: result.dimensions.warning_response.score,
+              confidenceAlignment: result.dimensions.confidence_alignment.score,
+              sessionCount: 1,
+              eventsJson: JSON.stringify(result.events),
+              patternsJson: JSON.stringify(patterns),
+              tip,
+              computedAt: result.computedAt,
+            });
+          }
+        } catch {
+          // Score calculation is non-critical
+        }
+      })();
+    }
+
     const shouldRunRetro = !lastTeamComposition || lastTeamComposition.activeAgents.some(a => a.role === "retrospective");
     if (lastTotalReworks > 0 && lastFinalState && shouldRunRetro) {
         if (canRenderSpinner) {

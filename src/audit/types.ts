@@ -25,6 +25,15 @@ export interface AuditTrail {
   memoryUsage: MemoryUsageEntry;
   agentPerformance: AgentPerformanceEntry[];
   personalityEvents?: PersonalityEventSummary[];
+  vibeScore?: {
+    overall: number;
+    teamTrust: number;
+    reviewEngagement: number;
+    warningResponse: number;
+    confidenceAlignment: number;
+    patterns: string[];
+    tip: string;
+  };
 }
 
 export interface AuditSummary {

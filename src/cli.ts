@@ -386,6 +386,10 @@ async function main(): Promise<void> {
         const { runHandoffCommand } = await import("./commands/handoff.js");
         await runHandoffCommand(args.slice(1));
 
+    } else if (cmd === "score") {
+        const { runScoreCommand } = await import("./commands/score.js");
+        await runScoreCommand(args.slice(1));
+
     } else if (cmd === "demo") {
         const canRenderSpinner = Boolean(process.stdout.isTTY && process.stderr.isTTY);
         if (canRenderSpinner) intro("TeamClaw Demo Mode");

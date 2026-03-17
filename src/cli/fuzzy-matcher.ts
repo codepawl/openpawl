@@ -29,6 +29,7 @@ export const COMMANDS = [
     "onboard",
     "think",
     "handoff",
+    "score",
 ] as const;
 
 /** Known subcommands keyed by parent command. */
@@ -48,6 +49,7 @@ export const SUBCOMMANDS: Record<string, string[]> = {
     diff: [],
     think: ["history"],
     handoff: ["import"],
+    score: ["history"],
 };
 
 export type MatchResult = {

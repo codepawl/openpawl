@@ -1705,6 +1705,25 @@ document.getElementById('msg').textContent=r.ok?'Rejection submitted!':'Error: '
     },
   );
 
+  // ── Vibe score endpoint ──────────────────────────────────────────
+  fastify.get("/api/score", async (_req, reply) => {
+    try {
+      const lancedb = await import("@lancedb/lancedb");
+      const dbPath = path.join(os.homedir(), ".teamclaw", "memory", "global.db");
+      const db = await lancedb.connect(dbPath);
+      const { VibeScoreStore } = await import("../score/store.js");
+      const { calculateTrend } = await import("../score/trends.js");
+      const store = new VibeScoreStore();
+      await store.init(db);
+      const latest = await store.getLatest();
+      const recent = await store.getRecent(28);
+      const trend = calculateTrend(recent);
+      return { score: latest, trend };
+    } catch (err) {
+      return reply.status(500).send({ error: String(err) });
+    }
+  });
+
   // ── Handoff endpoints ──────────────────────────────────────────────
   fastify.get("/api/handoff", async (_req, reply) => {
     try {

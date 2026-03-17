@@ -32,6 +32,9 @@ export function renderAuditMarkdown(
   if (options.sections.agentPerformance) {
     sections.push(renderAgentPerformance(audit));
   }
+  if (audit.vibeScore) {
+    sections.push(renderVibeScore(audit));
+  }
 
   return sections.join("\n\n---\n\n") + "\n";
 }
@@ -184,6 +187,35 @@ function renderAgentPerformance(audit: AuditTrail): string {
       ? `${entry.vsProfile >= 0 ? "+" : ""}${entry.vsProfile.toFixed(2)} ${entry.trend === "up" ? "↑" : entry.trend === "down" ? "↓" : "→"}`
       : "—";
     lines.push(`| ${entry.agent} | ${entry.tasks} | ${entry.avgConfidence.toFixed(2)} | ${vs} |`);
+  }
+
+  return lines.join("\n");
+}
+
+function renderVibeScore(audit: AuditTrail): string {
+  const v = audit.vibeScore!;
+  const lines = [
+    "## Collaboration Score",
+    "",
+    `**Overall:** ${v.overall}/100`,
+    "",
+    "| Dimension | Score |",
+    "|-----------|-------|",
+    `| Team Trust | ${v.teamTrust.toFixed(1)}/25 |`,
+    `| Review Engagement | ${v.reviewEngagement.toFixed(1)}/25 |`,
+    `| Warning Response | ${v.warningResponse.toFixed(1)}/25 |`,
+    `| Confidence Alignment | ${v.confidenceAlignment.toFixed(1)}/25 |`,
+  ];
+
+  if (v.patterns.length > 0) {
+    lines.push("", "**Patterns:**");
+    for (const p of v.patterns) {
+      lines.push(`- ${p}`);
+    }
+  }
+
+  if (v.tip) {
+    lines.push("", `**Tip:** ${v.tip}`);
   }
 
   return lines.join("\n");

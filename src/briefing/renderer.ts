@@ -98,6 +98,13 @@ export function renderBriefing(data: BriefingData): string {
     }
   }
 
+  // Vibe score
+  if (data.vibeScore) {
+    const arrow = data.vibeScore.direction === "improving" ? "↑" : data.vibeScore.direction === "degrading" ? "↓" : "→";
+    const deltaStr = data.vibeScore.delta != null ? ` (${data.vibeScore.delta > 0 ? "+" : ""}${data.vibeScore.delta.toFixed(0)})` : "";
+    lines.push(color(pc.bold, `Vibe Score: ${data.vibeScore.overall}/100 ${arrow}${deltaStr}`));
+  }
+
   lines.push(color(pc.dim, SEPARATOR));
 
   // Enforce max 12 content lines (excluding separators)

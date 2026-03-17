@@ -239,6 +239,39 @@ export async function collectBriefingData(): Promise<BriefingData> {
     // Best-effort
   }
 
+  // 13. Load latest vibe score (best-effort)
+  let vibeScore: BriefingData["vibeScore"];
+  try {
+    const { VectorMemory: VM3 } = await import("../core/knowledge-base.js");
+    const { CONFIG: CFG3 } = await import("../core/config.js");
+    const vm3 = new VM3(CFG3.vectorStorePath, CFG3.memoryBackend);
+    await vm3.init();
+    const emb3 = vm3.getEmbedder();
+    if (emb3) {
+      const { GlobalMemoryManager: GMM3 } = await import("../memory/global/store.js");
+      const gm3 = new GMM3();
+      await gm3.init(emb3);
+      const db3 = gm3.getDb();
+      if (db3) {
+        const { VibeScoreStore } = await import("../score/store.js");
+        const { calculateTrend } = await import("../score/trends.js");
+        const scoreStore = new VibeScoreStore();
+        await scoreStore.init(db3);
+        const recent = await scoreStore.getRecent(28);
+        if (recent.length > 0) {
+          const trend = calculateTrend(recent);
+          vibeScore = {
+            overall: trend.current,
+            delta: trend.delta,
+            direction: trend.direction,
+          };
+        }
+      }
+    }
+  } catch {
+    // Best-effort — don't break briefing if score fails
+  }
+
   return {
     lastSession: {
       sessionId: lastCompleted.sessionId,
@@ -258,5 +291,6 @@ export async function collectBriefingData(): Promise<BriefingData> {
     recentThinkSessions,
     asyncThinkResults,
     contextFileFound,
+    vibeScore,
   };
 }
