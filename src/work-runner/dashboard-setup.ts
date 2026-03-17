@@ -3,11 +3,28 @@
  */
 
 import { logger } from "../core/logger.js";
+import { findAvailablePort } from "../core/port.js";
 
 export type DashboardSetupOptions = {
     webPort: number;
     dashboardPort?: number;
 };
+
+/** Wait until a port can be bound (i.e. the previous process released it). */
+async function waitForPortFree(port: number, timeoutMs = 5000): Promise<boolean> {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+        try {
+            // findAvailablePort returns the port itself when it's free
+            const free = await findAvailablePort(port, 0);
+            if (free === port) return true;
+        } catch {
+            // port not free yet
+        }
+        await new Promise((r) => setTimeout(r, 200));
+    }
+    return false;
+}
 
 /**
  * Start the dashboard daemon, verify health, and initialize the bridge.
@@ -22,8 +39,13 @@ export async function startDashboard(
     // Restart daemon if already running so it serves the latest build
     const preStatus = daemonStatus();
     if (preStatus.web === "running") {
+        const oldPort = preStatus.webPort ?? webPort;
         stopDaemon();
-        await new Promise((r) => setTimeout(r, 500));
+        // Wait for the port to actually be released before restarting
+        const freed = await waitForPortFree(oldPort);
+        if (!freed) {
+            logger.warn(`Port ${oldPort} still in use after stop — new dashboard may bind to a different port`);
+        }
     }
 
     const daemonResult = startDaemon({ web: true, gateway: false, webPort });
@@ -47,9 +69,9 @@ export async function startDashboard(
         logger.warn(`Dashboard auto-start skipped: ${daemonResult.error}`);
     }
 
-    // Verify dashboard is serving correctly (retry up to 3s for server startup)
+    // Verify dashboard is serving correctly (retry up to 5s for server startup)
     let dashboardHealthy = false;
-    for (let attempt = 0; attempt < 6; attempt++) {
+    for (let attempt = 0; attempt < 10; attempt++) {
         try {
             const checkUrl = `http://localhost:${actualPort}`;
             const res = await fetch(checkUrl, { signal: AbortSignal.timeout(2000) });
@@ -64,7 +86,7 @@ export async function startDashboard(
             }
             break;
         } catch {
-            if (attempt < 5) {
+            if (attempt < 9) {
                 await new Promise((r) => setTimeout(r, 500));
             } else {
                 logger.warn(`>>> Dashboard Health: unreachable after ${(attempt + 1) * 500}ms — server may still be starting`);

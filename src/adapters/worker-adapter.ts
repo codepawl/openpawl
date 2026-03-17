@@ -300,6 +300,7 @@ export class UniversalOpenClawAdapter implements WorkerAdapter {
           const result = JSON.parse(stdout) as Record<string, unknown>;
           const status = result.status as string;
           if (status !== "ok") {
+            log(`[openclaw] non-ok response: ${JSON.stringify(result).slice(0, 1000)}`);
             const errMsg = String(result.error ?? result.summary ?? "Agent command failed");
             if (this.onReasoning) {
               this.onReasoning(`[gateway error] ${errMsg}`);
