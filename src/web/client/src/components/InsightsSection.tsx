@@ -5,6 +5,7 @@ import { NodeGraphView } from "./NodeGraphView";
 import { LiveStateGraph } from "./LiveStateGraph";
 import { MemoryPanel } from "./MemoryPanel";
 import { ProfilesPanel } from "./ProfilesPanel";
+import { ThinkPanel } from "./ThinkPanel";
 
 const TAB_CONFIG = {
   matrix: { icon: "bi-grid-3x3-gap-fill", label: "Priority Matrix" },
@@ -12,6 +13,7 @@ const TAB_CONFIG = {
   workflow: { icon: "bi-signpost-split", label: "Roadmap" },
   memory: { icon: "bi-database", label: "Memory" },
   profiles: { icon: "bi-person-badge", label: "Profiles" },
+  think: { icon: "bi-chat-square-dots", label: "Think" },
 } as const;
 
 type InsightsTab = keyof typeof TAB_CONFIG;
@@ -69,8 +71,10 @@ export function InsightsSection() {
               <LiveStateGraph />
             ) : activeTab === "memory" ? (
               <MemoryPanel />
-            ) : (
+            ) : activeTab === "profiles" ? (
               <ProfilesPanel />
+            ) : (
+              <ThinkPanel />
             )}
           </div>
           </motion.div>
