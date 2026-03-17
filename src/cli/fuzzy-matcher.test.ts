@@ -3,8 +3,6 @@ import {
     findClosestCommand,
     findClosestSubcommand,
     scoreMatch,
-    COMMANDS,
-    SUBCOMMANDS,
 } from "./fuzzy-matcher.js";
 
 describe("scoreMatch", () => {

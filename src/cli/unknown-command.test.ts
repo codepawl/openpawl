@@ -103,7 +103,6 @@ describe("formatUnknownCommand", () => {
                 confidence: "high",
             };
             const msg = formatUnknownCommand({ command: "modals", suggestion });
-            // eslint-disable-next-line no-control-regex
             const hasAnsi = /\x1b\[/.test(msg);
             expect(hasAnsi).toBe(false);
             expect(msg).toContain('Unknown command "modals"');

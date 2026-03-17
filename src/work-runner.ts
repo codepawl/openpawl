@@ -471,7 +471,6 @@ export async function runWork(
         const MAX_DRIFT_RETRIES = 3;
         let goalToCheck = effectiveGoal;
 
-        // eslint-disable-next-line no-constant-condition
         while (true) {
             try {
                 const { detectDrift } = await import("./drift/detector.js");

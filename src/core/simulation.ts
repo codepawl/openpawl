@@ -242,7 +242,7 @@ export class TeamOrchestration {
     const telemetryMemoryRetrievalNode = wrapWithTelemetry("memory_retrieval", memoryRetrievalNode);
     const telemetryCoordinatorNode = wrapWithTelemetry("coordinator", (s) => this.coordinator.coordinateNode(s, signal));
     const previewNode = createPreviewNode({ previewProvider, costConfig });
-    const telemetryPreviewNode = wrapWithTelemetry("preview", previewNode);
+    const telemetryPreviewNode = wrapWithTelemetry("preview_gate", previewNode);
     const confidenceRouterNode = createConfidenceRouterNode({
       thresholds: CONFIG.confidenceScoringEnabled ? CONFIG.confidenceThresholds : undefined,
       team: this.team,
@@ -255,7 +255,7 @@ export class TeamOrchestration {
       .addNode("system_design", telemetrySystemDesignNode)
       .addNode("rfc_phase", telemetryRfcNode)
       .addNode("coordinator", telemetryCoordinatorNode)
-      .addNode("preview", telemetryPreviewNode)
+      .addNode("preview_gate", telemetryPreviewNode)
       .addNode("approval", telemetryApprovalNode)
       .addNode("worker_task", telemetryWorkerTaskNode)
       .addNode("confidence_router", telemetryConfidenceRouterNode)
@@ -292,9 +292,9 @@ export class TeamOrchestration {
       .addEdge("sprint_planning", "system_design")
       .addEdge("system_design", "rfc_phase")
       .addEdge("rfc_phase", "coordinator")
-      .addEdge("coordinator", "preview")
+      .addEdge("coordinator", "preview_gate")
       .addConditionalEdges(
-        "preview",
+        "preview_gate",
         (s) => {
           if (s.aborted) return "__end__";
           const taskQueue = s.task_queue ?? [];

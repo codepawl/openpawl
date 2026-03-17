@@ -159,7 +159,7 @@ describe("createPreviewNode", () => {
       } as unknown as Record<string, unknown>,
     });
     const result = await node(state);
-    expect(result.__node__).toBe("preview");
+    expect(result.__node__).toBe("preview_gate");
     expect(result.preview).toBeUndefined();
     expect(result.aborted).toBeUndefined();
   });
@@ -173,7 +173,7 @@ describe("createPreviewNode", () => {
       ],
     });
     const result = await node(state);
-    expect(result.__node__).toBe("preview");
+    expect(result.__node__).toBe("preview_gate");
     const preview = result.preview as unknown as PreviewState;
     expect(preview.status).toBe("approved");
   });
@@ -182,7 +182,7 @@ describe("createPreviewNode", () => {
     const node = createPreviewNode();
     const state = makeState({ task_queue: [] });
     const result = await node(state);
-    expect(result.__node__).toBe("preview");
+    expect(result.__node__).toBe("preview_gate");
     expect(result.preview).toBeUndefined();
   });
 

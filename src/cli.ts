@@ -15,7 +15,7 @@ import { createRequire } from "node:module";
 import pc from "picocolors";
 import { intro, outro } from "@clack/prompts";
 import { logger } from "./core/logger.js";
-import { COMMANDS, findClosestCommand, findClosestSubcommand, SUBCOMMANDS } from "./cli/fuzzy-matcher.js";
+import { COMMANDS, findClosestCommand, findClosestSubcommand } from "./cli/fuzzy-matcher.js";
 import { handleUnknownCommand, handleUnknownSubcommand } from "./cli/unknown-command.js";
 
 function parseGoalArg(args: string[]): { goal?: string; rest: string[] } {

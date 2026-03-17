@@ -96,7 +96,7 @@ export function createPreviewNode(
 
     // Already processed — pass through
     if (existingPreview && existingPreview.status !== "pending") {
-      return { __node__: "preview" };
+      return { __node__: "preview_gate" };
     }
 
     // Skip preview flag
@@ -108,7 +108,7 @@ export function createPreviewNode(
           estimate: { estimatedUSD: 0, parallelWaves: 0, rfcRequired: false, estimatedMinutes: 0 },
           status: "approved" as const,
         },
-        __node__: "preview",
+        __node__: "preview_gate",
       };
     }
 
@@ -117,7 +117,7 @@ export function createPreviewNode(
 
     // No pending tasks — nothing to preview
     if (previewTasks.length === 0) {
-      return { __node__: "preview" };
+      return { __node__: "preview_gate" };
     }
 
     const estimate: CostEstimate = estimateCost(previewTasks, costConfig);
@@ -164,7 +164,7 @@ export function createPreviewNode(
         preview: { ...previewState, status: "aborted" },
         aborted: true,
         messages: ["Preview: Sprint aborted by user"],
-        __node__: "preview",
+        __node__: "preview_gate",
       };
     }
 
@@ -180,7 +180,7 @@ export function createPreviewNode(
         task_queue: updatedQueue,
         total_tasks: response.editedTasks.length,
         messages: [`Preview: Sprint approved with ${response.editedTasks.length} edited tasks`],
-        __node__: "preview",
+        __node__: "preview_gate",
       };
     }
 
@@ -189,7 +189,7 @@ export function createPreviewNode(
     return {
       preview: { ...previewState, status: "approved" },
       messages: [`Preview: Sprint approved — ${previewTasks.length} tasks, ~$${estimate.estimatedUSD.toFixed(2)}`],
-      __node__: "preview",
+      __node__: "preview_gate",
     };
   };
 }

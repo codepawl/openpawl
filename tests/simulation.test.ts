@@ -309,7 +309,7 @@ describe("simulation.ts — TeamOrchestration", () => {
       expect(registeredNodes).toContain("system_design");
       expect(registeredNodes).toContain("rfc_phase");
       expect(registeredNodes).toContain("coordinator");
-      expect(registeredNodes).toContain("preview");
+      expect(registeredNodes).toContain("preview_gate");
       expect(registeredNodes).toContain("approval");
       expect(registeredNodes).toContain("worker_task");
       expect(registeredNodes).toContain("worker_collect");
@@ -327,7 +327,7 @@ describe("simulation.ts — TeamOrchestration", () => {
       expect(edges).toContainEqual(["sprint_planning", "system_design"]);
       expect(edges).toContainEqual(["system_design", "rfc_phase"]);
       expect(edges).toContainEqual(["rfc_phase", "coordinator"]);
-      expect(edges).toContainEqual(["coordinator", "preview"]);
+      expect(edges).toContainEqual(["coordinator", "preview_gate"]);
       expect(edges).toContainEqual(["worker_task", "confidence_router"]);
       expect(edges).toContainEqual(["confidence_router", "worker_collect"]);
       // partial_approval → increment_cycle is now a conditional edge (rework loop)
@@ -338,7 +338,7 @@ describe("simulation.ts — TeamOrchestration", () => {
       const conditionalSources = mockAddConditionalEdges.mock.calls.map(
         (call: unknown[]) => call[0]
       );
-      expect(conditionalSources).toContain("preview");
+      expect(conditionalSources).toContain("preview_gate");
       expect(conditionalSources).toContain("approval");
       expect(conditionalSources).toContain("worker_collect");
       expect(conditionalSources).toContain("partial_approval");
@@ -675,8 +675,8 @@ describe("simulation.ts — TeamOrchestration", () => {
       mockAddNode.mockClear();
       mockAddEdge.mockClear();
       createTeamOrchestration({ team: makeTeam() });
-      // Conditional edges moved from "coordinator" to "preview" node
-      coordinatorRoute = getRoutingFn("preview");
+      // Conditional edges moved from "coordinator" to "preview_gate" node
+      coordinatorRoute = getRoutingFn("preview_gate");
       approvalRoute = getRoutingFn("approval");
       incrementRoute = getRoutingFn("increment_cycle");
     });

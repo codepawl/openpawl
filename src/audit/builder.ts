@@ -170,7 +170,7 @@ function buildDecisionLog(events: RecordingEvent[], _taskQueue: Record<string, u
       data.action = response?.action;
     } else if (evt.nodeId === "confidence_router") {
       decision = "Confidence router evaluated task results";
-    } else if (evt.nodeId === "preview") {
+    } else if (evt.nodeId === "preview_gate") {
       decision = "Preview shown for user approval";
     } else if (evt.nodeId === "sprint_planning") {
       decision = "Sprint planning completed";

@@ -129,7 +129,6 @@ export class SprintPlanningNode {
     let pastDecisions: import("../journal/types.js").Decision[] = [];
     try {
       const { DecisionStore } = await import("../journal/store.js");
-      const { GlobalMemoryManager } = await import("../memory/global/store.js");
       const lancedb = await import("@lancedb/lancedb");
       const os = await import("node:os");
       const path = await import("node:path");

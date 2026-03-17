@@ -134,7 +134,7 @@ vi.mock("../src/graph/nodes/preview.js", () => ({
   createPreviewNode: vi.fn().mockReturnValue(
     vi.fn().mockImplementation(() => ({
       preview: { tasks: [], estimate: { estimatedUSD: 0, parallelWaves: 0, rfcRequired: false, estimatedMinutes: 0 }, status: "approved" },
-      __node__: "preview",
+      __node__: "preview_gate",
     }))
   ),
 }));
@@ -339,7 +339,7 @@ async function simulateGraph(
     "system_design",
     "rfc_phase",
     "coordinator",
-    "preview",
+    "preview_gate",
   ];
 
   // Execute linear prefix
@@ -353,7 +353,7 @@ async function simulateGraph(
 
   // Now enter the conditional routing loop
   let iterations = 0;
-  let currentNode = "preview"; // just completed preview (after coordinator)
+  let currentNode = "preview_gate"; // just completed preview (after coordinator)
 
   while (iterations < maxIterations) {
     iterations++;
