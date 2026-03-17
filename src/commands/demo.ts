@@ -19,7 +19,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function resolveClientDir(): string | null {
     const candidates = [
+        path.join(__dirname, "client"),                    // dist/client (built output)
         path.join(__dirname, "..", "client"),
+        path.join(__dirname, "..", "dist", "client"),
         path.join(__dirname, "..", "web", "client", "dist"),
         path.join(__dirname, "..", "web", "client"),
     ];
@@ -494,6 +496,32 @@ export async function runDemo(args: string[]): Promise<void> {
 
     await fastify.listen({ port, host: "0.0.0.0" });
     const url = `http://localhost:${port}`;
+
+    // Verify the server is actually responding before declaring it live
+    let alive = false;
+    for (let attempt = 0; attempt < 10; attempt++) {
+        try {
+            const resp = await fetch(`${url}/api/events`, {
+                signal: AbortSignal.timeout(1000),
+                headers: { Accept: "text/event-stream" },
+            });
+            if (resp.ok) {
+                alive = true;
+                // Consume and discard the SSE stream so the connection closes
+                resp.body?.cancel();
+                break;
+            }
+        } catch {
+            // not ready yet
+        }
+        await sleep(300);
+    }
+
+    if (!alive) {
+        logger.error(`Server started but ${url} is not responding — check firewall or port conflicts`);
+        process.exit(1);
+    }
+
     logger.success(`Demo server live at ${url}`);
     logger.info("Waiting 2s for browser connections...");
     await sleep(2000);

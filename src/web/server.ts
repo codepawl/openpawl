@@ -106,9 +106,10 @@ const isProduction = process.env.NODE_ENV === "production";
 
 function resolveClientDir(): string | null {
   const candidates = [
+    path.join(__dirname, "client"),                    // dist/client (built output)
     path.join(__dirname, "..", "client"),
+    path.join(__dirname, "..", "dist", "client"),
     path.join(__dirname, "client", "dist"),
-    path.join(__dirname, "client"),
   ];
   for (const p of candidates) {
     if (existsSync(path.join(p, "index.html"))) {
@@ -1430,12 +1431,34 @@ document.getElementById('msg').textContent=r.ok?'Rejection submitted!':'Error: '
 
   try {
     await fastify.listen({ port, host: "0.0.0.0" });
+
+    // Verify the server is actually reachable before declaring it live
+    const url = `http://localhost:${port}`;
+    let alive = false;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      try {
+        const resp = await fetch(`${url}/api/memory/health`, {
+          signal: AbortSignal.timeout(1000),
+        });
+        if (resp.ok) { alive = true; break; }
+      } catch {
+        // not ready yet
+      }
+      await new Promise((r) => setTimeout(r, 300));
+    }
+
+    if (!alive) {
+      const msg = `Server started but ${url} is not responding — check firewall or port conflicts`;
+      if (s) { s.stop(msg); }
+      else { logger.error(msg); }
+      process.exit(1);
+    }
+
     if (s) {
-      const url = `http://localhost:${port}`;
       s.stop("Web Server is live!");
       note(`Access the dashboard at: ${url}`, "TeamClaw Web UI");
     } else {
-      logger.success(`Web UI: http://localhost:${port}`);
+      logger.success(`Web UI: ${url}`);
     }
   } catch (err) {
     if (s) {
