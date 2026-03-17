@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "bin": {
+    "teamclaw": "./dist/cli.js"
+  },
   "scripts": {
     "dev": "tsup --watch",
     "build": "tsup && pnpm --dir src/web/client build",
@@ -21,6 +24,7 @@
     "@langchain/langgraph": "^0.2.74",
     "@langchain/langgraph-checkpoint": "^0.0.17",
     "bootstrap-icons": "^1.13.1",
+    "damerau-levenshtein": "^1.0.8",
     "fastify": "^5.8.2",
     "fastify-plugin": "^5.1.0",
     "picocolors": "^1.1.1",
@@ -33,6 +37,7 @@
     }
   },
   "devDependencies": {
+    "@types/damerau-levenshtein": "^1.0.2",
     "@types/node": "^22.19.15",
     "@types/ws": "^8.18.1",
     "@typescript-eslint/eslint-plugin": "^8.56.1",
