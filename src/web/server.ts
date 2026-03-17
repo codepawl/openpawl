@@ -245,6 +245,39 @@ export async function runWeb(args: string[]): Promise<void> {
     return { lessons };
   });
 
+  // --- Personality endpoints ---
+
+  fastify.get("/api/personality/profiles", async () => {
+    const { PERSONALITY_PROFILES } = await import("../personality/profiles.js");
+    return { profiles: PERSONALITY_PROFILES };
+  });
+
+  fastify.get("/api/personality/events", async () => {
+    try {
+      const lancedb = await import("@lancedb/lancedb");
+      const { PersonalityEventStore } = await import("../personality/memory.js");
+      const dbPath = path.join(os.homedir(), ".teamclaw", "memory", "global.db");
+      const db = await lancedb.connect(dbPath);
+      const store = new PersonalityEventStore();
+      await store.init(db);
+      const events = await store.getRecent(30);
+      return { events };
+    } catch {
+      return { events: [] };
+    }
+  });
+
+  fastify.get("/api/personality/config", async () => {
+    return {
+      config: {
+        enabled: CONFIG.personalityEnabled,
+        pushbackEnabled: CONFIG.personalityPushbackEnabled,
+        coordinatorIntervention: CONFIG.personalityCoordinatorIntervention,
+        agentOverrides: CONFIG.personalityAgentOverrides,
+      },
+    };
+  });
+
   fastify.post("/api/config", async (req, reply) => {
     const body = req.body as Record<string, unknown>;
     const template = (body.template as string)?.trim() || "game_dev";
