@@ -11,6 +11,8 @@ import { DEFAULT_CONFIDENCE_THRESHOLDS } from "../confidence/types.js";
 import { parseConfidence } from "../confidence/parser.js";
 import { getRoutingDecision, mapRoutingToStatus } from "../confidence/router.js";
 import { logger, isDebugMode } from "../../core/logger.js";
+import { detectPushback } from "../../personality/pushback.js";
+import { CONFIG } from "../../core/config.js";
 
 function log(msg: string): void {
   if (isDebugMode()) {
@@ -62,6 +64,25 @@ export function createConfidenceRouterNode(
     // treat as pass-through — don't override routing
     if (confidence.reasoning === "No confidence block provided") {
       return { __node__: "confidence_router" };
+    }
+
+    // Personality pushback: reduce confidence score based on trigger severity
+    if (CONFIG.personalityEnabled && CONFIG.personalityPushbackEnabled) {
+      const assignedTo = (taskItem.assigned_to as string) ?? "";
+      const assignedRole = options.team
+        ? options.team.find((b) => b.id === assignedTo)?.role_id ?? ""
+        : "";
+      if (assignedRole) {
+        const pushback = detectPushback(rawOutput, assignedRole);
+        if (pushback.triggered) {
+          if (pushback.severity === "block") {
+            confidence.score = Math.max(0, confidence.score - 0.2);
+          } else if (pushback.severity === "warn") {
+            confidence.score = Math.max(0, confidence.score - 0.1);
+          }
+          log(`[confidence_router] pushback: ${pushback.severity} — ${pushback.response}`);
+        }
+      }
     }
 
     log(`[confidence_router] ${taskId}: score=${confidence.score.toFixed(2)}, flags=[${confidence.flags.join(",")}]`);

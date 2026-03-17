@@ -8,6 +8,8 @@ import pc from "picocolors";
 import type { GraphState } from "../core/graph-state.js";
 import { extractSuccessPattern } from "../memory/success/extractor.js";
 import type { TaskForExtraction } from "../memory/success/extractor.js";
+import { detectCoordinatorIntervention } from "../personality/coordinator-intervention.js";
+import { CONFIG } from "../core/config.js";
 
 export interface PartialApprovalTask {
   task_id: string;
@@ -55,6 +57,23 @@ export function createPartialApprovalNode(options: {
 
   return async (state: GraphState): Promise<Partial<GraphState>> => {
     const taskQueue = state.task_queue ?? [];
+
+    // Coordinator personality intervention: auto-resolve stuck rework loops
+    const interventionMessages: string[] = [];
+    if (CONFIG.personalityEnabled && CONFIG.personalityCoordinatorIntervention) {
+      const intervention = detectCoordinatorIntervention(state);
+      if (intervention) {
+        interventionMessages.push(`Coordinator Intervention: ${intervention.message}`);
+        // Auto-approve the stuck task at current confidence
+        const stuckIdx = taskQueue.findIndex(
+          (t) => (t.task_id as string) === intervention.taskId,
+        );
+        if (stuckIdx !== -1) {
+          taskQueue[stuckIdx] = { ...taskQueue[stuckIdx], status: "completed" };
+        }
+      }
+    }
+
     const waitingTasks = taskQueue.filter((t) => {
       const st = t.status as string;
       return st === "waiting_for_human" || st === "auto_approved_pending";
@@ -231,7 +250,7 @@ export function createPartialApprovalNode(options: {
       next_sprint_backlog: escalatedTasks,
       new_success_patterns: newPatternIds,
       approval_stats: stats,
-      messages: [summary],
+      messages: [...interventionMessages, summary],
       last_action: `Partial approval: ${summaryParts.join(", ")}`,
       __node__: "partial_approval",
     };

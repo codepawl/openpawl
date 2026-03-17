@@ -1,15 +1,8 @@
 import type { CoordinatorInterventionResult } from "./types.js";
 import { getPersonality } from "./profiles.js";
 
-interface ConfidenceHistoryEntry {
-  task_id: string;
-  status_before: string;
-  status_after: string;
-  [key: string]: unknown;
-}
-
 interface GraphStateLike {
-  confidence_history?: ConfidenceHistoryEntry[];
+  confidence_history?: Array<Record<string, unknown>>;
   [key: string]: unknown;
 }
 
@@ -22,8 +15,10 @@ export function detectCoordinatorIntervention(
   // Count rework cycles per task
   const reworkCounts = new Map<string, number>();
   for (const entry of history) {
-    const taskId = entry.task_id;
-    if (entry.status_before === "needs_rework" || entry.status_after === "needs_rework") {
+    const taskId = String(entry.task_id ?? "");
+    const statusBefore = String(entry.status_before ?? "");
+    const statusAfter = String(entry.status_after ?? "");
+    if (statusBefore === "needs_rework" || statusAfter === "needs_rework") {
       reworkCounts.set(taskId, (reworkCounts.get(taskId) ?? 0) + 1);
     }
   }

@@ -119,6 +119,38 @@ export const CONFIG = {
         }
         return false;
     })(),
+    personalityEnabled: (() => {
+        const p = (globalCfg as Record<string, unknown>).personality;
+        if (p && typeof p === "object" && !Array.isArray(p)) {
+            return (p as Record<string, unknown>).enabled !== false;
+        }
+        return false;
+    })(),
+    personalityPushbackEnabled: (() => {
+        const p = (globalCfg as Record<string, unknown>).personality;
+        if (p && typeof p === "object" && !Array.isArray(p)) {
+            return (p as Record<string, unknown>).pushbackEnabled !== false;
+        }
+        return true;
+    })(),
+    personalityCoordinatorIntervention: (() => {
+        const p = (globalCfg as Record<string, unknown>).personality;
+        if (p && typeof p === "object" && !Array.isArray(p)) {
+            return (p as Record<string, unknown>).coordinatorIntervention !== false;
+        }
+        return true;
+    })(),
+    personalityAgentOverrides: (() => {
+        const p = (globalCfg as Record<string, unknown>).personality;
+        if (p && typeof p === "object" && !Array.isArray(p)) {
+            const overrides = (p as Record<string, unknown>).agentOverrides;
+            if (overrides && typeof overrides === "object" && !Array.isArray(overrides)) {
+                return overrides as Record<string, { enabled?: boolean }>;
+            }
+        }
+        return {} as Record<string, { enabled?: boolean }>;
+    })(),
+
     confidenceThresholds: (() => {
         const defaults = { autoApprove: 0.85, reviewRequired: 0.60, reworkRequired: 0.40 };
         const cs = (globalCfg as Record<string, unknown>).confidenceScoring;
@@ -269,6 +301,15 @@ export function getWorkerUrlsForTeam(
     if (Object.keys(CONFIG.openclawWorkers).length > 0)
         return CONFIG.openclawWorkers;
     return {};
+}
+
+export function isPersonalityEnabled(role?: string): boolean {
+    if (!CONFIG.personalityEnabled) return false;
+    if (role) {
+        const override = CONFIG.personalityAgentOverrides[role];
+        if (override && typeof override.enabled === "boolean") return override.enabled;
+    }
+    return true;
 }
 
 // Re-export validateOrPromptConfig from the extracted module

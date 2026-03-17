@@ -36,6 +36,12 @@ export interface TeamClawGlobalConfig {
     keepHistory?: boolean;
     gitCommit?: boolean;
   };
+  personality?: {
+    enabled?: boolean;
+    pushbackEnabled?: boolean;
+    coordinatorIntervention?: boolean;
+    agentOverrides?: Record<string, { enabled?: boolean }>;
+  };
   workspaceDir?: string;
   proxy?: {
     path?: string;
@@ -225,6 +231,32 @@ export function normalizeGlobalConfig(input: Partial<TeamClawGlobalConfig>): Tea
       }
     : undefined;
 
+  const rawPersonality = (input as Record<string, unknown>).personality;
+  const personalityObj = rawPersonality && typeof rawPersonality === "object" && !Array.isArray(rawPersonality)
+    ? (rawPersonality as Record<string, unknown>)
+    : undefined;
+  const personality = personalityObj
+    ? {
+        enabled: typeof personalityObj.enabled === "boolean" ? personalityObj.enabled : true,
+        pushbackEnabled: typeof personalityObj.pushbackEnabled === "boolean" ? personalityObj.pushbackEnabled : true,
+        coordinatorIntervention: typeof personalityObj.coordinatorIntervention === "boolean" ? personalityObj.coordinatorIntervention : true,
+        agentOverrides: (() => {
+          const raw = personalityObj.agentOverrides;
+          if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+          const entries = Object.entries(raw as Record<string, unknown>)
+            .map(([k, v]) => {
+              if (v && typeof v === "object" && !Array.isArray(v)) {
+                const obj = v as Record<string, unknown>;
+                return [k, { enabled: typeof obj.enabled === "boolean" ? obj.enabled : true }] as const;
+              }
+              return null;
+            })
+            .filter((e): e is [string, { enabled: boolean }] => e !== null);
+          return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+        })(),
+      }
+    : undefined;
+
   return {
     version: 1,
     managedGateway: typeof input.managedGateway === "boolean" ? input.managedGateway : true,
@@ -243,6 +275,7 @@ export function normalizeGlobalConfig(input: Partial<TeamClawGlobalConfig>): Tea
     ...(modelAllowlist && modelAllowlist.length > 0 ? { modelAllowlist } : {}),
     ...(fallbackChain && fallbackChain.length > 0 ? { fallbackChain } : {}),
     ...(handoff ? { handoff } : {}),
+    ...(personality ? { personality } : {}),
     ...(workspaceDir ? { workspaceDir } : {}),
     ...(proxy ? { proxy } : {}),
   };
