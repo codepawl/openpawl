@@ -27,6 +27,7 @@ export const COMMANDS = [
     "clean",
     "run",
     "onboard",
+    "think",
 ] as const;
 
 /** Known subcommands keyed by parent command. */
@@ -44,6 +45,7 @@ export const SUBCOMMANDS: Record<string, string[]> = {
     forecast: ["accuracy"],
     heatmap: [],
     diff: [],
+    think: ["history"],
 };
 
 export type MatchResult = {

@@ -371,6 +371,10 @@ async function main(): Promise<void> {
         const { runLogs } = await import("./commands/logs.js");
         await runLogs(args.slice(1));
 
+    } else if (cmd === "think") {
+        const { runThinkCommand } = await import("./commands/think.js");
+        await runThinkCommand(args.slice(1));
+
     } else if (cmd === "demo") {
         const canRenderSpinner = Boolean(process.stdout.isTTY && process.stderr.isTTY);
         if (canRenderSpinner) intro("TeamClaw Demo Mode");
