@@ -18,6 +18,7 @@ function makeBriefingData(overrides: Partial<BriefingData> = {}): BriefingData {
     teamPerformance: [],
     newGlobalPatterns: 2,
     openRFCs: [],
+    relevantDecisions: [],
     ...overrides,
   };
 }

@@ -8,6 +8,7 @@ export type {
   LeftOpenItem,
   TeamPerformanceEntry,
   InterRunSummary,
+  RelevantDecision,
 } from "./types.js";
 export { collectBriefingData } from "./collector.js";
 export { renderBriefing, renderWelcome, renderInterRunSummary } from "./renderer.js";

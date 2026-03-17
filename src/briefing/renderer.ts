@@ -64,6 +64,14 @@ export function renderBriefing(data: BriefingData): string {
     }
   }
 
+  // Relevant past decisions — max 2
+  if (data.relevantDecisions && data.relevantDecisions.length > 0) {
+    lines.push(color(pc.bold, "Previously decided:"));
+    for (const d of data.relevantDecisions.slice(0, 2)) {
+      lines.push(color(pc.magenta, `→ ${d.decision} (${d.recommendedBy}, ${d.date}) — still applies?`));
+    }
+  }
+
   // Team performance — only notable agents, max 2
   const notable = data.teamPerformance.filter((tp) => tp.trend !== "stable");
   if (notable.length > 0) {

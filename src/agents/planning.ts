@@ -13,6 +13,7 @@ import { ensureWorkspaceDir, writeTextFile } from "../core/workspace-fs.js";
 import { getCanvasTelemetry } from "../core/canvas-telemetry.js";
 import type { AgentProfile } from "./profiles/types.js";
 import { formatProfilesForPrompt } from "./profiles/prompt.js";
+import { withDecisionContext } from "../journal/prompt.js";
 
 function log(msg: string): void {
   if (isDebugMode()) {
@@ -124,7 +125,25 @@ export class SprintPlanningNode {
     const memoryBlock = memoriesContext ? `\n\n${memoriesContext}` : "";
     const profileBlock = formatProfilesForPrompt(this.profiles);
 
-    const prompt = `You are a Scrum Master conducting Sprint Planning.
+    // Load relevant past decisions for context injection
+    let pastDecisions: import("../journal/types.js").Decision[] = [];
+    try {
+      const { DecisionStore } = await import("../journal/store.js");
+      const { GlobalMemoryManager } = await import("../memory/global/store.js");
+      const lancedb = await import("@lancedb/lancedb");
+      const os = await import("node:os");
+      const path = await import("node:path");
+      const dbPath = path.join(os.homedir(), ".teamclaw", "memory", "global.db");
+      const db = await lancedb.connect(dbPath);
+      const decStore = new DecisionStore();
+      await decStore.init(db);
+      const recent = await decStore.getRecentDecisions(30);
+      pastDecisions = recent.filter((d) => d.status === "active").slice(0, 3);
+    } catch {
+      // Non-critical — decisions unavailable
+    }
+
+    let prompt = `You are a Scrum Master conducting Sprint Planning.
 
 ## Sprint Goal
 ${goal}
@@ -160,6 +179,11 @@ Example:
     {"role": "qa_reviewer", "bot": "bot_1", "focus": "Testing and quality"}
   ]
 }`;
+
+    // Inject past decisions into prompt
+    if (pastDecisions.length > 0) {
+      prompt = withDecisionContext(prompt, pastDecisions);
+    }
 
     const messages = [
       { role: "user", content: prompt },

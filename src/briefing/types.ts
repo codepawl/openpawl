@@ -24,6 +24,12 @@ export interface TeamPerformanceEntry {
   alert: boolean;
 }
 
+export interface RelevantDecision {
+  decision: string;
+  recommendedBy: string;
+  date: string;
+}
+
 export interface BriefingData {
   lastSession: LastSessionInfo | null;
   whatWasBuilt: string[];
@@ -32,6 +38,7 @@ export interface BriefingData {
   teamPerformance: TeamPerformanceEntry[];
   newGlobalPatterns: number;
   openRFCs: string[];
+  relevantDecisions: RelevantDecision[];
 }
 
 export interface InterRunSummary {

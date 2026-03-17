@@ -15,6 +15,7 @@ interface BriefingData {
   teamPerformance: { agentRole: string; trend: string; confidenceDelta: number; alert: boolean }[];
   newGlobalPatterns: number;
   openRFCs: string[];
+  relevantDecisions?: { decision: string; recommendedBy: string; date: string }[];
 }
 
 export function SessionBriefing({

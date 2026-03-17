@@ -137,6 +137,16 @@ describe("collectBriefingData", () => {
     expect(data.whatWasBuilt).toEqual([]);
   });
 
+  it("includes relevantDecisions field (max 2) without crashing", async () => {
+    mockListSessions.mockReturnValue([makeSession()]);
+    mockReadRecordingEvents.mockResolvedValue([makeExitEvent({ task_queue: [] })]);
+    const data = await collectBriefingData();
+    // relevantDecisions may be empty (decision store not available in test env)
+    // but the field must exist and not crash
+    expect(Array.isArray(data.relevantDecisions)).toBe(true);
+    expect(data.relevantDecisions.length).toBeLessThanOrEqual(2);
+  });
+
   it("extracts team performance from agent profiles in state", async () => {
     mockListSessions.mockReturnValue([makeSession()]);
     mockReadRecordingEvents.mockResolvedValue([

@@ -21,6 +21,7 @@ import {
   buildReworkPrompt,
 } from "./review-workflow.js";
 import { withConfidenceScoring } from "../graph/confidence/prompt.js";
+import { extractDecisions } from "../journal/extractor.js";
 import type { AgentProfile, RoutingDecision } from "./profiles/types.js";
 import { ProfileRouter } from "./profiles/router.js";
 
@@ -544,6 +545,54 @@ export function createWorkerCollectNode(): (state: GraphState) => Partial<GraphS
         return r?.routing_decision === "escalated";
       })
       .map((t) => t.task_id as string);
+
+    // Fire-and-forget: extract decisions from agent outputs (async, never blocks)
+    try {
+      const sessionId = (state as Record<string, unknown>).replaySessionId as string ?? "";
+      const goal = (state.user_goal ?? "") as string;
+      const runIndex = (state.generation_id ?? 1) as number;
+      for (const task of taskQueue) {
+        const result = task.result as Record<string, unknown> | null;
+        if (!result?.output) continue;
+        const agentRole = (task.assigned_to as string) ?? "";
+        const output = String(result.output);
+        const confObj = result.confidence as Record<string, unknown> | undefined;
+        const conf = typeof confObj?.score === "number" ? (confObj.score as number) : 0;
+        const decisions = extractDecisions({
+          agentRole,
+          agentOutput: output,
+          taskId: (task.task_id as string) ?? "",
+          sessionId,
+          runIndex,
+          goalContext: goal,
+          confidence: conf,
+        });
+        if (decisions.length > 0) {
+          // Async persist — import dynamically to avoid blocking
+          void (async () => {
+            try {
+              const lancedbMod = await import("@lancedb/lancedb");
+              const os = await import("node:os");
+              const path = await import("node:path");
+              const { DecisionStore } = await import("../journal/store.js");
+              const { checkSupersession } = await import("../journal/supersession.js");
+              const dbPath = path.join(os.homedir(), ".teamclaw", "memory", "global.db");
+              const db = await lancedbMod.connect(dbPath);
+              const store = new DecisionStore();
+              await store.init(db);
+              for (const dec of decisions) {
+                await store.upsert(dec);
+                await checkSupersession(dec, store);
+              }
+            } catch {
+              // Non-critical — decision persistence failure must never affect run
+            }
+          })();
+        }
+      }
+    } catch {
+      // Decision extraction must never block the aggregator
+    }
 
     // Emit final progress with the full merged queue
     workerEvents.emit("progress", { taskQueue: [...taskQueue] });

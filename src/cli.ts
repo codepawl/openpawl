@@ -15,6 +15,8 @@ import { createRequire } from "node:module";
 import pc from "picocolors";
 import { intro, outro } from "@clack/prompts";
 import { logger } from "./core/logger.js";
+import { COMMANDS, findClosestCommand, findClosestSubcommand, SUBCOMMANDS } from "./cli/fuzzy-matcher.js";
+import { handleUnknownCommand, handleUnknownSubcommand } from "./cli/unknown-command.js";
 
 function parseGoalArg(args: string[]): { goal?: string; rest: string[] } {
     let goal: string | undefined;
@@ -82,6 +84,7 @@ function printHelp(): void {
         "  " + cmd(pad("lessons")) + desc("Export lessons learned"),
         "  " + cmd(pad("memory")) + desc("Global memory: health, promote, export/import"),
         "  " + cmd(pad("profile")) + desc("Agent performance profiles: list, show, reset"),
+        "  " + cmd(pad("journal")) + desc("Decision journal: list, search, show, export"),
         "  " + cmd(pad("clean")) + desc("Remove session data (preserves global memory)"),
         "  " + cmd(pad("run openclaw")) + desc("Start OpenClaw gateway"),
         "  " + cmd(pad("demo")) + desc("Run a synthetic demo (no gateway needed)"),
@@ -108,7 +111,22 @@ async function main(): Promise<void> {
         printHelp();
         return;
     }
-    const cmd = args[0];
+    if (args[0] === "--version" || args[0] === "-V") {
+        const require = createRequire(import.meta.url);
+        const { version } = require("../package.json") as { version: string };
+        console.log(version);
+        return;
+    }
+    const rawCmd = args[0] ?? "";
+
+    // Unknown flag (starts with --)
+    if (rawCmd.startsWith("--") || rawCmd.startsWith("-")) {
+        logger.error(`Unknown flag "${rawCmd}". Run \`teamclaw --help\` for usage.`);
+        process.exit(1);
+    }
+
+    // Case-insensitive command resolution
+    const cmd = COMMANDS.find((c) => c === rawCmd.toLowerCase()) ?? rawCmd;
 
     // -------------------------------------------------------------------------
     // Pillar 1: teamclaw setup
@@ -262,11 +280,8 @@ async function main(): Promise<void> {
             return;
         }
 
-        logger.error(`Unknown subcommand: config ${sub}`);
-        logger.error(
-            "Usage: teamclaw config | config get <KEY> [--raw] | config set <KEY> <VALUE> | config unset <KEY>",
-        );
-        process.exit(1);
+        const subMatch = findClosestSubcommand("config", sub);
+        handleUnknownSubcommand("config", sub, subMatch);
 
     } else if (cmd === "model") {
         const { runModelCommand } = await import("./commands/model.js");
@@ -338,6 +353,10 @@ async function main(): Promise<void> {
             process.exit(1);
         }
 
+    } else if (cmd === "journal") {
+        const { runJournalCommand } = await import("./commands/journal.js");
+        await runJournalCommand(args.slice(1));
+
     } else if (cmd === "logs") {
         const { runLogs } = await import("./commands/logs.js");
         await runLogs(args.slice(1));
@@ -350,11 +369,8 @@ async function main(): Promise<void> {
         if (canRenderSpinner) outro("Demo session finished.");
 
     } else {
-        logger.error(`Unknown command: ${cmd}`);
-        logger.error(
-            "Run `teamclaw --help` for usage. Key commands: setup, work, config, web, check, logs.",
-        );
-        process.exit(1);
+        const match = findClosestCommand(rawCmd);
+        handleUnknownCommand(rawCmd, match);
     }
 }
 

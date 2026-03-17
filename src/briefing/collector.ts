@@ -5,7 +5,7 @@
  * No LLM calls. All data comes from local storage.
  */
 
-import type { BriefingData, LeftOpenItem, TeamPerformanceEntry } from "./types.js";
+import type { BriefingData, LeftOpenItem, TeamPerformanceEntry, RelevantDecision } from "./types.js";
 import { summarizeTasks } from "./summarizer.js";
 import { listSessions } from "../replay/session-index.js";
 import { readRecordingEvents } from "../replay/storage.js";
@@ -24,6 +24,7 @@ export async function collectBriefingData(): Promise<BriefingData> {
     teamPerformance: [],
     newGlobalPatterns: 0,
     openRFCs: [],
+    relevantDecisions: [],
   };
 
   // 1. Find last completed session
@@ -133,6 +134,39 @@ export async function collectBriefingData(): Promise<BriefingData> {
     openRFCs.push(title);
   }
 
+  // 10. Retrieve relevant past decisions (max 2)
+  const relevantDecisions: RelevantDecision[] = [];
+  try {
+    const { DecisionStore } = await import("../journal/store.js");
+    const { GlobalMemoryManager } = await import("../memory/global/store.js");
+    const { VectorMemory } = await import("../core/knowledge-base.js");
+    const { CONFIG } = await import("../core/config.js");
+
+    const vm = new VectorMemory(CONFIG.vectorStorePath, CONFIG.memoryBackend);
+    await vm.init();
+    const embedder = vm.getEmbedder();
+    if (embedder) {
+      const globalMgr = new GlobalMemoryManager();
+      await globalMgr.init(embedder);
+      const db = globalMgr.getDb();
+      if (db) {
+        const decStore = new DecisionStore();
+        await decStore.init(db);
+        const recent = await decStore.getRecentDecisions(30);
+        const active = recent.filter((d) => d.status === "active");
+        for (const d of active.slice(0, 2)) {
+          relevantDecisions.push({
+            decision: d.decision,
+            recommendedBy: d.recommendedBy,
+            date: new Date(d.capturedAt).toLocaleDateString("en-US", { day: "numeric", month: "short" }),
+          });
+        }
+      }
+    }
+  } catch {
+    // Decision retrieval is non-critical
+  }
+
   return {
     lastSession: {
       sessionId: lastCompleted.sessionId,
@@ -148,5 +182,6 @@ export async function collectBriefingData(): Promise<BriefingData> {
     teamPerformance,
     newGlobalPatterns,
     openRFCs,
+    relevantDecisions,
   };
 }
