@@ -24,6 +24,7 @@ import {
 import pc from "picocolors";
 import os from "node:os";
 import path from "node:path";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import {
     readTeamclawConfig,
 } from "../core/jsonConfigManager.js";
@@ -134,51 +135,165 @@ async function stepWorkspace(state: WizardState): Promise<void> {
 // Step 3: Project Name
 // ---------------------------------------------------------------------------
 
-async function stepProject(state: WizardState): Promise<void> {
-    const tc = readTeamclawConfig();
-    const existingName = (tc.data as Record<string, unknown>).project_name as string | undefined;
-    const dirName = path.basename(state.workspaceDir);
-    const cwdName = path.basename(process.cwd());
-
-    const detected = existingName?.trim() || dirName || cwdName || "";
-
-    if (detected) {
-        const choice = handleCancel(
-            await select({
-                message: "Project name:",
-                options: [
-                    {
-                        value: detected,
-                        label: `Use "${detected}"`,
-                        hint: existingName ? "from config" : "from directory name",
-                    },
-                    { value: "__custom__", label: "Enter a different name..." },
-                    { value: "__skip__", label: "Skip (no project name)" },
-                ],
-            }),
-        ) as string;
-
-        if (choice === "__skip__") {
-            state.projectName = "";
-            return;
-        }
-
-        if (choice !== "__custom__") {
-            state.projectName = choice;
-            return;
-        }
+function listExistingProjects(workspaceDir: string): string[] {
+    const resolved = path.resolve(workspaceDir);
+    if (!existsSync(resolved)) return [];
+    try {
+        return readdirSync(resolved)
+            .filter((name) => {
+                if (name.startsWith(".")) return false;
+                try {
+                    return statSync(path.join(resolved, name)).isDirectory();
+                } catch {
+                    return false;
+                }
+            });
+    } catch {
+        return [];
     }
+}
+
+async function promptProjectName(
+    state: WizardState,
+    initialValue: string,
+    existingProjects: string[],
+): Promise<void> {
+    const workspaceDirName = path.basename(state.workspaceDir);
 
     const nameInput = handleCancel(
         await text({
             message: "Project name:",
-            initialValue: "",
+            initialValue,
             placeholder: "my-awesome-project",
-            validate: (v) =>
-                (v ?? "").trim().length > 0 ? undefined : "Project name cannot be empty",
+            validate: (v) => {
+                const trimmed = (v ?? "").trim();
+                if (!trimmed) return "Project name cannot be empty";
+                if (trimmed === workspaceDirName) {
+                    return `Name cannot match workspace directory ("${workspaceDirName}")`;
+                }
+                return undefined;
+            },
         }),
     ) as string;
-    state.projectName = nameInput.trim();
+
+    const name = nameInput.trim();
+
+    if (existingProjects.includes(name)) {
+        await handleDuplicateProject(state, name, existingProjects);
+    } else {
+        state.projectName = name;
+    }
+}
+
+async function handleDuplicateProject(
+    state: WizardState,
+    name: string,
+    existingProjects: string[],
+): Promise<void> {
+    // Find a safe auto-suffix that doesn't conflict
+    let suffix = 2;
+    let autoName = `${name}-${suffix}`;
+    while (existingProjects.includes(autoName)) {
+        suffix++;
+        autoName = `${name}-${suffix}`;
+    }
+
+    const resolution = handleCancel(
+        await select({
+            message: `Project "${name}" already exists in the workspace.`,
+            options: [
+                { value: "__rename__", label: "Choose a different name" },
+                { value: "__suffix__", label: `Add suffix → "${autoName}"` },
+                { value: "__custom_suffix__", label: "Add my own prefix/suffix" },
+                { value: "__use_anyway__", label: `Use "${name}" anyway`, hint: "may overwrite" },
+            ],
+        }),
+    ) as string;
+
+    if (resolution === "__rename__") {
+        await promptProjectName(state, "", existingProjects);
+        return;
+    }
+
+    if (resolution === "__suffix__") {
+        state.projectName = autoName;
+        return;
+    }
+
+    if (resolution === "__custom_suffix__") {
+        const custom = handleCancel(
+            await text({
+                message: `Enter the full project name (based on "${name}"):`,
+                initialValue: name,
+                placeholder: `${name}-v2`,
+                validate: (v) => {
+                    const trimmed = (v ?? "").trim();
+                    if (!trimmed) return "Project name cannot be empty";
+                    if (trimmed === name) return "Name is still the same — change it or pick another option";
+                    return undefined;
+                },
+            }),
+        ) as string;
+
+        const customName = custom.trim();
+        if (existingProjects.includes(customName)) {
+            await handleDuplicateProject(state, customName, existingProjects);
+        } else {
+            state.projectName = customName;
+        }
+        return;
+    }
+
+    // __use_anyway__
+    state.projectName = name;
+}
+
+async function stepProject(state: WizardState): Promise<void> {
+    const tc = readTeamclawConfig();
+    const existingName = (tc.data as Record<string, unknown>).project_name as string | undefined;
+    const workspaceDirName = path.basename(state.workspaceDir);
+    const existingProjects = listExistingProjects(state.workspaceDir);
+
+    const options: Array<{ value: string; label: string; hint?: string }> = [];
+
+    // Show previous project name if it's valid (not same as workspace dir)
+    if (existingName?.trim() && existingName.trim() !== workspaceDirName) {
+        options.push({
+            value: existingName.trim(),
+            label: `Use "${existingName.trim()}"`,
+            hint: "from previous config",
+        });
+    }
+
+    options.push(
+        { value: "__custom__", label: "Enter a project name" },
+        { value: "__back__", label: "Go back", hint: "return to workspace step" },
+    );
+
+    const choice = handleCancel(
+        await select({
+            message: "Project name:",
+            options,
+        }),
+    ) as string;
+
+    if (choice === "__back__") {
+        await stepWorkspace(state);
+        await stepProject(state);
+        return;
+    }
+
+    if (choice === "__custom__") {
+        await promptProjectName(state, "", existingProjects);
+        return;
+    }
+
+    // User picked the previous config name — still check for duplicates
+    if (existingProjects.includes(choice)) {
+        await handleDuplicateProject(state, choice, existingProjects);
+    } else {
+        state.projectName = choice;
+    }
 }
 
 // ---------------------------------------------------------------------------
