@@ -30,6 +30,13 @@ export interface RelevantDecision {
   date: string;
 }
 
+export interface RecentThinkSession {
+  question: string;
+  recommendation: string;
+  savedToJournal: boolean;
+  date: string;
+}
+
 export interface BriefingData {
   lastSession: LastSessionInfo | null;
   whatWasBuilt: string[];
@@ -39,6 +46,7 @@ export interface BriefingData {
   newGlobalPatterns: number;
   openRFCs: string[];
   relevantDecisions: RelevantDecision[];
+  recentThinkSessions?: RecentThinkSession[];
 }
 
 export interface InterRunSummary {

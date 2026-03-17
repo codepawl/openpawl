@@ -167,6 +167,39 @@ export async function collectBriefingData(): Promise<BriefingData> {
     // Decision retrieval is non-critical
   }
 
+  // 11. Load recent think sessions (best-effort)
+  let recentThinkSessions: BriefingData["recentThinkSessions"];
+  try {
+    const { VectorMemory: VM } = await import("../core/knowledge-base.js");
+    const { CONFIG: CFG } = await import("../core/config.js");
+    const vm2 = new VM(CFG.vectorStorePath, CFG.memoryBackend);
+    await vm2.init();
+    const emb = vm2.getEmbedder();
+    if (emb) {
+      const { GlobalMemoryManager: GMM } = await import("../memory/global/store.js");
+      const gm2 = new GMM();
+      await gm2.init(emb);
+      const db2 = gm2.getDb();
+      if (db2) {
+        const { ThinkHistoryStore } = await import("../think/history.js");
+        const thinkStore = new ThinkHistoryStore();
+        await thinkStore.init(db2);
+        const entries = await thinkStore.getAll();
+        const recent = entries.slice(0, 3);
+        if (recent.length > 0) {
+          recentThinkSessions = recent.map((e) => ({
+            question: e.question,
+            recommendation: e.recommendation,
+            savedToJournal: e.savedToJournal,
+            date: new Date(e.createdAt).toISOString().slice(0, 10),
+          }));
+        }
+      }
+    }
+  } catch {
+    // Best-effort — don't break briefing if think history fails
+  }
+
   return {
     lastSession: {
       sessionId: lastCompleted.sessionId,
@@ -183,5 +216,6 @@ export async function collectBriefingData(): Promise<BriefingData> {
     newGlobalPatterns,
     openRFCs,
     relevantDecisions,
+    recentThinkSessions,
   };
 }
