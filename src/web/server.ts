@@ -1611,6 +1611,100 @@ document.getElementById('msg').textContent=r.ok?'Rejection submitted!':'Error: '
     },
   );
 
+  // ---------------------------------------------------------------------------
+  // Async Think Jobs
+  // ---------------------------------------------------------------------------
+
+  fastify.get("/api/think/async/jobs", async () => {
+    try {
+      const { AsyncThinkJobStore } = await import("../think/job-store.js");
+      const store = new AsyncThinkJobStore();
+      const jobs = store.list();
+      return {
+        jobs: jobs.map((j) => ({
+          jobId: j.id,
+          question: j.question,
+          status: j.status,
+          recommendation: j.result?.recommendation?.choice ?? null,
+          confidence: j.result?.recommendation?.confidence ?? null,
+          completedAt: j.completedAt,
+          savedToJournal: j.result?.savedToJournal ?? false,
+          createdAt: j.createdAt,
+          error: j.error,
+        })),
+      };
+    } catch (err) {
+      return { jobs: [], error: String(err) };
+    }
+  });
+
+  fastify.post<{ Body: { question: string; autoSave?: boolean } }>(
+    "/api/think/async",
+    async (req, reply) => {
+      const { question, autoSave } = req.body ?? {} as { question?: string; autoSave?: boolean };
+      if (!question?.trim()) {
+        return reply.status(400).send({ error: "Question is required" });
+      }
+      try {
+        const { launchAsyncThink } = await import("../think/background-executor.js");
+        const result = await launchAsyncThink(question.trim(), { autoSave: autoSave ?? true });
+        if (!result.ok) {
+          return reply.status(429).send({ error: result.error });
+        }
+        return {
+          jobId: result.job!.id,
+          question: result.job!.question,
+          status: result.job!.status,
+        };
+      } catch (err) {
+        return reply.status(500).send({ error: String(err) });
+      }
+    },
+  );
+
+  fastify.get<{ Params: { jobId: string } }>(
+    "/api/think/async/:jobId",
+    async (req, reply) => {
+      try {
+        const { AsyncThinkJobStore } = await import("../think/job-store.js");
+        const store = new AsyncThinkJobStore();
+        const job = store.get(req.params.jobId);
+        if (!job) {
+          return reply.status(404).send({ error: "Job not found" });
+        }
+        return job;
+      } catch (err) {
+        return reply.status(500).send({ error: String(err) });
+      }
+    },
+  );
+
+  fastify.post<{ Params: { jobId: string } }>(
+    "/api/think/async/:jobId/cancel",
+    async (req, reply) => {
+      try {
+        const { AsyncThinkJobStore } = await import("../think/job-store.js");
+        const store = new AsyncThinkJobStore();
+        const job = store.get(req.params.jobId);
+        if (!job) {
+          return reply.status(404).send({ error: "Job not found" });
+        }
+        if (job.status !== "running" && job.status !== "queued") {
+          return reply.status(400).send({ error: `Job is ${job.status}` });
+        }
+        if (job.pid !== null) {
+          try { process.kill(job.pid, "SIGTERM"); } catch { /* gone */ }
+        }
+        job.status = "cancelled";
+        job.completedAt = Date.now();
+        store.save(job);
+        return { success: true, status: "cancelled" };
+      } catch (err) {
+        return reply.status(500).send({ error: String(err) });
+      }
+    },
+  );
+
   // ── Handoff endpoints ──────────────────────────────────────────────
   fastify.get("/api/handoff", async (_req, reply) => {
     try {

@@ -118,10 +118,42 @@ export async function runThinkCommand(args: string[]): Promise<void> {
         '  teamclaw think "your question"               Interactive think session',
         '  teamclaw think "question" --save              Auto-save to journal',
         '  teamclaw think "question" --no-stream         Show results at end (no streaming)',
+        '  teamclaw think "question" --async             Run in background (async mode)',
+        '  teamclaw think "question" --async --no-save   Async without auto-saving to journal',
+        "",
+        "  teamclaw think jobs                           List async think jobs",
+        "  teamclaw think jobs --pending                 Show only pending jobs",
+        "  teamclaw think jobs --complete                Show only completed jobs",
+        "  teamclaw think status [jobId]                 Show async job status",
+        "  teamclaw think results [jobId]                Show async job results",
+        "  teamclaw think cancel <jobId>                 Cancel a running async job",
+        "  teamclaw think clear                          Remove finished async jobs",
         "  teamclaw think history                        List past think sessions",
         "  teamclaw think history --session <id>         Show specific session",
       ].join("\n"),
     );
+    return;
+  }
+
+  // Async subcommands
+  if (args[0] === "jobs") {
+    await runAsyncJobs(args.slice(1));
+    return;
+  }
+  if (args[0] === "status") {
+    await runAsyncStatus(args[1]);
+    return;
+  }
+  if (args[0] === "results") {
+    await runAsyncResults(args[1]);
+    return;
+  }
+  if (args[0] === "cancel") {
+    await runAsyncCancel(args[1]);
+    return;
+  }
+  if (args[0] === "clear") {
+    await runAsyncClear();
     return;
   }
 
@@ -134,13 +166,37 @@ export async function runThinkCommand(args: string[]): Promise<void> {
   // Parse flags
   const autoSave = args.includes("--save");
   const noStream = args.includes("--no-stream");
+  const isAsync = args.includes("--async");
+  const noSave = args.includes("--no-save");
   const question = args
-    .filter((a) => a !== "--save" && a !== "--no-stream")
+    .filter((a) => a !== "--save" && a !== "--no-stream" && a !== "--async" && a !== "--no-save")
     .join(" ")
     .trim();
 
   if (!question) {
     logger.error("Please provide a question to think about.");
+    return;
+  }
+
+  // Async mode: launch background job and return
+  if (isAsync) {
+    const { launchAsyncThink } = await import("../think/background-executor.js");
+    const asyncAutoSave = !noSave;
+    const result = await launchAsyncThink(question, { autoSave: asyncAutoSave });
+    if (!result.ok) {
+      logger.error(result.error ?? "Failed to launch async think job.");
+      return;
+    }
+    logger.plain("");
+    logger.plain(pc.bold(pc.yellow("Async think submitted")));
+    logger.plain(pc.dim("━".repeat(55)));
+    logger.plain(`Job ID: ${pc.cyan(result.job!.id)}`);
+    logger.plain(`Question: "${question}"`);
+    logger.plain(`Auto-save: ${asyncAutoSave ? "yes" : "no"}`);
+    logger.plain("");
+    logger.plain(pc.dim(`Check status:  teamclaw think status ${result.job!.id}`));
+    logger.plain(pc.dim(`View results:  teamclaw think results ${result.job!.id}`));
+    logger.plain(pc.dim(`List all jobs: teamclaw think jobs`));
     return;
   }
 
@@ -324,4 +380,186 @@ export async function runThinkCommand(args: string[]): Promise<void> {
       return;
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Async think helpers
+// ---------------------------------------------------------------------------
+
+function formatAge(ms: number): string {
+  const sec = Math.floor(ms / 1000);
+  if (sec < 60) return `${sec}s`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m`;
+  const hr = Math.floor(min / 60);
+  return `${hr}h ${min % 60}m`;
+}
+
+function statusBadge(status: string): string {
+  switch (status) {
+    case "queued": return pc.dim("queued");
+    case "running": return pc.yellow("running");
+    case "completed": return pc.green("completed");
+    case "failed": return pc.red("failed");
+    case "cancelled": return pc.dim("cancelled");
+    default: return status;
+  }
+}
+
+async function runAsyncJobs(args: string[]): Promise<void> {
+  const { AsyncThinkJobStore } = await import("../think/job-store.js");
+  const store = new AsyncThinkJobStore();
+  let jobs = store.list();
+
+  if (args.includes("--pending")) {
+    jobs = jobs.filter((j) => j.status === "queued" || j.status === "running");
+  } else if (args.includes("--complete")) {
+    jobs = jobs.filter((j) => j.status === "completed");
+  }
+
+  if (jobs.length === 0) {
+    logger.plain("No async think jobs found.");
+    return;
+  }
+
+  logger.plain(pc.bold("Async Think Jobs"));
+  logger.plain(pc.dim("━".repeat(55)));
+  const now = Date.now();
+  for (const job of jobs) {
+    const q = job.question.length > 40 ? job.question.slice(0, 37) + "..." : job.question;
+    const age = formatAge(now - job.createdAt);
+    logger.plain(`${pc.cyan(job.id)} ${statusBadge(job.status)} ${pc.dim(age)}`);
+    logger.plain(`  "${q}"`);
+    if (job.status === "completed" && job.result?.recommendation) {
+      logger.plain(`  ${pc.green("→")} ${job.result.recommendation.choice}`);
+    }
+    if (job.status === "failed" && job.error) {
+      logger.plain(`  ${pc.red("→")} ${job.error}`);
+    }
+    logger.plain("");
+  }
+}
+
+async function runAsyncStatus(jobId?: string): Promise<void> {
+  const { AsyncThinkJobStore } = await import("../think/job-store.js");
+  const store = new AsyncThinkJobStore();
+
+  if (!jobId) {
+    // Show pending jobs
+    const pending = store.list().filter((j) => j.status === "queued" || j.status === "running");
+    if (pending.length === 0) {
+      logger.plain("No pending async think jobs.");
+      return;
+    }
+    for (const job of pending) {
+      const age = formatAge(Date.now() - job.createdAt);
+      logger.plain(`${pc.cyan(job.id)} ${statusBadge(job.status)} ${pc.dim(age)} — "${job.question}"`);
+    }
+    return;
+  }
+
+  const job = store.get(jobId);
+  if (!job) {
+    logger.error(`Job not found: ${jobId}`);
+    return;
+  }
+
+  logger.plain(pc.bold(`Async Think Job: ${job.id}`));
+  logger.plain(pc.dim("━".repeat(55)));
+  logger.plain(`Status:    ${statusBadge(job.status)}`);
+  logger.plain(`Question:  "${job.question}"`);
+  logger.plain(`Auto-save: ${job.autoSave ? "yes" : "no"}`);
+  logger.plain(`Created:   ${new Date(job.createdAt).toISOString()}`);
+  if (job.startedAt) logger.plain(`Started:   ${new Date(job.startedAt).toISOString()}`);
+  if (job.completedAt) {
+    logger.plain(`Completed: ${new Date(job.completedAt).toISOString()}`);
+    logger.plain(`Duration:  ${formatAge(job.completedAt - (job.startedAt ?? job.createdAt))}`);
+  }
+  if (job.error) logger.plain(`Error:     ${pc.red(job.error)}`);
+  if (job.notificationSent) logger.plain(`Notified:  yes`);
+  if (job.briefedAt) logger.plain(`Briefed:   ${new Date(job.briefedAt).toISOString()}`);
+  if (job.result?.recommendation) {
+    logger.plain("");
+    renderRecommendation(job.result.recommendation);
+  }
+}
+
+async function runAsyncResults(jobId?: string): Promise<void> {
+  const { AsyncThinkJobStore } = await import("../think/job-store.js");
+  const store = new AsyncThinkJobStore();
+
+  if (!jobId) {
+    // Show most recent completed job
+    const completed = store.getCompleted();
+    if (completed.length === 0) {
+      logger.plain("No completed async think jobs.");
+      return;
+    }
+    jobId = completed[0].id;
+  }
+
+  const job = store.get(jobId);
+  if (!job) {
+    logger.error(`Job not found: ${jobId}`);
+    return;
+  }
+  if (job.status !== "completed" || !job.result) {
+    logger.plain(`Job ${pc.cyan(job.id)} is ${statusBadge(job.status)} — no results yet.`);
+    return;
+  }
+
+  logger.plain("");
+  logger.plain(pc.bold(pc.yellow("Async Think Results")));
+  logger.plain(pc.dim("━".repeat(55)));
+  logger.plain(`Job: ${pc.cyan(job.id)}`);
+  logger.plain(`Question: "${job.question}"`);
+
+  for (const round of job.result.rounds) {
+    renderRound(round);
+  }
+
+  if (job.result.savedToJournal) {
+    logger.plain(pc.green("\n✓ Decision saved to journal"));
+  }
+}
+
+async function runAsyncCancel(jobId?: string): Promise<void> {
+  if (!jobId) {
+    logger.error("Usage: teamclaw think cancel <jobId>");
+    return;
+  }
+
+  const { AsyncThinkJobStore } = await import("../think/job-store.js");
+  const store = new AsyncThinkJobStore();
+  const job = store.get(jobId);
+
+  if (!job) {
+    logger.error(`Job not found: ${jobId}`);
+    return;
+  }
+
+  if (job.status !== "running" && job.status !== "queued") {
+    logger.plain(`Job ${pc.cyan(job.id)} is already ${statusBadge(job.status)}.`);
+    return;
+  }
+
+  if (job.pid !== null) {
+    try {
+      process.kill(job.pid, "SIGTERM");
+    } catch {
+      // Process already gone
+    }
+  }
+
+  job.status = "cancelled";
+  job.completedAt = Date.now();
+  store.save(job);
+  logger.plain(`Cancelled job ${pc.cyan(job.id)}.`);
+}
+
+async function runAsyncClear(): Promise<void> {
+  const { AsyncThinkJobStore } = await import("../think/job-store.js");
+  const store = new AsyncThinkJobStore();
+  const count = store.clearFinished();
+  logger.plain(`Cleared ${count} finished job${count !== 1 ? "s" : ""}.`);
 }

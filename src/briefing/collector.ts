@@ -216,6 +216,29 @@ export async function collectBriefingData(): Promise<BriefingData> {
     // Best-effort — don't break briefing if think history fails
   }
 
+  // 12. Load completed async think jobs not yet briefed (best-effort)
+  let asyncThinkResults: BriefingData["asyncThinkResults"];
+  try {
+    const { AsyncThinkJobStore } = await import("../think/job-store.js");
+    const jobStore = new AsyncThinkJobStore();
+    const unbriefed = jobStore.getUnbriefed();
+    if (unbriefed.length > 0) {
+      asyncThinkResults = unbriefed.slice(0, 2).map((job) => ({
+        jobId: job.id,
+        question: job.question,
+        recommendation: job.result?.recommendation?.choice ?? "Inconclusive",
+        confidence: job.result?.recommendation?.confidence ?? 0,
+        completedAt: job.completedAt ?? 0,
+        savedToJournal: job.result?.savedToJournal ?? false,
+      }));
+      for (const job of unbriefed.slice(0, 2)) {
+        jobStore.markBriefed(job.id);
+      }
+    }
+  } catch {
+    // Best-effort
+  }
+
   return {
     lastSession: {
       sessionId: lastCompleted.sessionId,
@@ -233,6 +256,7 @@ export async function collectBriefingData(): Promise<BriefingData> {
     openRFCs,
     relevantDecisions,
     recentThinkSessions,
+    asyncThinkResults,
     contextFileFound,
   };
 }

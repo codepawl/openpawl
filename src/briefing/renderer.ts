@@ -72,6 +72,17 @@ export function renderBriefing(data: BriefingData): string {
     }
   }
 
+  // Async think results (completed while away)
+  if (data.asyncThinkResults && data.asyncThinkResults.length > 0) {
+    lines.push(color(pc.bold, "Async think complete (while you were away):"));
+    for (const r of data.asyncThinkResults.slice(0, 2)) {
+      const q = r.question.length > 40 ? r.question.slice(0, 37) + "..." : r.question;
+      const saved = r.savedToJournal ? pc.green("saved") : pc.dim("not saved");
+      lines.push(color(pc.cyan, `  "${q}" — ${r.recommendation} (${(r.confidence * 100).toFixed(0)}%) [${saved}]`));
+      lines.push(color(pc.dim, `  teamclaw think results ${r.jobId}`));
+    }
+  }
+
   // Team performance — only notable agents, max 2
   const notable = data.teamPerformance.filter((tp) => tp.trend !== "stable");
   if (notable.length > 0) {

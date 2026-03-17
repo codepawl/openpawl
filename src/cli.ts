@@ -376,6 +376,12 @@ async function main(): Promise<void> {
         const { runThinkCommand } = await import("./commands/think.js");
         await runThinkCommand(args.slice(1));
 
+    } else if (cmd === "think-worker") {
+        const jobId = args[1];
+        if (!jobId) process.exit(1);
+        const { runAsyncThinkWorker } = await import("./think/async-worker.js");
+        await runAsyncThinkWorker(jobId);
+
     } else if (cmd === "handoff") {
         const { runHandoffCommand } = await import("./commands/handoff.js");
         await runHandoffCommand(args.slice(1));

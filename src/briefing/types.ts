@@ -37,6 +37,15 @@ export interface RecentThinkSession {
   date: string;
 }
 
+export interface AsyncThinkBriefing {
+  jobId: string;
+  question: string;
+  recommendation: string;
+  confidence: number;
+  completedAt: number;
+  savedToJournal: boolean;
+}
+
 export interface BriefingData {
   lastSession: LastSessionInfo | null;
   whatWasBuilt: string[];
@@ -47,6 +56,7 @@ export interface BriefingData {
   openRFCs: string[];
   relevantDecisions: RelevantDecision[];
   recentThinkSessions?: RecentThinkSession[];
+  asyncThinkResults?: AsyncThinkBriefing[];
   contextFileFound?: boolean;
 }
 
