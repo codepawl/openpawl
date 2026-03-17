@@ -39,13 +39,13 @@ export function generateMockResponse(prompt: string, botId: string): string {
   }
 
   // Think / rubber duck perspectives
-  if (lower.includes("tech lead perspective") || lower.includes("as a tech lead")) {
+  if (lower.includes("you are teamclaw's tech lead") || lower.includes("tech lead perspective") || lower.includes("as a tech lead")) {
     return mockTechLeadPerspective(prompt);
   }
-  if (lower.includes("rfc author") || lower.includes("as an rfc author")) {
+  if (lower.includes("you are teamclaw's rfc author") || lower.includes("rfc author perspective") || lower.includes("as an rfc author")) {
     return mockRfcAuthorPerspective(prompt);
   }
-  if (lower.includes("synthesize") || lower.includes("recommendation")) {
+  if (lower.includes("you are teamclaw's coordinator") || lower.includes("synthesize") || lower.includes("now synthesize")) {
     return mockCoordinatorSynthesis(prompt);
   }
 

@@ -30,6 +30,9 @@ export const COMMANDS = [
     "think",
     "handoff",
     "score",
+    "journal",
+    "clarity",
+    "drift",
 ] as const;
 
 /** Known subcommands keyed by parent command. */
@@ -50,6 +53,9 @@ export const SUBCOMMANDS: Record<string, string[]> = {
     think: ["history"],
     handoff: ["import"],
     score: ["history"],
+    journal: ["list", "search", "show", "export"],
+    clarity: [],
+    drift: [],
 };
 
 export type MatchResult = {
