@@ -155,7 +155,9 @@ async function main(): Promise<void> {
         );
 
         if (canRenderSpinner) {
-            intro("TeamClaw Work Session");
+            const { isMockLlmEnabled } = await import("./core/mock-llm.js");
+            const mockLabel = isMockLlmEnabled() ? " [mock mode]" : "";
+            intro(`TeamClaw Work Session${mockLabel}`);
         }
 
         const { runWork } = await import("./work-runner.js");

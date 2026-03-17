@@ -6,6 +6,7 @@ import type {
   StreamOptions,
 } from "../client/types.js";
 import type { ProxyHealthResponse, ProxyReconnectResponse } from "./types.js";
+import { isMockLlmEnabled, generateMockResponse } from "../core/mock-llm.js";
 
 export class ProxyService {
   private readonly client: OpenClawClient;
@@ -37,6 +38,14 @@ export class ProxyService {
     prompt: string,
     options?: StreamOptions,
   ): AsyncGenerator<StreamChunk, void, undefined> {
+    // Mock LLM mode — return synthetic response without connecting to gateway
+    if (isMockLlmEnabled()) {
+      const mockText = generateMockResponse(prompt, "proxy");
+      // Yield the full response as a single chunk
+      yield { content: mockText, done: false };
+      yield { content: "", done: true };
+      return;
+    }
     await this.ensureConnected();
     yield* this.client.stream(prompt, options);
   }

@@ -370,6 +370,10 @@ export async function generate(prompt: string, options?: GenerateOptions & { bot
 }
 
 export async function llmHealthCheck(): Promise<boolean> {
+  // Mock LLM mode bypasses gateway check
+  const { isMockLlmEnabled } = await import("./mock-llm.js");
+  if (isMockLlmEnabled()) return true;
+
   const workerUrl = CONFIG.openclawWorkerUrl?.trim();
   if (!workerUrl) return false;
   try {

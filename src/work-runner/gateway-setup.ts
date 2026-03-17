@@ -108,6 +108,13 @@ export async function ensureGatewayRunning(
     canRenderSpinner: boolean,
     logFn: (level: "info" | "warn" | "error", msg: string) => void,
 ): Promise<void> {
+    // Mock LLM mode — skip gateway entirely
+    const { isMockLlmEnabled } = await import("../core/mock-llm.js");
+    if (isMockLlmEnabled()) {
+        logFn("info", "[mock mode] Skipping gateway setup");
+        return;
+    }
+
     const gatewayAlreadyRunning = await isPortInUse(config.gatewayPort);
 
     if (config.managedGateway && gatewayAlreadyRunning) {
@@ -183,6 +190,13 @@ export async function verifyGatewayHealth(
     canRenderSpinner: boolean,
     logFn: (level: "info" | "warn" | "error", msg: string) => void,
 ): Promise<void> {
+    // Mock LLM mode — skip health check
+    const { isMockLlmEnabled: mockCheck } = await import("../core/mock-llm.js");
+    if (mockCheck()) {
+        logFn("info", "[mock mode] Skipping gateway health check");
+        return;
+    }
+
     const health = await runGatewayHealthCheck();
     const pingCheck = health.checks.find((c) => c.name === "ping");
     const authCheck = health.checks.find((c) => c.name === "auth");

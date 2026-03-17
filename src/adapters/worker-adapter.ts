@@ -14,6 +14,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 
 import { openclawEvents } from "../core/openclaw-events.js";
+import { isMockLlmEnabled, generateMockResponse } from "../core/mock-llm.js";
 
 export type WorkerAdapterType = "openclaw";
 
@@ -237,6 +238,25 @@ export class UniversalOpenClawAdapter implements WorkerAdapter {
       timestamp: Date.now(),
     });
     log(`[openclaw] agent → session=${sessionId} model=${model} msgLen=${fullMessage.length}`);
+
+    // Mock LLM mode — return synthetic response without calling OpenClaw
+    if (isMockLlmEnabled()) {
+      const mockText = generateMockResponse(fullMessage, this.botId);
+      if (tokenUsageCb) tokenUsageCb(500, 200, 0, "mock-model");
+      openclawEvents.emit("log", {
+        id: `wa-${Date.now()}-mock`,
+        level: "success",
+        source: "worker-adapter",
+        action: "mock_response",
+        model: "mock-model",
+        botId: this.botId,
+        message: `[mock] Response generated (${mockText.length} chars)`,
+        meta: { mock: true, responseLength: mockText.length },
+        timestamp: Date.now(),
+      });
+      if (streamDone) streamDone();
+      return Promise.resolve(mockText);
+    }
 
     return new Promise((resolve, reject) => {
       if (signal?.aborted) {
