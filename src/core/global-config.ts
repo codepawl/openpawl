@@ -2,6 +2,14 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+export interface ProviderConfigEntry {
+  type: "anthropic" | "openai" | "openrouter" | "ollama" | "deepseek" | "groq" | "custom";
+  apiKey?: string;
+  baseURL?: string;
+  model?: string;
+  name?: string;
+}
+
 export interface TeamClawGlobalConfig {
   version: 1;
   managedGateway: boolean;
@@ -42,6 +50,7 @@ export interface TeamClawGlobalConfig {
     coordinatorIntervention?: boolean;
     agentOverrides?: Record<string, { enabled?: boolean }>;
   };
+  providers?: ProviderConfigEntry[];
   workspaceDir?: string;
   proxy?: {
     path?: string;
@@ -257,6 +266,22 @@ export function normalizeGlobalConfig(input: Partial<TeamClawGlobalConfig>): Tea
       }
     : undefined;
 
+  // Parse providers: ProviderConfigEntry[]
+  const validProviderTypes = ["anthropic", "openai", "openrouter", "ollama", "deepseek", "groq", "custom"] as const;
+  const rawProviders = (input as Record<string, unknown>).providers;
+  const providers: ProviderConfigEntry[] | undefined = Array.isArray(rawProviders)
+    ? (rawProviders as unknown[])
+        .filter((v): v is Record<string, unknown> => typeof v === "object" && v !== null)
+        .filter((v) => typeof v.type === "string" && (validProviderTypes as readonly string[]).includes(v.type))
+        .map((v) => ({
+          type: v.type as ProviderConfigEntry["type"],
+          ...(typeof v.apiKey === "string" && v.apiKey.trim() ? { apiKey: v.apiKey.trim() } : {}),
+          ...(typeof v.baseURL === "string" && v.baseURL.trim() ? { baseURL: v.baseURL.trim() } : {}),
+          ...(typeof v.model === "string" && v.model.trim() ? { model: v.model.trim() } : {}),
+          ...(typeof v.name === "string" && v.name.trim() ? { name: v.name.trim() } : {}),
+        }))
+    : undefined;
+
   return {
     version: 1,
     managedGateway: typeof input.managedGateway === "boolean" ? input.managedGateway : true,
@@ -278,6 +303,7 @@ export function normalizeGlobalConfig(input: Partial<TeamClawGlobalConfig>): Tea
     ...(personality ? { personality } : {}),
     ...(workspaceDir ? { workspaceDir } : {}),
     ...(proxy ? { proxy } : {}),
+    ...(providers && providers.length > 0 ? { providers } : {}),
   };
 }
 

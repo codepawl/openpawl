@@ -8,3 +8,9 @@ export { ProviderManager } from "./provider-manager.js";
 export { HealthMonitor } from "./health-monitor.js";
 export { ProviderError, emptyStats } from "./types.js";
 export type { ProviderName, ProviderStats, ProviderStatEntry } from "./types.js";
+export {
+  getGlobalProviderManager,
+  setGlobalProviderManager,
+  resetGlobalProviderManager,
+  createProviderChain,
+} from "./provider-factory.js";
