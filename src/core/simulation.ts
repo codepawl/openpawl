@@ -133,8 +133,6 @@ export class TeamOrchestration {
     const sharedLlmAdapter =
       Object.values(this.workerBots)[0]?.adapter ??
       new UniversalOpenClawAdapter({
-        workerUrl: CONFIG.openclawWorkerUrl,
-        authToken: CONFIG.openclawToken,
         model: resolveModelForAgent("coordinator"),
         botId: "coordinator",
       });

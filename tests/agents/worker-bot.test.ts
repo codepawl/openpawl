@@ -13,7 +13,7 @@ import type { GraphState } from "@/core/graph-state.js";
 
 function createMockAdapter(result: TaskResult): WorkerAdapter {
   return {
-    adapterType: "openclaw",
+    adapterType: "provider",
     executeTask: vi.fn(() => Promise.resolve(result)),
     healthCheck: vi.fn(() => Promise.resolve(true)),
     getStatus: vi.fn(() => Promise.resolve({})),

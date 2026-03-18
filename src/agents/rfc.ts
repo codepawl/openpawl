@@ -49,8 +49,6 @@ export class RFCNode {
     this.llmAdapter =
       options.llmAdapter ??
       new UniversalOpenClawAdapter({
-        workerUrl: CONFIG.openclawWorkerUrl,
-        authToken: CONFIG.openclawToken,
         model: resolveModelForAgent("rfc"),
         botId: "rfc",
       });

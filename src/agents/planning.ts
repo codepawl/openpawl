@@ -37,8 +37,6 @@ export class SprintPlanningNode {
     this.llmAdapter =
       options.llmAdapter ??
       new UniversalOpenClawAdapter({
-        workerUrl: CONFIG.openclawWorkerUrl,
-        authToken: CONFIG.openclawToken,
         model: resolveModelForAgent("planner"),
         botId: "planner",
       });

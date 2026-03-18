@@ -7,7 +7,7 @@ import type { TaskRequest, TaskResult } from "@/core/state.js";
 import type { GraphState } from "@/core/graph-state.js";
 
 class TimedMockAdapter implements WorkerAdapter {
-  readonly adapterType = "openclaw" as const;
+  readonly adapterType = "provider" as const;
   readonly workerUrl: string;
   private readonly delayMs: number;
   private readonly activeByUrl: Map<string, number>;

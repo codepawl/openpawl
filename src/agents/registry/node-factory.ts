@@ -6,7 +6,6 @@ import { ROLE_TEMPLATES } from "../../core/bot-definitions.js";
 import type { BotDefinition } from "../../core/bot-definitions.js";
 import { WorkerBot } from "../worker-bot.js";
 import { UniversalOpenClawAdapter } from "../../adapters/worker-adapter.js";
-import { CONFIG } from "../../core/config.js";
 import { registerConfidenceFlags } from "../../graph/confidence/types.js";
 import type { ValidatedAgentDef } from "./validator.js";
 
@@ -64,8 +63,6 @@ export function createCustomWorkerBots(
     botDefs.push(botDef);
 
     const adapter = new UniversalOpenClawAdapter({
-      workerUrl: CONFIG.openclawWorkerUrl,
-      authToken: CONFIG.openclawToken,
       workspacePath,
       botId: botDef.id,
       systemPromptOverride: def.systemPrompt,
@@ -84,7 +81,7 @@ export function createCustomWorkerBots(
 
 /** Wrap an adapter's executeTask to invoke lifecycle hooks. */
 function wrapAdapterWithHooks(
-  adapter: UniversalOpenClawAdapter,
+  adapter: InstanceType<typeof UniversalOpenClawAdapter>,
   def: ValidatedAgentDef,
 ): void {
   const originalExecuteTask = adapter.executeTask.bind(adapter);

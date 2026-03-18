@@ -57,8 +57,6 @@ export class SystemDesignNode {
     this.llmAdapter =
       options.llmAdapter ??
       new UniversalOpenClawAdapter({
-        workerUrl: CONFIG.openclawWorkerUrl,
-        authToken: CONFIG.openclawToken,
         model: resolveModelForAgent("architect"),
         botId: "architect",
       });

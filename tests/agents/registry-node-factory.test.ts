@@ -16,9 +16,8 @@ vi.mock("@/adapters/worker-adapter.js", () => ({
     complete = vi.fn().mockResolvedValue("ok");
     getStatus = vi.fn().mockResolvedValue({});
     reset = vi.fn();
-    adapterType = "openclaw" as const;
+    adapterType = "provider" as const;
   },
-  CONFIG: { openclawWorkerUrl: "http://localhost:8001", openclawToken: "test" },
 }));
 
 vi.mock("@/core/config.js", () => ({

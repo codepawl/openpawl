@@ -1,9 +1,8 @@
 import { intro, note, outro } from "@clack/prompts";
-import { runGatewayHealthCheck } from "../core/health.js";
 import { buildTeamFromRoster, buildTeamFromTemplate } from "../core/team-templates.js";
 import { loadTeamConfig } from "../core/team-config.js";
-import { CONFIG, getWorkerUrlsForTeam } from "../core/config.js";
-import { createWorkerAdapter } from "../adapters/worker-adapter.js";
+import { getWorkerUrlsForTeam } from "../core/config.js";
+import { getGlobalProviderManager } from "../providers/provider-factory.js";
 
 function formatMs(n: number): string {
   return n >= 0 ? `${n}ms` : "n/a";
@@ -11,21 +10,19 @@ function formatMs(n: number): string {
 
 export async function runStatusCommand(): Promise<void> {
   intro("TeamClaw Status");
-  const health = await runGatewayHealthCheck();
 
-  note(
-    [
-      `URL: ${health.gatewayUrl}`,
-      `Protocol: ${health.protocol.toUpperCase()}`,
-      `Latency: ${formatMs(health.latency)}`,
-      `Auth: ${health.authStatus}`,
-      `Overall: ${health.status}`,
-      "",
-      ...health.checks.map((c) => `- ${c.name}: ${c.level} (${c.message})`),
-      ...(health.tip ? ["", health.tip] : []),
-    ].join("\n"),
-    "Gateway",
-  );
+  // Provider status
+  const mgr = getGlobalProviderManager();
+  const providers = mgr.getProviders();
+  const providerLines: string[] = [];
+  for (const p of providers) {
+    const healthy = await p.healthCheck();
+    providerLines.push(`${p.name}: ${p.isAvailable() ? "available" : "unavailable"} | health=${healthy ? "ok" : "fail"}`);
+  }
+  if (providerLines.length === 0) {
+    providerLines.push("No providers configured. Run `teamclaw setup` or set an API key env var.");
+  }
+  note(providerLines.join("\n"), "Providers");
 
   const teamConfig = await loadTeamConfig();
   const team =
@@ -37,13 +34,7 @@ export async function runStatusCommand(): Promise<void> {
   });
   const botLines: string[] = [];
   for (const bot of team) {
-    const adapter = createWorkerAdapter(bot, workerUrls);
-    const available = await adapter.healthCheck();
-    botLines.push(
-      `${bot.id} (${bot.name}) | model=${CONFIG.openclawModel || "(not set)"} | ${
-        available ? "available" : "unreachable"
-      }`,
-    );
+    botLines.push(`${bot.id} (${bot.name})`);
   }
   note(botLines.join("\n"), "Roster");
 
@@ -62,4 +53,3 @@ export async function runStatusCommand(): Promise<void> {
 
   outro("Status complete.");
 }
-

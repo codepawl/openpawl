@@ -28,8 +28,6 @@ export class CoordinatorAgent {
     this.llmAdapter =
       options.llmAdapter ??
       new UniversalOpenClawAdapter({
-        workerUrl: CONFIG.openclawWorkerUrl,
-        authToken: CONFIG.openclawToken,
         model: resolveModelForAgent("coordinator"),
         botId: "coordinator",
       });
