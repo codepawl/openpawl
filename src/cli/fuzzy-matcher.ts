@@ -33,6 +33,7 @@ export const COMMANDS = [
     "journal",
     "clarity",
     "drift",
+    "update",
 ] as const;
 
 /** Known subcommands keyed by parent command. */

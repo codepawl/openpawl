@@ -90,6 +90,7 @@ function printHelp(): void {
         "  " + cmd(pad("handoff")) + desc("Generate CONTEXT.md handoff file, or import from collaborator"),
         "  " + cmd(pad("clean")) + desc("Remove session data (preserves global memory)"),
         "  " + cmd(pad("run openclaw")) + desc("Start OpenClaw gateway"),
+        "  " + cmd(pad("update")) + desc("Self-update TeamClaw to the latest version"),
         "  " + cmd(pad("demo")) + desc("Run a synthetic demo (no gateway needed)"),
         "",
         section("Work options:"),
@@ -391,6 +392,10 @@ async function main(): Promise<void> {
     } else if (cmd === "score") {
         const { runScoreCommand } = await import("./commands/score.js");
         await runScoreCommand(args.slice(1));
+
+    } else if (cmd === "update") {
+        const { runUpdateCommand } = await import("./commands/update.js");
+        await runUpdateCommand(args.slice(1));
 
     } else if (cmd === "demo") {
         const canRenderSpinner = Boolean(process.stdout.isTTY && process.stderr.isTTY);
