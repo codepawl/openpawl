@@ -302,38 +302,90 @@ async function stepProject(state: WizardState): Promise<void> {
 // Step 4: Model Selection (simplified — defaults from first provider)
 // ---------------------------------------------------------------------------
 
+const ANTHROPIC_MODELS = [
+    { value: "claude-sonnet-4-20250514", label: "claude-sonnet-4-6", hint: "Recommended · Fast + smart" },
+    { value: "claude-opus-4-20250514", label: "claude-opus-4-6", hint: "Most capable · Slower" },
+    { value: "claude-haiku-4-5-20251001", label: "claude-haiku-4-5", hint: "Fastest · Lighter tasks" },
+];
+
+const OPENAI_MODELS = [
+    { value: "gpt-4o", label: "gpt-4o", hint: "Recommended · Fast + smart" },
+    { value: "gpt-4o-mini", label: "gpt-4o-mini", hint: "Fastest · Lighter tasks" },
+    { value: "o3", label: "o3", hint: "Most capable · Reasoning" },
+];
+
 async function stepModel(state: WizardState): Promise<void> {
     const firstProvider = state.providerEntries[0];
     const providerType = firstProvider?.type ?? "anthropic";
     const providerModel = firstProvider?.model;
     const defaultModel = providerModel || PROVIDER_DEFAULT_MODELS[providerType] || "";
 
-    if (defaultModel) {
-        note(
-            `Default model from ${providerType} provider: ${pc.cyan(defaultModel)}`,
-            "Model",
-        );
-        const useDefault = handleCancel(
-            await confirm({
-                message: `Use ${defaultModel}?`,
-                initialValue: true,
-            }),
-        ) as boolean;
+    let modelOptions: Array<{ value: string; label: string; hint?: string }> | null = null;
+    let defaultModelLabel = "";
 
-        if (useDefault) {
-            state.selectedModel = defaultModel;
-            return;
-        }
+    if (providerType === "anthropic") {
+        modelOptions = ANTHROPIC_MODELS;
+        defaultModelLabel = "claude-sonnet-4-6";
+    } else if (providerType === "openai") {
+        modelOptions = OPENAI_MODELS;
+        defaultModelLabel = "gpt-4o";
     }
 
-    const custom = handleCancel(
-        await text({
-            message: "Enter model name:",
-            placeholder: defaultModel || "model-name",
-            initialValue: defaultModel,
-        }),
-    ) as string;
-    state.selectedModel = custom.trim() || defaultModel || "default";
+    if (modelOptions) {
+        const options = [
+            ...modelOptions,
+            { value: "__custom__", label: "Other", hint: "Enter a model name manually" },
+        ];
+
+        console.log(`  ${pc.dim(`Tip: ${defaultModelLabel} is the best balance for most TeamClaw workflows.`)}`);
+
+        const choice = handleCancel(
+            await select({
+                message: "Choose a model:",
+                options,
+            }),
+        ) as string;
+
+        if (choice === "__custom__") {
+            const custom = handleCancel(
+                await text({
+                    message: "Enter model name:",
+                    placeholder: defaultModel || "model-name",
+                    initialValue: defaultModel,
+                }),
+            ) as string;
+            state.selectedModel = custom.trim() || defaultModel || "default";
+        } else {
+            state.selectedModel = choice;
+        }
+    } else {
+        if (defaultModel) {
+            note(
+                `Default model from ${providerType} provider: ${pc.cyan(defaultModel)}`,
+                "Model",
+            );
+            const useDefault = handleCancel(
+                await confirm({
+                    message: `Use ${defaultModel}?`,
+                    initialValue: true,
+                }),
+            ) as boolean;
+
+            if (useDefault) {
+                state.selectedModel = defaultModel;
+                return;
+            }
+        }
+
+        const custom = handleCancel(
+            await text({
+                message: "Enter model name:",
+                placeholder: defaultModel || "model-name",
+                initialValue: defaultModel,
+            }),
+        ) as string;
+        state.selectedModel = custom.trim() || defaultModel || "default";
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -384,6 +436,23 @@ export async function runSetup(): Promise<void> {
 
     if (canTTY) {
         intro(pc.bold(pc.cyan("TeamClaw Setup Wizard")));
+
+        note(
+            [
+                "TeamClaw gives you a team of specialized AI agents",
+                "that work together to ship your goals — and remember",
+                "everything across sessions.",
+                "",
+                "This setup takes about 2 minutes.",
+                `You'll need: an API key from your chosen AI provider.`,
+                "",
+                "Steps:",
+                `  ${pc.cyan("1.")} Workspace & project  ${pc.dim("(~30 seconds)")}`,
+                `  ${pc.cyan("2.")} Choose AI provider   ${pc.dim("(~60 seconds)")}`,
+                `  ${pc.cyan("3.")} Pick a team          ${pc.dim("(~30 seconds)")}`,
+            ].join("\n"),
+            "Welcome to TeamClaw",
+        );
     } else {
         logger.info("TeamClaw Setup Wizard");
     }
@@ -471,14 +540,30 @@ export async function runSetup(): Promise<void> {
         process.exit(0);
     }
 
-    const globalConfigPath = persistAllConfig(state);
+    persistAllConfig(state);
 
     note(
         [
-            `Global config : ${pc.cyan(globalConfigPath)}`,
-            `Project config: ${pc.cyan("teamclaw.config.json")}`,
+            `Provider:   ${providerSummary}`,
+            `Team:       ${rosterSummary}`,
+            `Model:      ${state.selectedModel || "default"}`,
+            `Dashboard:  ${pc.cyan("http://localhost:9001")}`,
+            "",
+            `${pc.bold("What to do next:")}`,
+            "",
+            `${pc.green("\u2192")} Start your first sprint:`,
+            `  ${pc.cyan('teamclaw work --goal "describe what you want to build"')}`,
+            "",
+            `${pc.green("\u2192")} See TeamClaw in action first:`,
+            `  ${pc.cyan("teamclaw demo")}`,
+            "",
+            `${pc.green("\u2192")} Open the dashboard:`,
+            `  ${pc.cyan("teamclaw web start")}`,
+            "",
+            `${pc.green("\u2192")} Browse team templates:`,
+            `  ${pc.cyan("teamclaw templates browse")}`,
         ].join("\n"),
-        "Config saved!",
+        "Setup complete!",
     );
 
     const nextStep = handleCancel(
@@ -486,6 +571,7 @@ export async function runSetup(): Promise<void> {
             message: "What would you like to do next?",
             options: [
                 { value: "work", label: "Start a work session now  (teamclaw work)" },
+                { value: "demo", label: "See TeamClaw in action  (teamclaw demo)" },
                 { value: "exit", label: "Exit" },
             ],
         }),
@@ -495,6 +581,10 @@ export async function runSetup(): Promise<void> {
         outro("Launching work session...");
         const { runWork } = await import("../work-runner.js");
         await runWork({ args: [], noWeb: false });
+    } else if (nextStep === "demo") {
+        outro("Launching demo...");
+        const { runDemo } = await import("./demo.js");
+        await runDemo([]);
     } else {
         outro(
             `Setup complete! Run ${pc.green("teamclaw work")} whenever you're ready.`,

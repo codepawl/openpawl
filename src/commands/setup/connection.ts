@@ -38,13 +38,13 @@ export function handleCancel<T>(v: T): T {
 type ProviderType = ProviderConfigEntry["type"];
 
 const PROVIDER_CHOICES: Array<{ value: ProviderType; label: string; hint?: string }> = [
-    { value: "anthropic", label: "Anthropic", hint: "recommended" },
-    { value: "openai", label: "OpenAI" },
-    { value: "openrouter", label: "OpenRouter" },
-    { value: "ollama", label: "Ollama", hint: "local" },
-    { value: "deepseek", label: "DeepSeek" },
-    { value: "groq", label: "Groq" },
-    { value: "custom", label: "Custom" },
+    { value: "anthropic", label: "Anthropic (Claude)", hint: "Recommended \u00b7 Best quality" },
+    { value: "openai", label: "OpenAI (GPT-4o)", hint: "Great quality" },
+    { value: "openrouter", label: "OpenRouter", hint: "100+ models \u00b7 Mix of prices" },
+    { value: "ollama", label: "Ollama", hint: "Free \u00b7 Runs locally \u00b7 No internet needed" },
+    { value: "deepseek", label: "DeepSeek", hint: "Cheap + fast" },
+    { value: "groq", label: "Groq", hint: "Fastest inference" },
+    { value: "custom", label: "Custom", hint: "Any OpenAI-compatible API" },
 ];
 
 const DEFAULT_MODELS: Record<ProviderType, string> = {
@@ -78,7 +78,7 @@ async function testOllamaConnection(baseURL: string): Promise<boolean> {
 async function promptProviderEntry(): Promise<ProviderConfigEntry> {
     const providerType = handleCancel(
         await select({
-            message: "Select a provider:",
+            message: "Choose your AI provider\n  " + pc.dim("Tip: Not sure? Pick Anthropic \u2014 it's what TeamClaw was built and tested with."),
             options: PROVIDER_CHOICES,
         }),
     ) as ProviderType;
@@ -86,6 +86,17 @@ async function promptProviderEntry(): Promise<ProviderConfigEntry> {
     const entry: ProviderConfigEntry = { type: providerType };
 
     if (providerType === "ollama") {
+        console.log([
+            "",
+            `  ${pc.bold("Ollama runs AI models locally on your machine.")}`,
+            `  It's completely free — no API key needed.`,
+            "",
+            `  Requirements:`,
+            `  \u00b7 Ollama installed: ${pc.cyan("https://ollama.ai/download")}`,
+            `  \u00b7 At least one model pulled: ${pc.dim("ollama pull llama3.1")}`,
+            "",
+        ].join("\n"));
+
         const baseURL = handleCancel(
             await text({
                 message: "Ollama base URL:",
@@ -99,9 +110,21 @@ async function promptProviderEntry(): Promise<ProviderConfigEntry> {
 
         const reachable = await testOllamaConnection(entry.baseURL);
         if (!reachable) {
+            console.log([
+                "",
+                `  ${pc.yellow("\u26a0")} Ollama is not running at ${entry.baseURL}`,
+                "",
+                `  To install Ollama:`,
+                `    1. Download from: ${pc.cyan("https://ollama.ai/download")}`,
+                `    2. Install and open it`,
+                `    3. Pull a model: ${pc.dim("ollama pull llama3.1")}`,
+                `    4. Come back and run: ${pc.dim("teamclaw setup")}`,
+                "",
+            ].join("\n"));
+
             const proceed = handleCancel(
                 await confirm({
-                    message: "Ollama is not reachable. Continue anyway?",
+                    message: "Continue setup without Ollama running?",
                     initialValue: true,
                 }),
             ) as boolean;
@@ -139,10 +162,22 @@ async function promptProviderEntry(): Promise<ProviderConfigEntry> {
         if (apiKey?.trim()) entry.apiKey = apiKey.trim();
     } else {
         // Anthropic, OpenAI, OpenRouter, DeepSeek, Groq — all need an API key
-        const keyHint = providerType === "anthropic" ? " (starts with sk-ant-)" : "";
+        const { PROVIDER_URLS, API_KEY_PREFIXES, validateApiKeyFormat, maskApiKey } = await import("../../core/errors.js");
+        const urls = PROVIDER_URLS[providerType];
+        const providerLabel = PROVIDER_CHOICES.find((c) => c.value === providerType)!.label;
+        const prefix = API_KEY_PREFIXES[providerType];
+
+        // Show guidance
+        const guidance = [
+            urls?.keyUrl ? `Get your key at: ${pc.cyan(urls.keyUrl)}` : "",
+            prefix ? `Starts with: ${pc.dim(prefix)}` : "",
+            `Your key is stored locally in ~/.teamclaw/config.json`,
+        ].filter(Boolean).join("\n  ");
+        console.log(`  ${guidance}`);
+
         const apiKey = handleCancel(
             await password({
-                message: `${PROVIDER_CHOICES.find((c) => c.value === providerType)!.label} API key${keyHint}:`,
+                message: `${providerLabel} API key:`,
             }),
         ) as string;
 
@@ -158,6 +193,23 @@ async function promptProviderEntry(): Promise<ProviderConfigEntry> {
                 process.exit(0);
             }
         } else {
+            // Validate format
+            const validation = validateApiKeyFormat(providerType, apiKey.trim());
+            if (validation.valid) {
+                console.log(`  ${pc.green("\u2713")} Format looks correct  ${pc.dim(maskApiKey(apiKey.trim()))}`);
+            } else {
+                console.log(`  ${pc.yellow("\u26a0")} ${validation.hint}`);
+                const proceed = handleCancel(
+                    await confirm({
+                        message: "Key format looks unusual. Use it anyway?",
+                        initialValue: true,
+                    }),
+                ) as boolean;
+                if (!proceed) {
+                    cancel("Setup cancelled.");
+                    process.exit(0);
+                }
+            }
             entry.apiKey = apiKey.trim();
         }
     }

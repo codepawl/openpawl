@@ -185,6 +185,7 @@ export async function promptPreLaunchConfirmation(
         : `${maxRuns} runs`;
     logger.plain(pc.dim("  Session   ") + sessionLabel);
     logger.plain(pc.dim("  Model     ") + model);
+    logger.plain(pc.dim("  ") + pc.yellow("This will make real API calls and use your credits."));
     logger.plain("");
 
     const action = await select({

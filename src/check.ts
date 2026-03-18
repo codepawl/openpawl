@@ -1,96 +1,119 @@
 /**
- * TeamClaw check — verify LLM provider connectivity.
+ * TeamClaw check — comprehensive system check with actionable output.
  */
 
-import { getGlobalProviderManager } from "./providers/provider-factory.js";
+import { existsSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+import { intro, note, outro, spinner } from "@clack/prompts";
+import pc from "picocolors";
+
 import { logger } from "./core/logger.js";
-import { intro, log, note, outro, spinner } from "@clack/prompts";
+import { getGlobalProviderManager } from "./providers/provider-factory.js";
 import { randomPhrase } from "./utils/spinner-phrases.js";
 
 export async function runCheck(_args: string[]): Promise<void> {
   const canRenderSpinner = Boolean(process.stdout.isTTY && process.stderr.isTTY);
+
   if (canRenderSpinner) {
-    intro("TeamClaw Provider Check");
+    intro("TeamClaw System Check");
   } else {
-    logger.plain("TeamClaw provider check\n");
+    logger.plain("TeamClaw System Check\n");
   }
 
+  const issues: string[] = [];
+  const lines: string[] = [];
+
+  // Node.js version
+  const nodeVersion = process.version;
+  const nodeMajor = parseInt(nodeVersion.slice(1).split(".")[0], 10);
+  if (nodeMajor >= 20) {
+    lines.push(`  ${pc.green("✓")}  Node.js      ${nodeVersion} ${pc.dim("(required: >=20)")}`);
+  } else {
+    lines.push(`  ${pc.red("✗")}  Node.js      ${nodeVersion} ${pc.red("(required: >=20)")}`);
+    issues.push("Node.js version must be >= 20");
+  }
+
+  // Config file
+  const configPath = path.join(os.homedir(), ".teamclaw", "config.json");
+  if (existsSync(configPath)) {
+    lines.push(`  ${pc.green("✓")}  Config       ~/.teamclaw/config.json`);
+  } else {
+    lines.push(`  ${pc.red("✗")}  Config       ${pc.dim("Not found")}`);
+    issues.push("No config file. Run: teamclaw setup");
+  }
+
+  // Memory directory
+  const memoryDir = path.join(os.homedir(), ".teamclaw", "memory");
+  if (existsSync(memoryDir)) {
+    lines.push(`  ${pc.green("✓")}  Memory DB    ~/.teamclaw/memory/`);
+  } else {
+    lines.push(`  ${pc.dim("-")}  Memory DB    ${pc.dim("Not initialized (created on first run)")}`);
+  }
+
+  lines.push("");
+  lines.push("  Providers:");
+
+  // Provider check
   const manager = getGlobalProviderManager();
   const providers = manager.getProviders();
 
   if (providers.length === 0) {
-    if (canRenderSpinner) {
-      log.error(
-        "No LLM providers configured. Run `teamclaw setup` or set an API key env var (e.g. ANTHROPIC_API_KEY).",
-      );
-      outro("Provider check failed.");
-    } else {
-      logger.error(
-        "No LLM providers configured. Run `teamclaw setup` or set an API key env var (e.g. ANTHROPIC_API_KEY).",
-      );
-    }
-    process.exit(1);
-  }
+    lines.push(`    ${pc.red("✗")}  No providers configured`);
+    issues.push("No AI provider configured\n     Fix: Run teamclaw setup\n       Or: export ANTHROPIC_API_KEY=sk-ant-...");
+  } else {
+    const s = canRenderSpinner ? spinner() : null;
+    if (s) s.start(randomPhrase("network"));
 
-  const s = canRenderSpinner ? spinner() : null;
-  if (s) s.start(randomPhrase("network"));
-
-  let healthy = 0;
-  const results: { name: string; ok: boolean; latency: number }[] = [];
-
-  for (const provider of providers) {
-    const start = Date.now();
-    let ok = false;
-    try {
-      ok = await provider.healthCheck();
-    } catch {
-      ok = false;
-    }
-    const latency = Date.now() - start;
-    results.push({ name: provider.name, ok, latency });
-
-    if (ok) {
-      healthy++;
-      if (s) {
-        s.message(`✅ ${provider.name} healthy (${latency}ms)`);
-      } else {
-        logger.success(`${provider.name} healthy (${latency}ms)`);
+    for (const provider of providers) {
+      const start = Date.now();
+      let ok = false;
+      try {
+        ok = await provider.healthCheck();
+      } catch {
+        ok = false;
       }
-    } else {
-      if (s) {
-        s.message(`❌ ${provider.name} unreachable`);
+      const latency = Date.now() - start;
+
+      if (ok) {
+        lines.push(`    ${pc.green("✓")}  ${provider.name.padEnd(12)} API key valid ${pc.dim(`(${latency}ms)`)}`);
       } else {
-        logger.error(`${provider.name} unreachable`);
+        lines.push(`    ${pc.red("✗")}  ${provider.name.padEnd(12)} ${pc.red("unreachable or invalid key")}`);
+        issues.push(`Provider ${provider.name} is not reachable. Check your API key and connection.`);
       }
     }
-  }
 
-  if (s) {
-    s.stop(`${healthy}/${providers.length} provider(s) healthy.`);
+    if (s) s.stop("Provider check complete.");
   }
 
   // Summary
-  const summaryLines = results.map(
-    (r) => `  ${r.ok ? "✓" : "✗"} ${r.name}${r.ok ? ` (${r.latency}ms)` : ""}`,
-  );
-  summaryLines.push("");
-  summaryLines.push("Fallback order:");
-  providers.forEach((p, i) => {
-    summaryLines.push(`  ${i + 1}. ${p.name}`);
-  });
+  lines.push("");
+  lines.push("  " + pc.dim("─".repeat(40)));
+
+  if (issues.length === 0) {
+    lines.push(`  ${pc.green("✓")}  Ready to use`);
+    lines.push("");
+    lines.push(`  Quick start:`);
+    lines.push(`    ${pc.cyan('teamclaw work --goal "your goal here"')}`);
+  } else {
+    lines.push(`  ${pc.red("✗")}  Not ready — ${issues.length} issue(s) found`);
+    lines.push("");
+    for (const issue of issues) {
+      lines.push(`  ${pc.yellow("Issue:")} ${issue}`);
+    }
+  }
 
   if (canRenderSpinner) {
-    note(summaryLines.join("\n"), `${healthy}/${providers.length} provider(s) healthy`);
-    outro(healthy === providers.length ? "Provider check complete." : "Provider check failed.");
+    note(lines.join("\n"), "Results");
+    outro(issues.length === 0 ? "System check passed." : "System check failed.");
   } else {
-    logger.plain("");
-    logger.plain(`${healthy}/${providers.length} provider(s) healthy`);
-    for (const line of summaryLines) {
+    for (const line of lines) {
       logger.plain(line);
     }
   }
 
-  if (healthy === 0) {
+  if (issues.length > 0) {
     process.exit(1);
   }
 }

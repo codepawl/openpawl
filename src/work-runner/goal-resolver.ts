@@ -257,9 +257,22 @@ export async function promptGoalChoice(): Promise<{ mode: "file" | "manual"; val
         return { mode: "file", value: String(filePath).trim() };
     }
 
+    console.log([
+        "",
+        "  Examples:",
+        '  · "Add rate limiting to the auth API"',
+        '  · "Build a caching layer for user profiles"',
+        '  · "Write tests for the payment module"',
+        '  · "Refactor the database queries in orders.ts"',
+        "",
+        "  Tip: Be specific. The more detail you give, the better",
+        "  the team can plan.",
+        "",
+    ].join("\n"));
+
     const goalInput = await text({
-        message: "Enter your goal:",
-        placeholder: "Build a landing page with authentication",
+        message: "What's your goal for this session?",
+        placeholder: "Describe what you want to build or fix...",
     });
 
     if (isCancel(goalInput) || !String(goalInput).trim()) {

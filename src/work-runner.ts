@@ -294,9 +294,8 @@ export async function runWork(
     const persistedGlobalConfig = readGlobalConfig();
     const setupConfig = persistedGlobalConfig ?? readGlobalConfigWithDefaults();
     if (!persistedGlobalConfig) {
-        logger.warn(
-            "No setup config found at ~/.teamclaw/config.json. Run `teamclaw setup` to configure providers.",
-        );
+        const { formatFirstRunMessage } = await import("./core/errors.js");
+        logger.plain(formatFirstRunMessage());
     }
 
     const pm = getGlobalProviderManager();
@@ -1064,16 +1063,25 @@ export async function runWork(
                         break;
                     }
 
+                    // Use friendly error formatting for provider errors
+                    const { ProviderError } = await import("./providers/types.js");
+                    const { formatError } = await import("./core/errors.js");
+                    if (error instanceof ProviderError) {
+                        sPlan.stop("✗ Provider error");
+                        const friendly = formatError(error.code, error.provider, `${error.code} (${error.statusCode ?? "N/A"})`);
+                        logger.plain("\n" + friendly);
+                        clearSessionConfig();
+                        process.exit(1);
+                    }
+
                     sPlan.stop(
-                        `❌ Coordinator failed to decompose goal: ${message}`,
+                        `✗ Coordinator failed to decompose goal: ${message}`,
                     );
                     const isFatal =
                         /HTTP [45]\d\d|ECONNREFUSED|ENOTFOUND|404|Not Found|fetch failed/i.test(message);
                     if (isFatal) {
-                        cancel(
-                            `Fatal Error: Coordinator failed — ${message.split("\n")[0]}.\n` +
-                            `  • Run \`teamclaw setup\` to reconfigure providers or \`teamclaw check\` to diagnose.`,
-                        );
+                        const friendly = formatError("CONNECTION_FAILED", "your provider", message.split("\n")[0]);
+                        cancel(friendly);
                         clearSessionConfig();
                         process.exit(1);
                     }
