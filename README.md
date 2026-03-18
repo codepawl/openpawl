@@ -42,7 +42,7 @@ Or via npm:
 npm install -g @teamclaw/cli
 ```
 
-**Requirements:** Node.js >= 20, pnpm, an [OpenClaw](https://github.com/nxank4/openclaw) gateway.
+**Requirements:** Node.js >= 20, pnpm, and an LLM API key (Anthropic, OpenAI, OpenRouter, DeepSeek, Groq, or local Ollama).
 
 ---
 
@@ -225,7 +225,7 @@ See [SECURITY.md](./SECURITY.md) for vulnerability reporting.
 | [ARCHITECTURE.md](./docs/ARCHITECTURE.md) | System design |
 | [CUSTOM_AGENTS.md](./docs/CUSTOM_AGENTS.md) | Custom agent SDK guide |
 | [WEBHOOKS.md](./docs/WEBHOOKS.md) | Webhook event schemas |
-| [OPENCLAW_PROVISIONING.md](./docs/OPENCLAW_PROVISIONING.md) | Gateway setup |
+| [PROVIDERS.md](./docs/PROVIDERS.md) | LLM provider setup |
 
 ---
 
