@@ -73,7 +73,6 @@
 ### 3.4 Documentation Files
 
 - Project docs live in `DOCS/` directory
-- Update `CURRENT_STATUS.md` when sprint goals change
 - Maintain `CHANGELOG.md` for user-facing changes
 
 ---
