@@ -91,6 +91,7 @@ function printHelp(): void {
         "  " + cmd(pad("standup")) + desc("Daily standup summary: yesterday, blocked, next steps"),
         "  " + cmd(pad("handoff")) + desc("Generate CONTEXT.md handoff file, or import from collaborator"),
         "  " + cmd(pad("cache")) + desc("Response cache: stats, clear, prune, enable/disable"),
+        "  " + cmd(pad("providers")) + desc("List and test configured LLM providers"),
         "  " + cmd(pad("clean")) + desc("Remove session data (preserves global memory)"),
         "  " + cmd(pad("run openclaw")) + desc("Start OpenClaw gateway"),
         "  " + cmd(pad("update")) + desc("Self-update TeamClaw to the latest version"),
@@ -412,6 +413,10 @@ async function main(): Promise<void> {
     } else if (cmd === "cache") {
         const { runCacheCommand } = await import("./commands/cache.js");
         await runCacheCommand(args.slice(1));
+
+    } else if (cmd === "providers") {
+        const { runProvidersCommand } = await import("./commands/providers.js");
+        await runProvidersCommand(args.slice(1));
 
     } else if (cmd === "demo") {
         const { runDemo } = await import("./commands/demo.js");

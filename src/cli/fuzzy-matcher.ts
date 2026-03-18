@@ -37,6 +37,7 @@ export const COMMANDS = [
     "standup",
     "templates",
     "cache",
+    "providers",
 ] as const;
 
 /** Known subcommands keyed by parent command. */
@@ -62,6 +63,7 @@ export const SUBCOMMANDS: Record<string, string[]> = {
     drift: [],
     templates: ["browse", "search", "install", "remove", "list", "show", "validate", "publish", "init", "update"],
     cache: ["stats", "clear", "prune", "disable", "enable"],
+    providers: ["list", "test"],
 };
 
 export type MatchResult = {
