@@ -12,9 +12,9 @@ vi.mock("@anthropic-ai/sdk", () => {
       yield { type: "content_block_delta", delta: { type: "text_delta", text: " world" } };
       yield { type: "message_stop" };
     },
-    finalMessage: {
+    finalMessage: vi.fn().mockResolvedValue({
       usage: { input_tokens: 10, output_tokens: 5 },
-    },
+    }),
   };
 
   return {

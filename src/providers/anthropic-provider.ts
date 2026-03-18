@@ -59,10 +59,15 @@ export class AnthropicProvider implements StreamProvider {
         if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
           yield { content: event.delta.text, done: false };
         } else if (event.type === "message_stop") {
-          const msg = stream.finalMessage;
-          const usage = msg?.usage
-            ? { promptTokens: msg.usage.input_tokens, completionTokens: msg.usage.output_tokens }
-            : undefined;
+          let usage: { promptTokens: number; completionTokens: number } | undefined;
+          try {
+            const msg = await stream.finalMessage();
+            if (msg?.usage) {
+              usage = { promptTokens: msg.usage.input_tokens, completionTokens: msg.usage.output_tokens };
+            }
+          } catch {
+            // Usage stats unavailable
+          }
           yield { content: "", done: true, usage };
           this.lastSuccessAt = Date.now();
         }
