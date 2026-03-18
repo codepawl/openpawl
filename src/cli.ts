@@ -79,6 +79,7 @@ function printHelp(): void {
         "  " + cmd(pad("heatmap")) + desc("Agent utilization heatmap and bottleneck detection"),
         "  " + cmd(pad("forecast")) + desc("Estimate run cost before execution"),
         "  " + cmd(pad("replay")) + desc("Replay past sessions (list, play, diff, export)"),
+        "  " + cmd(pad("templates")) + desc("Browse, install, and publish templates"),
         "  " + cmd(pad("agent")) + desc("Manage custom agents (add, list, remove)"),
         "  " + cmd(pad("logs")) + desc("View session and gateway logs"),
         "  " + cmd(pad("lessons")) + desc("Export lessons learned"),
@@ -98,6 +99,7 @@ function printHelp(): void {
         "  " + cmd(pad("--goal <text>")) + desc("Set goal inline, or --goal @file.md to load from file"),
         "  " + cmd(pad("--no-web")) + desc("Skip automatic web dashboard"),
         "  " + cmd(pad("--runs <N>")) + desc("Run N sessions sequentially"),
+        "  " + cmd(pad("--template <id>")) + desc("Use a marketplace template for team composition"),
         "",
         section("Examples:"),
         "  " + exCmd("teamclaw setup") + "                          " + desc("Get started"),
@@ -402,12 +404,13 @@ async function main(): Promise<void> {
         const { runUpdateCommand } = await import("./commands/update.js");
         await runUpdateCommand(args.slice(1));
 
+    } else if (cmd === "templates" || cmd === "template") {
+        const { runTemplatesCommand } = await import("./commands/templates.js");
+        await runTemplatesCommand(args.slice(1));
+
     } else if (cmd === "demo") {
-        const canRenderSpinner = Boolean(process.stdout.isTTY && process.stderr.isTTY);
-        if (canRenderSpinner) intro("TeamClaw Demo Mode");
         const { runDemo } = await import("./commands/demo.js");
         await runDemo(args.slice(1));
-        if (canRenderSpinner) outro("Demo session finished.");
 
     } else {
         const match = findClosestCommand(rawCmd);
