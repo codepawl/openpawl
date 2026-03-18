@@ -338,32 +338,6 @@ async function main(): Promise<void> {
         const { runLessonsExport } = await import("./commands/lessons-export.js");
         await runLessonsExport(args.slice(1));
 
-    } else if (cmd === "run") {
-        const runArgs = args.slice(1);
-        if (!runArgs[0] || runArgs[0] === "--help" || runArgs[0] === "-h") {
-            logger.plain("Usage: teamclaw run gateway [--port PORT]");
-            logger.plain("");
-            logger.plain("Start the LLM gateway.");
-            logger.plain("");
-            logger.plain("Examples:");
-            logger.plain("  teamclaw run gateway             # interactive (auto-detect port)");
-            logger.plain("  teamclaw run gateway --port 9000");
-            return;
-        }
-        if (runArgs[0] === "gateway") {
-            const portIndex = runArgs.indexOf("--port");
-            const explicitPort =
-                portIndex !== -1 && runArgs[portIndex + 1]
-                    ? runArgs[portIndex + 1]
-                    : undefined;
-            const { startGateway } = await import("./commands/run-gateway.js");
-            await startGateway({ port: explicitPort });
-        } else {
-            logger.error(`Unknown run target: ${runArgs[0]}`);
-            logger.error("Usage: teamclaw run gateway [--port PORT]");
-            process.exit(1);
-        }
-
     } else if (cmd === "clarity") {
         const { runClarityCommand } = await import("./commands/clarity.js");
         await runClarityCommand(args.slice(1));

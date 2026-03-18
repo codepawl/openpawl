@@ -286,7 +286,7 @@ teamclaw think history --session <id>      # show specific session
 ## Constraints
 
 - No LangGraph graph for think sessions — direct proxy calls only
-- No new OpenClawClient instance — use ProxyService only
+- No new LLM client instance — use ProxyService only
 - No modifications to drift, journal, clarity, standup, or proxy layers
 - Not included in `teamclaw demo` command
 

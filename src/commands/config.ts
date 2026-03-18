@@ -11,10 +11,7 @@ import {
     text,
 } from "@clack/prompts";
 import pc from "picocolors";
-import {
-    discoverOpenAIApi,
-    readLegacyGatewayConfig,
-} from "../core/discovery.js";
+import { discoverOpenAIApi } from "../core/port-scanner.js";
 import {
     readTeamclawConfig,
     writeTeamclawConfig,
@@ -167,27 +164,17 @@ async function loadDashboardState(): Promise<DashboardState> {
 
     const chatEndpoint =
         String(globalCfg.chatEndpoint || "") ||
-        (typeof data.chat_endpoint === "string"
-            ? data.chat_endpoint.trim()
-            : typeof data.openclaw_chat_endpoint === "string"
-                ? data.openclaw_chat_endpoint.trim()
-                : "") ||
-        (parsed?.openclaw_chat_endpoint?.trim() ?? "/v1/chat/completions");
+        (typeof data.chat_endpoint === "string" ? data.chat_endpoint.trim() : "") ||
+        (parsed?.chat_endpoint?.trim() ?? "/v1/chat/completions");
 
     const model =
         String(globalCfg.model || "") ||
-        (typeof data.model === "string"
-            ? data.model.trim()
-            : typeof data.openclaw_model === "string"
-                ? data.openclaw_model.trim()
-                : "") ||
-        (parsed?.openclaw_model?.trim() ?? "");
+        (typeof data.model === "string" ? data.model.trim() : "") ||
+        (parsed?.model?.trim() ?? "");
 
     const token = String(globalCfg.token || "") ||
-        (typeof data.token === "string"
-            ? data.token.trim()
-            : "") ||
-        (parsed?.openclaw_token?.trim() ?? "");
+        (typeof data.token === "string" ? data.token.trim() : "") ||
+        "";
 
     const memoryPath =
         (typeof data.vector_store_path === "string" ? data.vector_store_path : "") ||
@@ -323,40 +310,7 @@ async function providerMenu(state: DashboardState): Promise<void> {
             const s = spinner();
             s.start(randomPhrase("scan"));
 
-            // Try the legacy on-disk config — it contains the exact
-            // port and token with no network probing required.
-            const localCfg = readLegacyGatewayConfig();
-
-            if (localCfg) {
-                const modelLabel = localCfg.model
-                    ? `, model: ${localCfg.model}`
-                    : "";
-                s.stop(
-                    `✅ [Config File] Found LLM configuration! (Port: ${localCfg.port}${modelLabel})`,
-                );
-
-                state.gatewayUrl = localCfg.url;
-                state.token = localCfg.token;
-                state.chatEndpoint = "/v1/chat/completions";
-                if (localCfg.model) {
-                    state.model = localCfg.model;
-                }
-
-                note(
-                    [
-                        `Gateway URL : ${localCfg.url}`,
-                        `Token       : extracted from ${localCfg.configPath}`,
-                        localCfg.model
-                            ? `Model       : ${localCfg.model}`
-                            : `Model       : (not set in config file — edit manually if needed)`,
-                    ].join("\n"),
-                    "Legacy config file loaded",
-                );
-                continue;
-            }
-
-            // Config file not found — fall back to the network port scanner.
-            s.start(randomPhrase("scan"));
+            // Scan local ports for OpenAI-compatible services
             const discovered = await discoverOpenAIApi("http://localhost", {
                 preferredPort: parsePortFromUrl(state.gatewayUrl),
                 timeoutMs: 1000,
@@ -365,8 +319,8 @@ async function providerMenu(state: DashboardState): Promise<void> {
                 s.stop("⚠️ Could not auto-detect API.");
                 note(
                     [
-                        "No local config file found and no API responded on common ports.",
-                        "Locations checked: ~/.teamclaw/config.json, ~/.openclaw/config.json (and OS equivalents).",
+                        "No OpenAI-compatible API responded on common ports.",
+                        "Tip: configure providers via `teamclaw setup` instead.",
                         "Tip: ensure you are pointing to the API port, not the Web UI port.",
                     ].join("\n"),
                     "Discovery warning",

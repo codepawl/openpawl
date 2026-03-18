@@ -3,10 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>TeamClaw | OpenClaw Bot Team Workspace</title>
+    <title>TeamClaw | AI Agent Team Workspace</title>
     <meta
       name="description"
-      content="Build and run AI bot teams with OpenClaw. Real-time workflow telemetry and team visualization."
+      content="Build and run AI agent teams with TeamClaw. Real-time workflow telemetry and team visualization."
     />
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <style>
@@ -743,7 +743,7 @@
             </select>
           </div>
           <div class="cfg-field" style="grid-column: span 2">
-            <span class="cfg-label">OPENCLAW WORKER URL</span>
+            <span class="cfg-label">LLM PROVIDER URL</span>
             <span class="cfg-hint">Required before first run.</span>
             <input
               class="cfg-input"
@@ -1292,8 +1292,8 @@
           desc: "Decomposes goals into tasks, assigns work to the bot team.",
         },
         sparki: {
-          role: "Worker (OpenClaw)",
-          desc: "Executes assigned tasks via OpenClaw.",
+          role: "Worker",
+          desc: "Executes assigned tasks via LLM provider.",
         },
         hr: {},
         market: {},

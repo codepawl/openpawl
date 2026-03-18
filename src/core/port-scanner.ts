@@ -1,6 +1,13 @@
 import WebSocket from "ws";
 
-import type { OpenAIApiDiscovery } from "./discovery.js";
+export interface OpenAIApiDiscovery {
+    baseUrl: string;
+    port: number;
+    protocol: "http" | "ws";
+    serviceName: string;
+    chatEndpoint: string;
+    models: string[];
+}
 
 export interface OpenAIApiDiscoveryOptions {
     preferredPort?: number;
@@ -35,14 +42,12 @@ function uniquePorts(ports: number[]): number[] {
 function inferHttpServiceName(port: number, serverHeader: string): string {
     const h = serverHeader.toLowerCase();
     if (h.includes("ollama") || port === 11434) return "Ollama";
-    if (h.includes("openclaw")) return "LLM Gateway";
+    if (port === 18789 || port === 8001) return "LLM Gateway";
     return "OpenAI-Compatible";
 }
 
-function inferWsServiceName(port: number, htmlSignature: string): string {
-    const sig = htmlSignature.toLowerCase();
-    // 8001 is the legacy default; 18789 is the current default gateway port.
-    if (sig.includes("openclaw") || port === 8001 || port === 18789)
+function inferWsServiceName(port: number, _htmlSignature: string): string {
+    if (port === 8001 || port === 18789)
         return "LLM Gateway";
     return "WebSocket AI Gateway";
 }
@@ -241,7 +246,7 @@ export async function discoverOpenAIApi(
             // ignore
         }
 
-        const looksGatewayHtml = htmlSig.toLowerCase().includes("openclaw");
+        const looksGatewayHtml = htmlSig.toLowerCase().includes("gateway");
 
         // Probe C (fallback): WebSocket handshake only when HTTP checks did not
         // conclusively confirm a live service.
