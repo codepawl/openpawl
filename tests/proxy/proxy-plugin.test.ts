@@ -1,30 +1,46 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import Fastify from "fastify";
 import type { FastifyInstance } from "fastify";
-import { OpenClawError } from "@/client/errors.js";
 import type { StreamChunk } from "@/providers/stream-types.js";
+import type { StreamProvider } from "@/providers/provider.js";
+import { ProviderError } from "@/providers/types.js";
 
 // ---------------------------------------------------------------------------
-// Mock OpenClawClient
+// Mock the global provider manager
 // ---------------------------------------------------------------------------
 
-const mockClient = {
-  connect: vi.fn().mockResolvedValue(undefined),
-  disconnect: vi.fn().mockResolvedValue(undefined),
-  isConnected: vi.fn().mockReturnValue(true),
-  stream: vi.fn(),
-  on: vi.fn(),
+const mockStream = vi.fn();
+
+const mockProvider: StreamProvider = {
+  name: "test",
+  stream: mockStream,
+  healthCheck: vi.fn().mockResolvedValue(true),
+  isAvailable: vi.fn().mockReturnValue(true),
+  setAvailable: vi.fn(),
 };
 
-vi.mock("@/client/OpenClawClient.js", () => ({
-  OpenClawClient: vi.fn().mockImplementation(() => mockClient),
+// We need to mock at the ProxyService level since the factory imports are ESM
+vi.mock("@/proxy/ProxyService.js", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("@/proxy/ProxyService.js")>();
+  const { ProviderManager } = await import("@/providers/provider-manager.js");
+  const { HealthMonitor } = await import("@/providers/health-monitor.js");
+  return {
+    ...mod,
+    createProxyService: () => {
+      const mgr = new ProviderManager([mockProvider]);
+      const monitor = new HealthMonitor([mockProvider]);
+      return new mod.ProxyService(mgr, monitor);
+    },
+  };
+});
+
+vi.mock("@/core/mock-llm.js", () => ({
+  isMockLlmEnabled: () => false,
+  generateMockResponse: () => "mock",
 }));
 
-vi.mock("@/core/global-config.js", () => ({
-  readGlobalConfigWithDefaults: () => ({
-    gatewayUrl: "ws://localhost:18789",
-    token: "test-token",
-  }),
+vi.mock("@/core/logger.js", () => ({
+  logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), plain: vi.fn(), success: vi.fn() },
 }));
 
 // ---------------------------------------------------------------------------
@@ -58,9 +74,7 @@ describe("proxyPlugin", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
-    mockClient.isConnected.mockReturnValue(true);
-    mockClient.connect.mockResolvedValue(undefined);
-    mockClient.disconnect.mockResolvedValue(undefined);
+    (mockProvider.isAvailable as ReturnType<typeof vi.fn>).mockReturnValue(true);
 
     fastify = Fastify();
     const { proxyPlugin } = await import("@/proxy/plugin.js");
@@ -72,25 +86,20 @@ describe("proxyPlugin", () => {
     await fastify.close();
   });
 
-  // -- Health ---------------------------------------------------------------
-
   describe("GET /proxy/health", () => {
     it("returns health status", async () => {
       const res = await fastify.inject({ method: "GET", url: "/proxy/health" });
       expect(res.statusCode).toBe(200);
       const body = res.json();
       expect(body).toHaveProperty("connected", true);
-      expect(body).toHaveProperty("gatewayUrl", "ws://localhost:18789");
       expect(body).toHaveProperty("uptime");
       expect(typeof body.uptime).toBe("number");
     });
   });
 
-  // -- Stream ---------------------------------------------------------------
-
   describe("GET /proxy/stream", () => {
     it("yields SSE chunk and done events", async () => {
-      mockClient.stream.mockImplementation(() =>
+      mockStream.mockImplementation(() =>
         makeChunks([
           { content: "Hello", done: false },
           { content: " world", done: false },
@@ -118,8 +127,13 @@ describe("proxyPlugin", () => {
     });
 
     it("maps stream errors to SSE error events", async () => {
-      mockClient.stream.mockImplementation(async function* () {
-        throw new OpenClawError("STREAM_FAILED", "upstream error");
+      mockStream.mockImplementation(async function* () {
+        throw new ProviderError({
+          provider: "test",
+          code: "STREAM_FAILED",
+          message: "upstream error",
+          isFallbackTrigger: false,
+        });
       });
 
       const res = await fastify.inject({
@@ -132,7 +146,7 @@ describe("proxyPlugin", () => {
       expect(errorEvt).toBeDefined();
       const data = errorEvt!.data as Record<string, unknown>;
       expect(data.code).toBe("STREAM_FAILED");
-      expect(data.message).toBe("upstream error");
+      expect(data.message).toContain("upstream error");
     });
 
     it("returns 400 when prompt is missing", async () => {
@@ -152,12 +166,10 @@ describe("proxyPlugin", () => {
     });
   });
 
-  // -- Concurrent streams ---------------------------------------------------
-
   describe("concurrent streams", () => {
     it("handles 3 parallel streams independently", async () => {
       let callCount = 0;
-      mockClient.stream.mockImplementation(() => {
+      mockStream.mockImplementation(() => {
         const id = ++callCount;
         return makeChunks([
           { content: `response-${id}`, done: false },
@@ -180,8 +192,6 @@ describe("proxyPlugin", () => {
       }
     });
   });
-
-  // -- Reconnect ------------------------------------------------------------
 
   describe("POST /proxy/reconnect", () => {
     it("resets provider health state and returns success", async () => {

@@ -1,22 +1,18 @@
-import type { OpenClawClientConfig } from "../client/types.js";
 import type { StreamChunk, StreamOptions } from "../providers/stream-types.js";
 import type { ProxyHealthResponse, ProxyReconnectResponse } from "./types.js";
 import { isMockLlmEnabled, generateMockResponse } from "../core/mock-llm.js";
 import { streamWithCache } from "../cache/cache-interceptor.js";
-import { ProviderManager, OpenClawProvider, AnthropicProvider, HealthMonitor } from "../providers/index.js";
-import type { StreamProvider } from "../providers/index.js";
-import { readGlobalConfig } from "../core/global-config.js";
+import { ProviderManager, HealthMonitor } from "../providers/index.js";
+import { getGlobalProviderManager } from "../providers/provider-factory.js";
 
 export class ProxyService {
   readonly providerManager: ProviderManager;
   readonly healthMonitor: HealthMonitor;
-  private readonly gatewayUrl: string;
   private readonly startTime: number;
 
-  constructor(providerManager: ProviderManager, healthMonitor: HealthMonitor, gatewayUrl: string) {
+  constructor(providerManager: ProviderManager, healthMonitor: HealthMonitor) {
     this.providerManager = providerManager;
     this.healthMonitor = healthMonitor;
-    this.gatewayUrl = gatewayUrl;
     this.startTime = Date.now();
   }
 
@@ -40,7 +36,7 @@ export class ProxyService {
   health(): ProxyHealthResponse {
     return {
       connected: true,
-      gatewayUrl: this.gatewayUrl,
+      gatewayUrl: "provider-manager",
       uptime: Date.now() - this.startTime,
     };
   }
@@ -57,61 +53,20 @@ export class ProxyService {
 
 let instance: ProxyService | null = null;
 
-/** Get the singleton's ProviderManager (for stats access from audit/work-runner). Returns null if not yet created. */
 export function getProviderManager(): ProviderManager | null {
   return instance?.providerManager ?? null;
 }
 
-/** Get the singleton's HealthMonitor. Returns null if not yet created. */
 export function getHealthMonitor(): HealthMonitor | null {
   return instance?.healthMonitor ?? null;
 }
 
-export function createProxyService(config: OpenClawClientConfig): ProxyService {
+export function createProxyService(): ProxyService {
   if (!instance) {
-    const openclawProvider = new OpenClawProvider(config, {
-      firstChunkTimeoutMs: getFirstChunkTimeout(),
-    });
-
-    const providers: StreamProvider[] = [openclawProvider];
-
-    // Add Anthropic fallback if configured
-    const anthropicConfig = getAnthropicConfig();
-    if (anthropicConfig) {
-      providers.push(new AnthropicProvider(anthropicConfig));
-    }
-
-    const manager = new ProviderManager(providers);
+    const manager = getGlobalProviderManager();
+    const providers = [...manager.getProviders()];
     const monitor = new HealthMonitor(providers);
-
-    instance = new ProxyService(manager, monitor, config.gatewayUrl);
+    instance = new ProxyService(manager, monitor);
   }
   return instance;
-}
-
-function getFirstChunkTimeout(): number {
-  try {
-    const cfg = readGlobalConfig();
-    const providers = (cfg as Record<string, unknown> | null)?.providers as Record<string, unknown> | undefined;
-    return (providers?.firstChunkTimeoutMs as number) ?? 15_000;
-  } catch {
-    return 15_000;
-  }
-}
-
-function getAnthropicConfig(): { apiKey?: string; model?: string } | null {
-  if (process.env.ANTHROPIC_API_KEY) {
-    return { apiKey: process.env.ANTHROPIC_API_KEY };
-  }
-  try {
-    const cfg = readGlobalConfig();
-    const providers = (cfg as Record<string, unknown> | null)?.providers as Record<string, unknown> | undefined;
-    const anthropic = providers?.anthropic as Record<string, unknown> | undefined;
-    if (anthropic?.apiKey) {
-      return { apiKey: anthropic.apiKey as string, model: anthropic.model as string | undefined };
-    }
-  } catch {
-    // No config
-  }
-  return null;
 }

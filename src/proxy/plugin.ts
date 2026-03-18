@@ -1,10 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import fp from "fastify-plugin";
-import { OpenClawError } from "../client/errors.js";
-import { OpenClawClientConfigSchema } from "../client/types.js";
 import type { StreamOptions } from "../providers/stream-types.js";
 import { ProviderError } from "../providers/types.js";
-import { readGlobalConfigWithDefaults } from "../core/global-config.js";
 import { createProxyService } from "./ProxyService.js";
 import type { ProxyPluginOptions, ProxyStreamQuery } from "./types.js";
 
@@ -13,12 +10,7 @@ async function proxyPluginImpl(
   opts: ProxyPluginOptions,
 ): Promise<void> {
   const basePath = opts.basePath ?? "/proxy";
-  const globalCfg = readGlobalConfigWithDefaults();
-  const clientConfig = OpenClawClientConfigSchema.parse({
-    gatewayUrl: globalCfg.gatewayUrl,
-    apiKey: globalCfg.token || undefined,
-  });
-  const proxyService = createProxyService(clientConfig);
+  const proxyService = createProxyService();
 
   fastify.addHook("onClose", async () => {
     await proxyService.shutdown();
@@ -84,11 +76,9 @@ async function proxyPluginImpl(
         }
       } catch (err) {
         if (!abortController.signal.aborted) {
-          const code = err instanceof OpenClawError
+          const code = err instanceof ProviderError
             ? err.code
-            : err instanceof ProviderError
-              ? err.code
-              : "UNKNOWN";
+            : "UNKNOWN";
           const message = err instanceof Error ? err.message : String(err);
           const errorEvent = JSON.stringify({
             event: "error",

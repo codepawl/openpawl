@@ -4,8 +4,6 @@
  */
 
 import { ProxyService, createProxyService } from "../proxy/ProxyService.js";
-import { readGlobalConfigWithDefaults } from "../core/global-config.js";
-import { OpenClawClientConfigSchema } from "../client/types.js";
 import type { ThinkContext, ThinkRound, ThinkRecommendation } from "./types.js";
 import {
   buildTechLeadPrompt,
@@ -29,12 +27,7 @@ export interface ExecuteOptions {
 }
 
 function getProxy(): ProxyService {
-  const globalCfg = readGlobalConfigWithDefaults();
-  const clientConfig = OpenClawClientConfigSchema.parse({
-    gatewayUrl: globalCfg.gatewayUrl,
-    apiKey: globalCfg.token || undefined,
-  });
-  return createProxyService(clientConfig);
+  return createProxyService();
 }
 
 async function collectStream(
