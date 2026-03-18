@@ -272,6 +272,23 @@ export async function collectBriefingData(): Promise<BriefingData> {
     // Best-effort — don't break briefing if score fails
   }
 
+  // 14. Standup summary (best-effort)
+  let standupSummary: BriefingData["standupSummary"];
+  try {
+    const { collectStandupData } = await import("../standup/collector.js");
+    const { generateSuggestions } = await import("../standup/suggester.js");
+    const standupData = await collectStandupData({ since: Date.now() - 24 * 60 * 60 * 1000, label: "24h" });
+    standupData.suggested = generateSuggestions(standupData.blocked, standupData.yesterday.sessions);
+    standupSummary = {
+      sessionCount: standupData.yesterday.sessions.length,
+      totalCost: standupData.yesterday.totalCostUSD,
+      topBlocked: standupData.blocked[0]?.description ?? null,
+      topSuggestion: standupData.suggested[0]?.description ?? null,
+    };
+  } catch {
+    // Best-effort
+  }
+
   return {
     lastSession: {
       sessionId: lastCompleted.sessionId,
@@ -292,5 +309,6 @@ export async function collectBriefingData(): Promise<BriefingData> {
     asyncThinkResults,
     contextFileFound,
     vibeScore,
+    standupSummary,
   };
 }

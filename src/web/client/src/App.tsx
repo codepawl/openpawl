@@ -5,6 +5,7 @@ import { PaletteSettings } from "./components/settings/PaletteSettings";
 import { SummaryCards } from "./components/SummaryCards";
 import { WorkflowStepper } from "./components/WorkflowStepper";
 import { InsightsSection } from "./components/InsightsSection";
+import { StandupPanel } from "./components/StandupPanel";
 import { NotificationPanel } from "./components/NotificationPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { HumanApprovalModal } from "./components/HumanApprovalModal";
@@ -294,6 +295,9 @@ function Dashboard() {
           ) : (
             <>
               <PreviewPanel />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <StandupPanel />
+              </div>
               <SummaryCards />
               <KanbanBoard />
               <InsightsSection />

@@ -87,6 +87,7 @@ function printHelp(): void {
         "  " + cmd(pad("clarity")) + desc("Check goal clarity before sprinting"),
         "  " + cmd(pad("drift")) + desc("Check goal for conflicts with past decisions"),
         "  " + cmd(pad("journal")) + desc("Decision journal: list, search, show, export"),
+        "  " + cmd(pad("standup")) + desc("Daily standup summary: yesterday, blocked, next steps"),
         "  " + cmd(pad("handoff")) + desc("Generate CONTEXT.md handoff file, or import from collaborator"),
         "  " + cmd(pad("clean")) + desc("Remove session data (preserves global memory)"),
         "  " + cmd(pad("run openclaw")) + desc("Start OpenClaw gateway"),
@@ -370,6 +371,10 @@ async function main(): Promise<void> {
     } else if (cmd === "journal") {
         const { runJournalCommand } = await import("./commands/journal.js");
         await runJournalCommand(args.slice(1));
+
+    } else if (cmd === "standup") {
+        const { runStandupCommand } = await import("./commands/standup.js");
+        await runStandupCommand(args.slice(1));
 
     } else if (cmd === "logs") {
         const { runLogs } = await import("./commands/logs.js");

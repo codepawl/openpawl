@@ -1724,6 +1724,31 @@ document.getElementById('msg').textContent=r.ok?'Rejection submitted!':'Error: '
     }
   });
 
+  // ── Standup endpoint ──────────────────────────────────────────────
+  fastify.get("/api/standup", async (req, reply) => {
+    try {
+      const { collectStandupData } = await import("../standup/collector.js");
+      const { generateSuggestions } = await import("../standup/suggester.js");
+
+      const sinceParam = (req.query as Record<string, string>).since ?? "24h";
+      const match = sinceParam.match(/^(\d+)([dhw])$/);
+      let ms = 24 * 60 * 60 * 1000;
+      if (match) {
+        const [, n, unit] = match;
+        const num = Number(n);
+        if (unit === "h") ms = num * 60 * 60 * 1000;
+        else if (unit === "d") ms = num * 24 * 60 * 60 * 1000;
+        else if (unit === "w") ms = num * 7 * 24 * 60 * 60 * 1000;
+      }
+
+      const data = await collectStandupData({ since: Date.now() - ms, label: sinceParam });
+      data.suggested = generateSuggestions(data.blocked, data.yesterday.sessions);
+      return { data };
+    } catch (err) {
+      return reply.status(500).send({ error: String(err) });
+    }
+  });
+
   // ── Handoff endpoints ──────────────────────────────────────────────
   fastify.get("/api/handoff", async (_req, reply) => {
     try {

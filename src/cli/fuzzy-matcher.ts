@@ -34,6 +34,7 @@ export const COMMANDS = [
     "clarity",
     "drift",
     "update",
+    "standup",
 ] as const;
 
 /** Known subcommands keyed by parent command. */

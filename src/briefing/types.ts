@@ -59,6 +59,7 @@ export interface BriefingData {
   asyncThinkResults?: AsyncThinkBriefing[];
   contextFileFound?: boolean;
   vibeScore?: { overall: number; delta: number | null; direction: string };
+  standupSummary?: { sessionCount: number; totalCost: number; topBlocked: string | null; topSuggestion: string | null };
 }
 
 export interface InterRunSummary {
