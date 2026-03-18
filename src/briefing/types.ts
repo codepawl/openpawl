@@ -60,6 +60,7 @@ export interface BriefingData {
   contextFileFound?: boolean;
   vibeScore?: { overall: number; delta: number | null; direction: string };
   standupSummary?: { sessionCount: number; totalCost: number; topBlocked: string | null; topSuggestion: string | null };
+  cacheStats?: { hitRate: number; totalSavingsUSD: number };
 }
 
 export interface InterRunSummary {

@@ -289,6 +289,24 @@ export async function collectBriefingData(): Promise<BriefingData> {
     // Best-effort
   }
 
+  // 15. Cache stats (best-effort)
+  let cacheStats: BriefingData["cacheStats"];
+  try {
+    const { ResponseCacheStore } = await import("../cache/cache-store.js");
+    const cacheStore = new ResponseCacheStore();
+    if (cacheStore.exists()) {
+      const stats = await cacheStore.stats();
+      if (stats.totalEntries > 0) {
+        cacheStats = {
+          hitRate: stats.hitRate,
+          totalSavingsUSD: stats.totalSavingsUSD,
+        };
+      }
+    }
+  } catch {
+    // Best-effort
+  }
+
   return {
     lastSession: {
       sessionId: lastCompleted.sessionId,
@@ -310,5 +328,6 @@ export async function collectBriefingData(): Promise<BriefingData> {
     contextFileFound,
     vibeScore,
     standupSummary,
+    cacheStats,
   };
 }

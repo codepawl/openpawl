@@ -12,6 +12,7 @@ import { isCancel, confirm } from "@clack/prompts";
 
 export async function runClean(args: string[]): Promise<void> {
   const includeGlobal = args.includes("--include-global");
+  const keepCache = args.includes("--keep-cache");
 
   // Session data paths
   const sessionPaths = [
@@ -53,5 +54,16 @@ export async function runClean(args: string[]): Promise<void> {
     }
   } else {
     logger.plain("  Global memory preserved (use --include-global to also remove).");
+  }
+
+  // Clear response cache unless --keep-cache
+  if (!keepCache) {
+    const cachePath = path.join(os.homedir(), ".teamclaw", "cache");
+    if (existsSync(cachePath)) {
+      await rm(cachePath, { recursive: true, force: true });
+      logger.plain("  Removed response cache.");
+    }
+  } else {
+    logger.plain("  Response cache preserved (--keep-cache).");
   }
 }

@@ -100,6 +100,24 @@ export async function buildAuditTrail(
     // Score calculation non-critical
   }
 
+  // Build cache performance stats (best-effort)
+  let cachePerformance: import("./types.js").AuditTrail["cachePerformance"];
+  try {
+    const { getSessionCacheStats } = await import("../cache/cache-interceptor.js");
+    const cStats = getSessionCacheStats();
+    const total = cStats.hits + cStats.misses;
+    if (total > 0) {
+      cachePerformance = {
+        hitRate: cStats.hits / total,
+        entriesUsed: cStats.hits,
+        costSaved: cStats.savedUSD,
+        timeSavedMs: cStats.savedMs,
+      };
+    }
+  } catch {
+    // Cache stats unavailable
+  }
+
   return {
     sessionId,
     runIndex,
@@ -116,6 +134,7 @@ export async function buildAuditTrail(
     agentPerformance,
     ...(personalityEvents?.length ? { personalityEvents } : {}),
     ...(vibeScore ? { vibeScore } : {}),
+    ...(cachePerformance ? { cachePerformance } : {}),
   };
 }
 

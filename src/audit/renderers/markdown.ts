@@ -35,6 +35,9 @@ export function renderAuditMarkdown(
   if (audit.vibeScore) {
     sections.push(renderVibeScore(audit));
   }
+  if (audit.cachePerformance) {
+    sections.push(renderCachePerformance(audit));
+  }
 
   return sections.join("\n\n---\n\n") + "\n";
 }
@@ -219,6 +222,21 @@ function renderVibeScore(audit: AuditTrail): string {
   }
 
   return lines.join("\n");
+}
+
+function renderCachePerformance(audit: AuditTrail): string {
+  const c = audit.cachePerformance!;
+  const timeSaved = c.timeSavedMs < 1000
+    ? `${c.timeSavedMs}ms`
+    : `${(c.timeSavedMs / 1000).toFixed(0)}s`;
+  return [
+    "## Cache Performance",
+    "",
+    `- Hit rate: ${Math.round(c.hitRate * 100)}%`,
+    `- Entries used: ${c.entriesUsed}`,
+    `- Cost saved: $${c.costSaved.toFixed(2)}`,
+    `- Time saved: ${timeSaved}`,
+  ].join("\n");
 }
 
 /** Render a multi-run summary as markdown. */

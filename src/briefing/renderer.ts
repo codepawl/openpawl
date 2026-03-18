@@ -105,6 +105,12 @@ export function renderBriefing(data: BriefingData): string {
     lines.push(color(pc.bold, `Vibe Score: ${data.vibeScore.overall}/100 ${arrow}${deltaStr}`));
   }
 
+  // Cache stats footer
+  if (data.cacheStats) {
+    const hitPct = Math.round(data.cacheStats.hitRate * 100);
+    lines.push(color(pc.dim, `Cache: ${hitPct}% hit rate  |  Saved $${data.cacheStats.totalSavingsUSD.toFixed(2)} this week`));
+  }
+
   lines.push(color(pc.dim, SEPARATOR));
 
   // Enforce max 12 content lines (excluding separators)

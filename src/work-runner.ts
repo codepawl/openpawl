@@ -83,6 +83,8 @@ import type { WebhookApprovalConfig } from "./webhook/types.js";
 import { SuccessPatternStore } from "./memory/success/store.js";
 import { LearningCurveStore } from "./memory/success/learning-curve.js";
 import { PatternQualityStore, pruneStalePatterns } from "./memory/success/quality.js";
+import { ResponseCacheStore } from "./cache/cache-store.js";
+import { resetSessionCacheStats } from "./cache/cache-interceptor.js";
 import type { SuccessPattern } from "./memory/success/types.js";
 import { GlobalMemoryManager } from "./memory/global/store.js";
 import { PromotionEngine } from "./memory/global/promoter.js";
@@ -773,6 +775,13 @@ export async function runWork(
     const vectorMemory = new VectorMemory(CONFIG.vectorStorePath, selectedMemoryBackend);
     await vectorMemory.init();
 
+    // Auto-prune expired cache entries (async, never blocks startup)
+    resetSessionCacheStats();
+    const cacheStore = new ResponseCacheStore();
+    cacheStore.prune().then((pruned) => {
+        if (pruned > 0) log("info", `Pruned ${pruned} expired cache entries`);
+    }).catch(() => {});
+
     if (clearLegacy) {
         log("warn", "Clearing lesson data is not implemented (delete data/vector_store manually)");
     }
@@ -974,7 +983,35 @@ export async function runWork(
             const teamMode = parsed.teamMode ?? teamConfig?.team_mode ?? "manual";
             let teamComposition: TeamComposition | undefined;
 
-            if (teamMode === "autonomous") {
+            if (teamMode === "template" && parsed.templateId) {
+                // Template composition mode — load template and build composition
+                const { LocalTemplateStore } = await import("./templates/local-store.js");
+                const { getSeedTemplate } = await import("./templates/seeds/index.js");
+                const templateStore = new LocalTemplateStore();
+                const tmpl = await templateStore.get(parsed.templateId) ?? getSeedTemplate(parsed.templateId);
+                if (tmpl) {
+                    if (canRenderSpinner && runId === 1) {
+                        logger.info(`Using template: ${tmpl.name} (${tmpl.agents.length} agents)`);
+                        if (tmpl.defaultGoalTemplate) {
+                            logger.plain(pc.dim(`  Goal hint: ${tmpl.defaultGoalTemplate}`));
+                        }
+                    }
+                    teamComposition = {
+                        mode: "template",
+                        activeAgents: tmpl.agents.map((a) => ({
+                            role: a.role,
+                            reason: `Template agent: ${tmpl.name}`,
+                            confidence: a.compositionRules?.required ? 1.0 : 0.8,
+                        })),
+                        excludedAgents: [],
+                        overallConfidence: 0.9,
+                        analyzedGoal: goal,
+                        analyzedAt: new Date().toISOString(),
+                    };
+                } else {
+                    log("warn", `Template "${parsed.templateId}" not found. Falling back to manual mode.`);
+                }
+            } else if (teamMode === "autonomous") {
                 // Build custom inclusion rules from registered agents
                 const customRules = buildCustomCompositionRules();
                 teamComposition = analyzeGoal(goal, { runCount: maxRuns, customRules });

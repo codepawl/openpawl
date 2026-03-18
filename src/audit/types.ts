@@ -34,6 +34,12 @@ export interface AuditTrail {
     patterns: string[];
     tip: string;
   };
+  cachePerformance?: {
+    hitRate: number;
+    entriesUsed: number;
+    costSaved: number;
+    timeSavedMs: number;
+  };
 }
 
 export interface AuditSummary {

@@ -35,6 +35,8 @@ export const COMMANDS = [
     "drift",
     "update",
     "standup",
+    "templates",
+    "cache",
 ] as const;
 
 /** Known subcommands keyed by parent command. */
@@ -58,6 +60,8 @@ export const SUBCOMMANDS: Record<string, string[]> = {
     journal: ["list", "search", "show", "export"],
     clarity: [],
     drift: [],
+    templates: ["browse", "search", "install", "remove", "list", "show", "validate", "publish", "init", "update"],
+    cache: ["stats", "clear", "prune", "disable", "enable"],
 };
 
 export type MatchResult = {
