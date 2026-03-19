@@ -20,5 +20,12 @@ export interface StreamChunk {
   /** True when this is the final chunk (stream finished) */
   done: boolean;
   /** Token usage stats, present only on the final chunk when reported */
-  usage?: { promptTokens: number; completionTokens: number };
+  usage?: {
+    promptTokens: number;
+    completionTokens: number;
+    /** Anthropic prompt caching: tokens read from cache (90% cheaper) */
+    cacheReadTokens?: number;
+    /** Anthropic prompt caching: tokens written to cache (1.25x cost) */
+    cacheCreationTokens?: number;
+  };
 }

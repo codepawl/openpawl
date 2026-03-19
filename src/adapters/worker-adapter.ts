@@ -15,6 +15,8 @@ import path from "node:path";
 import { llmEvents } from "../core/llm-events.js";
 import { isMockLlmEnabled, generateMockResponse } from "../core/mock-llm.js";
 import { getGlobalProviderManager } from "../providers/provider-factory.js";
+import { getSemanticCache } from "../token-opt/semantic-cache.js";
+import { hasSessionSpecificContent } from "../cache/cache-store.js";
 
 export type WorkerAdapterType = "provider";
 
@@ -136,6 +138,22 @@ export class UniversalWorkerAdapter implements WorkerAdapter {
       return mockText;
     }
 
+    // Semantic cache lookup — skip LLM if similar query was recently answered
+    const semanticCache = getSemanticCache();
+    if (semanticCache.isEnabled() && !hasSessionSpecificContent(userMsg)) {
+      try {
+        await semanticCache.init();
+        const cached = await semanticCache.lookup(userMsg, model, this.botId);
+        if (cached !== null) {
+          if (tokenUsageCb) tokenUsageCb(0, 0, 0, model);
+          if (streamDone) streamDone();
+          return cached;
+        }
+      } catch {
+        // Semantic cache failure is non-blocking
+      }
+    }
+
     const startedAt = Date.now();
 
     try {
@@ -169,6 +187,11 @@ export class UniversalWorkerAdapter implements WorkerAdapter {
       // Token usage callback
       if (result.usage && tokenUsageCb) {
         tokenUsageCb(result.usage.promptTokens, result.usage.completionTokens, 0, model);
+      }
+
+      // Store in semantic cache (fire-and-forget)
+      if (semanticCache.isEnabled() && cleanedText && !hasSessionSpecificContent(userMsg)) {
+        semanticCache.store(userMsg, model, this.botId, cleanedText).catch(() => {});
       }
 
       // Fire reasoning callback

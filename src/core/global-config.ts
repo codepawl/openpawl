@@ -67,6 +67,26 @@ export interface TeamClawGlobalConfig {
     coordinatorIntervention?: boolean;
     agentOverrides?: Record<string, { enabled?: boolean }>;
   };
+  tokenOptimization?: {
+    promptCaching?: boolean;
+    contextCompression?: {
+      enabled?: boolean;
+      thresholdChars?: number;
+    };
+    payloadOffloading?: {
+      enabled?: boolean;
+      thresholdChars?: number;
+    };
+    semanticCache?: {
+      enabled?: boolean;
+      similarityThreshold?: number;
+      ttlMinutes?: number;
+    };
+    modelRouting?: {
+      enabled?: boolean;
+      allowTierDowngrade?: boolean;
+    };
+  };
   providers?: ProviderConfigEntry[];
   workspaceDir?: string;
   proxy?: {
@@ -305,6 +325,12 @@ export function normalizeGlobalConfig(input: Partial<TeamClawGlobalConfig>): Tea
         }))
     : undefined;
 
+  // Parse tokenOptimization — pass through if present, no deep validation needed
+  const rawTokenOpt = (input as Record<string, unknown>).tokenOptimization;
+  const tokenOptimization = rawTokenOpt && typeof rawTokenOpt === "object" && !Array.isArray(rawTokenOpt)
+    ? (rawTokenOpt as TeamClawGlobalConfig["tokenOptimization"])
+    : undefined;
+
   // Gateway fields are optional — include only when present in input
   const gatewayFields: Partial<TeamClawGlobalConfig> = {};
   if (typeof input.managedGateway === "boolean") gatewayFields.managedGateway = input.managedGateway;
@@ -334,6 +360,7 @@ export function normalizeGlobalConfig(input: Partial<TeamClawGlobalConfig>): Tea
     ...(personality ? { personality } : {}),
     ...(workspaceDir ? { workspaceDir } : {}),
     ...(proxy ? { proxy } : {}),
+    ...(tokenOptimization ? { tokenOptimization } : {}),
     ...(providers && providers.length > 0 ? { providers } : {}),
   };
 }

@@ -12,6 +12,7 @@ import {
   readGlobalConfig,
   buildDefaultGlobalConfig,
 } from "./global-config.js";
+import { recordTierDowngrade } from "../token-opt/stats.js";
 
 export interface ModelConfig {
   defaultModel: string;
@@ -36,6 +37,50 @@ let runtimeAllowlist: string[] = [];
 
 // Runtime fallback chain override
 let runtimeFallbackChain: string[] | null = null;
+
+// Active provider family — set by provider-factory after chain construction
+let activeProviderFamily: "anthropic" | "openai" | "generic" = "generic";
+
+/**
+ * Tier-based model defaults for agents that don't need full-power models.
+ * Applied only when no explicit per-agent config or global model is set.
+ */
+const TIER_DEFAULTS: Record<string, { anthropic: string; openai: string; generic: string }> = {
+  // fast tier: execution agents that don't need deep reasoning
+  tester:   { anthropic: "claude-haiku-4-5", openai: "gpt-4o-mini", generic: "" },
+  debugger: { anthropic: "claude-haiku-4-5", openai: "gpt-4o-mini", generic: "" },
+  // mini tier: bookkeeping / utility agents
+  briefing:           { anthropic: "claude-haiku-4-5", openai: "gpt-4o-mini", generic: "" },
+  standup:            { anthropic: "claude-haiku-4-5", openai: "gpt-4o-mini", generic: "" },
+  "memory-promotion": { anthropic: "claude-haiku-4-5", openai: "gpt-4o-mini", generic: "" },
+  "vibe-score":       { anthropic: "claude-haiku-4-5", openai: "gpt-4o-mini", generic: "" },
+  "context-handoff":  { anthropic: "claude-haiku-4-5", openai: "gpt-4o-mini", generic: "" },
+};
+
+function resolveTierDefault(agentRole: string): string {
+  const candidates = normalizeRole(agentRole);
+  for (const role of candidates) {
+    const tier = TIER_DEFAULTS[role];
+    if (tier) {
+      return tier[activeProviderFamily] || "";
+    }
+  }
+  return "";
+}
+
+/**
+ * Set the active provider family (called by provider-factory after chain build).
+ */
+export function setActiveProviderFamily(family: "anthropic" | "openai" | "generic"): void {
+  activeProviderFamily = family;
+}
+
+/**
+ * Get the current active provider family.
+ */
+export function getActiveProviderFamily(): "anthropic" | "openai" | "generic" {
+  return activeProviderFamily;
+}
 
 /**
  * Normalize an agent role for lookup.
@@ -120,6 +165,15 @@ export function resolveModelForAgent(agentRole: string): string {
     const globalCfg = readGlobalConfig() ?? buildDefaultGlobalConfig();
     const globalModel = globalCfg.model?.trim();
     if (globalModel) resolved = globalModel;
+  }
+
+  // Priority 3.5: Tier-based default (cheaper model for utility agents)
+  if (!resolved) {
+    const tierModel = resolveTierDefault(agentRole);
+    if (tierModel) {
+      resolved = tierModel;
+      recordTierDowngrade(agentRole, tierModel);
+    }
   }
 
   // Resolve aliases
@@ -268,6 +322,7 @@ export async function listAvailableModels(): Promise<string[]> {
  */
 export function clearModelConfigCache(): void {
   configAgentModels = null;
+  activeProviderFamily = "generic";
 
   // Reload aliases/allowlist/fallback from global config
   const globalCfg = readGlobalConfig();

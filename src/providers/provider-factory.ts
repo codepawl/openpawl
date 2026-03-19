@@ -17,6 +17,7 @@ import { VertexProvider } from "./vertex-provider.js";
 import type { StreamProvider } from "./provider.js";
 import { readGlobalConfig, type ProviderConfigEntry } from "../core/global-config.js";
 import { logger } from "../core/logger.js";
+import { setActiveProviderFamily } from "../core/model-config.js";
 
 let globalManager: ProviderManager | null = null;
 
@@ -158,6 +159,15 @@ export function getGlobalProviderManager(): ProviderManager {
   const chain = createProviderChain(configProviders);
   if (chain.length === 0) {
     logger.warn("No LLM providers configured. Set an API key env var or run `teamclaw setup`.");
+  }
+
+  // Set active provider family for tier-based model routing
+  const first = chain[0];
+  if (first) {
+    const family = first.name === "anthropic" ? "anthropic" as const
+      : (first.name === "openai" || first.name === "chatgpt") ? "openai" as const
+      : "generic" as const;
+    setActiveProviderFamily(family);
   }
 
   globalManager = new ProviderManager(chain);

@@ -3,6 +3,7 @@ import type { StreamChunk, StreamOptions } from "./stream-types.js";
 import type { StreamProvider } from "./provider.js";
 import { ProviderError } from "./types.js";
 import { logger } from "../core/logger.js";
+import { recordPromptCacheHit, recordPromptCacheCreation } from "../token-opt/stats.js";
 
 const DEFAULT_MODEL = "claude-sonnet-4-6";
 const HEALTH_WINDOW_MS = 5 * 60 * 1000;
@@ -48,7 +49,13 @@ export class AnthropicProvider implements StreamProvider {
       messages: [{ role: "user", content: prompt }],
     };
     if (options?.systemPrompt) {
-      params.system = options.systemPrompt;
+      params.system = [
+        {
+          type: "text" as const,
+          text: options.systemPrompt,
+          cache_control: { type: "ephemeral" as const },
+        },
+      ];
     }
 
     logger.debug(`[anthropic] streaming with model=${params.model}`);
@@ -59,11 +66,21 @@ export class AnthropicProvider implements StreamProvider {
         if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
           yield { content: event.delta.text, done: false };
         } else if (event.type === "message_stop") {
-          let usage: { promptTokens: number; completionTokens: number } | undefined;
+          let usage: { promptTokens: number; completionTokens: number; cacheReadTokens?: number; cacheCreationTokens?: number } | undefined;
           try {
             const msg = await stream.finalMessage();
             if (msg?.usage) {
-              usage = { promptTokens: msg.usage.input_tokens, completionTokens: msg.usage.output_tokens };
+              const u = msg.usage as unknown as Record<string, number>;
+              const cacheRead = u.cache_read_input_tokens ?? 0;
+              const cacheCreation = u.cache_creation_input_tokens ?? 0;
+              usage = {
+                promptTokens: msg.usage.input_tokens,
+                completionTokens: msg.usage.output_tokens,
+                ...(cacheRead > 0 ? { cacheReadTokens: cacheRead } : {}),
+                ...(cacheCreation > 0 ? { cacheCreationTokens: cacheCreation } : {}),
+              };
+              if (cacheRead > 0) recordPromptCacheHit(cacheRead);
+              if (cacheCreation > 0) recordPromptCacheCreation(cacheCreation);
             }
           } catch {
             // Usage stats unavailable

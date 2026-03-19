@@ -102,9 +102,9 @@ export class MemoryRetrievalNode {
           const globalStore = this.globalManager.getPatternStore();
           const queryVector = (await this.embedder.generate([userGoal]))[0] ?? [];
           if (globalStore && queryVector.length > 0) {
-            globalPatterns = await globalStore.search(queryVector, 5);
+            globalPatterns = await globalStore.search(queryVector, 3);
           }
-          const rawLessons = await this.globalManager.searchLessons(queryVector, 5);
+          const rawLessons = await this.globalManager.searchLessons(queryVector, 3);
           globalLessons = rawLessons.map((l) => ({ text: l.text }));
         } catch (err) {
           log(`Global memory query failed: ${err}`);
@@ -114,17 +114,17 @@ export class MemoryRetrievalNode {
         const sessionIds = new Set(successPatterns.map((p) => p.id));
         globalPatterns = globalPatterns.filter((p) => !sessionIds.has(p.id));
 
-        // Cap total: 5 patterns + 5 lessons
-        const allLessons = globalLessons.map((l) => l.text).slice(0, 5);
+        // Cap total: 3 patterns + 3 lessons
+        const allLessons = globalLessons.map((l) => l.text).slice(0, 3);
 
         if (globalPatterns.length > 0 || globalLessons.length > 0) {
           memoriesLines.push("\n## Global Knowledge (Cross-Session):");
-          for (const pattern of globalPatterns.slice(0, 5 - successPatterns.length)) {
+          for (const pattern of globalPatterns.slice(0, 3 - successPatterns.length)) {
             const conf = Math.round(pattern.confidence * 100);
-            memoriesLines.push(`- [Global] Task: "${pattern.taskDescription.slice(0, 60)}" | Approach: ${pattern.approach.slice(0, 100)} | Confidence: ${conf}%`);
+            memoriesLines.push(`pattern=${pattern.taskDescription.slice(0, 40)} approach=${pattern.approach.slice(0, 70)} conf=${conf}%`);
           }
           for (const lesson of allLessons) {
-            memoriesLines.push(`- [Global Lesson] ${lesson.slice(0, 120)}`);
+            memoriesLines.push(`lesson=${lesson.slice(0, 80)}`);
           }
         }
       }

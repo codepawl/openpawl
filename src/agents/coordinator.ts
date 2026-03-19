@@ -11,6 +11,7 @@ import type { WorkerAdapter } from "../adapters/worker-adapter.js";
 import { UniversalWorkerAdapter } from "../adapters/worker-adapter.js";
 import { resolveModelForAgent } from "../core/model-config.js";
 import { coordinatorEvents } from "../core/coordinator-events.js";
+import { compressIfLarge } from "../token-opt/payload-compressor.js";
 
 function log(msg: string): void {
   if (isDebugMode()) {
@@ -94,8 +95,11 @@ ${ancestralLessons.map((l, i) => `  ${i + 1}. ${l}`).join("\n")}
         ? `\n${projectContext}`
         : "";
 
-    const preferencesBlock = preferencesContext
-        ? `\n\n## User Preferences (from past projects - MUST ADHERE TO THESE):\n${preferencesContext}\n\nIMPORTANT: Follow these preferences exactly when decomposing the goal and assigning tasks.`
+    const compressedPreferences = preferencesContext
+        ? compressIfLarge(preferencesContext, 1500).text
+        : "";
+    const preferencesBlock = compressedPreferences
+        ? `\n\n## User Preferences (from past projects - MUST ADHERE TO THESE):\n${compressedPreferences}\n\nIMPORTANT: Follow these preferences exactly when decomposing the goal and assigning tasks.`
         : "";
 
     const prompt = `You are a team coordinator. Break this goal into 3-6 concrete subtasks.

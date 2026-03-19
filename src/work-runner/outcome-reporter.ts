@@ -7,6 +7,7 @@ import { logger } from "../core/logger.js";
 import { getTrafficController } from "../core/traffic-control.js";
 import { getLlmCache } from "../core/llm-cache.js";
 import type { BotDefinition } from "../core/bot-definitions.js";
+import { formatTokenOptSummary } from "../token-opt/stats.js";
 
 export function getBotName(botId: string, team: BotDefinition[]): string {
     const bot = team.find((b) => b.id === botId);
@@ -117,6 +118,12 @@ export function printSingleRunSummary(
         lines.push("");
         lines.push("Warnings:");
         warnings.forEach((w) => lines.push(`  ⚠ ${w}`));
+    }
+
+    const tokenOptLine = formatTokenOptSummary();
+    if (tokenOptLine) {
+        lines.push("");
+        lines.push(tokenOptLine);
     }
 
     logger.plain(lines.join("\n"));

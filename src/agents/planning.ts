@@ -14,6 +14,7 @@ import { getCanvasTelemetry } from "../core/canvas-telemetry.js";
 import type { AgentProfile } from "./profiles/types.js";
 import { formatProfilesForPrompt } from "./profiles/prompt.js";
 import { withDecisionContext } from "../journal/prompt.js";
+import { compressIfLarge } from "../token-opt/payload-compressor.js";
 
 function log(msg: string): void {
   if (isDebugMode()) {
@@ -120,7 +121,9 @@ export class SprintPlanningNode {
         ? `\n\n## Lessons from Prior Runs:\n${lessons.map((l, i) => `${i + 1}. ${l}`).join("\n")}`
         : "";
 
-    const memoryBlock = memoriesContext ? `\n\n${memoriesContext}` : "";
+    const memoryBlock = memoriesContext
+      ? `\n\n${compressIfLarge(memoriesContext).text}`
+      : "";
     const profileBlock = formatProfilesForPrompt(this.profiles);
 
     // Load relevant past decisions for context injection
