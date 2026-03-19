@@ -14,6 +14,7 @@ import {
 import pc from "picocolors";
 import type { ProviderConfigEntry } from "../../core/global-config.js";
 import { randomPhrase } from "../../utils/spinner-phrases.js";
+import { PROVIDER_CATALOG } from "../../providers/provider-catalog.js";
 
 export interface WizardState {
     providerEntries: ProviderConfigEntry[];
@@ -37,25 +38,46 @@ export function handleCancel<T>(v: T): T {
 
 type ProviderType = ProviderConfigEntry["type"];
 
-const PROVIDER_CHOICES: Array<{ value: ProviderType; label: string; hint?: string }> = [
+const PROVIDER_CHOICES: Array<{ value: string; label: string; hint?: string }> = [
+    // Subscription plans (first — users already pay for these)
+    { value: "chatgpt", label: "ChatGPT Plus/Pro", hint: "OAuth [officially supported by OpenAI]" },
+    { value: "copilot", label: "GitHub Copilot", hint: "Device OAuth [officially supported]" },
+    { value: "anthropic-sub", label: "Claude Pro/Max", hint: "setup-token [ToS gray area]" },
+    // API keys
     { value: "anthropic", label: "Anthropic (Claude)", hint: "Recommended \u00b7 Best quality" },
-    { value: "openai", label: "OpenAI (GPT-4o)", hint: "Great quality" },
-    { value: "openrouter", label: "OpenRouter", hint: "100+ models \u00b7 Mix of prices" },
-    { value: "ollama", label: "Ollama", hint: "Free \u00b7 Runs locally \u00b7 No internet needed" },
-    { value: "deepseek", label: "DeepSeek", hint: "Cheap + fast" },
+    { value: "openai", label: "OpenAI (GPT)", hint: "Great quality" },
+    { value: "gemini", label: "Google Gemini", hint: "API key [free tier available]" },
+    { value: "grok", label: "xAI Grok", hint: "2M context, real-time X" },
+    { value: "mistral", label: "Mistral AI", hint: "EU data residency" },
+    { value: "deepseek", label: "DeepSeek", hint: "Cheapest frontier" },
     { value: "groq", label: "Groq", hint: "Fastest inference" },
+    { value: "cerebras", label: "Cerebras", hint: "Extreme throughput" },
+    { value: "together", label: "Together AI", hint: "100+ open models, $100 free" },
+    { value: "fireworks", label: "Fireworks AI", hint: "Fast open model serving" },
+    { value: "openrouter", label: "OpenRouter", hint: "200+ models, one key" },
+    { value: "perplexity", label: "Perplexity", hint: "Web-grounded search" },
+    { value: "moonshot", label: "Moonshot AI (Kimi)", hint: "Kimi K2.5" },
+    { value: "zai", label: "Z.AI (GLM / Zhipu)", hint: "GLM-5" },
+    { value: "minimax", label: "MiniMax", hint: "1M context" },
+    { value: "cohere", label: "Cohere", hint: "RAG specialist" },
+    // OpenCode
+    { value: "opencode-zen", label: "OpenCode Zen", hint: "Curated frontier models" },
+    { value: "opencode-go", label: "OpenCode Go", hint: "Curated open models ($10/mo)" },
+    // Cloud
+    { value: "bedrock", label: "AWS Bedrock", hint: "IAM credentials" },
+    { value: "vertex", label: "Google Vertex AI", hint: "Service account" },
+    { value: "azure", label: "Azure OpenAI", hint: "API key + endpoint" },
+    // Local
+    { value: "ollama", label: "Ollama", hint: "Free \u00b7 Runs locally \u00b7 No key" },
+    { value: "lmstudio", label: "LM Studio", hint: "Free \u00b7 Runs locally \u00b7 No key" },
     { value: "custom", label: "Custom", hint: "Any OpenAI-compatible API" },
 ];
 
-const DEFAULT_MODELS: Record<ProviderType, string> = {
-    anthropic: "claude-sonnet-4-20250514",
-    openai: "gpt-4o",
-    openrouter: "anthropic/claude-sonnet-4-20250514",
-    ollama: "llama3.1",
-    deepseek: "deepseek-chat",
-    groq: "llama-3.3-70b-versatile",
-    custom: "",
-};
+/** Get default model for a provider from the catalog, with fallbacks for legacy types */
+function getDefaultModel(providerType: string): string {
+    const meta = PROVIDER_CATALOG[providerType];
+    return meta?.models[0]?.id ?? "";
+}
 
 async function testOllamaConnection(baseURL: string): Promise<boolean> {
     const s = spinner();
@@ -81,9 +103,9 @@ async function promptProviderEntry(): Promise<ProviderConfigEntry> {
             message: "Choose your AI provider\n  " + pc.dim("Tip: Not sure? Pick Anthropic \u2014 it's what TeamClaw was built and tested with."),
             options: PROVIDER_CHOICES,
         }),
-    ) as ProviderType;
+    ) as string;
 
-    const entry: ProviderConfigEntry = { type: providerType };
+    const entry: ProviderConfigEntry = { type: providerType as ProviderType };
 
     if (providerType === "ollama") {
         console.log([
@@ -215,7 +237,7 @@ async function promptProviderEntry(): Promise<ProviderConfigEntry> {
     }
 
     // Model override
-    const defaultModel = DEFAULT_MODELS[providerType] || "";
+    const defaultModel = getDefaultModel(providerType) || "";
     const modelInput = handleCancel(
         await text({
             message: `Model override (leave empty for default${defaultModel ? `: ${defaultModel}` : ""}):`,
@@ -232,7 +254,7 @@ async function promptProviderEntry(): Promise<ProviderConfigEntry> {
 
 function formatProviderLabel(entry: ProviderConfigEntry, index: number): string {
     const name = entry.name || entry.type;
-    const model = entry.model || DEFAULT_MODELS[entry.type] || "default";
+    const model = entry.model || getDefaultModel(entry.type) || "default";
     const keyStatus = entry.apiKey ? "key set" : entry.type === "ollama" ? "local" : "no key";
     return `Provider ${index + 1}: ${pc.cyan(name)} (model: ${model}, ${keyStatus})`;
 }

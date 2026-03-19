@@ -287,7 +287,7 @@ export function normalizeGlobalConfig(input: Partial<TeamClawGlobalConfig>): Tea
           ...(typeof v.baseURL === "string" && v.baseURL.trim() ? { baseURL: v.baseURL.trim() } : {}),
           ...(typeof v.model === "string" && v.model.trim() ? { model: v.model.trim() } : {}),
           ...(typeof v.name === "string" && v.name.trim() ? { name: v.name.trim() } : {}),
-          ...(typeof v.authMethod === "string" ? { authMethod: v.authMethod } : {}),
+          ...(typeof v.authMethod === "string" ? { authMethod: v.authMethod as ProviderConfigEntry["authMethod"] } : {}),
           ...(typeof v.oauthToken === "string" && v.oauthToken.trim() ? { oauthToken: v.oauthToken.trim() } : {}),
           ...(typeof v.refreshToken === "string" && v.refreshToken.trim() ? { refreshToken: v.refreshToken.trim() } : {}),
           ...(typeof v.tokenExpiry === "number" ? { tokenExpiry: v.tokenExpiry } : {}),

@@ -44,16 +44,13 @@ import { stepTeam } from "./setup/team-builder.js";
 import { stepCompositionMode } from "./setup/composition-mode.js";
 import type { CompositionWizardState } from "./setup/composition-mode.js";
 
-// Default models per provider type for the model selection step
-const PROVIDER_DEFAULT_MODELS: Record<string, string> = {
-    anthropic: "claude-sonnet-4-20250514",
-    openai: "gpt-4o",
-    openrouter: "anthropic/claude-sonnet-4-20250514",
-    ollama: "llama3.1",
-    deepseek: "deepseek-chat",
-    groq: "llama-3.3-70b-versatile",
-    custom: "",
-};
+import { PROVIDER_CATALOG } from "../providers/provider-catalog.js";
+
+/** Get default model for a provider from the catalog */
+function getDefaultModelForProvider(providerType: string): string {
+    const meta = PROVIDER_CATALOG[providerType];
+    return meta?.models[0]?.id ?? "";
+}
 
 // ---------------------------------------------------------------------------
 // Step 2: Workspace
@@ -318,7 +315,7 @@ async function stepModel(state: WizardState): Promise<void> {
     const firstProvider = state.providerEntries[0];
     const providerType = firstProvider?.type ?? "anthropic";
     const providerModel = firstProvider?.model;
-    const defaultModel = providerModel || PROVIDER_DEFAULT_MODELS[providerType] || "";
+    const defaultModel = providerModel || getDefaultModelForProvider(providerType) || "";
 
     let modelOptions: Array<{ value: string; label: string; hint?: string }> | null = null;
     let defaultModelLabel = "";
@@ -503,7 +500,7 @@ export async function runSetup(): Promise<void> {
     const providerSummary = state.providerEntries
         .map((p, i) => {
             const name = p.name || p.type;
-            const model = p.model || PROVIDER_DEFAULT_MODELS[p.type] || "default";
+            const model = p.model || getDefaultModelForProvider(p.type) || "default";
             return `Provider ${i + 1}: ${name} (${model})`;
         })
         .join("\n            ");
