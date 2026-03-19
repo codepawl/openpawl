@@ -1,5 +1,26 @@
+import {
+  select,
+  password,
+  text,
+  confirm,
+  note,
+  spinner,
+  isCancel,
+  cancel,
+} from "@clack/prompts";
+import {
+  PROVIDER_CATALOG,
+  getProvidersByCategory,
+  type ProviderMeta,
+} from "../providers/provider-catalog.js";
+import {
+  readGlobalConfig,
+  readGlobalConfigWithDefaults,
+  writeGlobalConfig,
+  type ProviderConfigEntry,
+} from "../core/global-config.js";
+import { validateApiKeyFormat, maskApiKey } from "../core/errors.js";
 import { getGlobalProviderManager } from "../providers/provider-factory.js";
-import { readGlobalConfig, type ProviderConfigEntry } from "../core/global-config.js";
 import { logger } from "../core/logger.js";
 import pc from "picocolors";
 
@@ -9,6 +30,25 @@ const ENV_KEYS: Record<string, string> = {
   OPENROUTER_API_KEY: "openrouter",
   DEEPSEEK_API_KEY: "deepseek",
   GROQ_API_KEY: "groq",
+  GOOGLE_API_KEY: "gemini",
+  GEMINI_API_KEY: "gemini",
+  XAI_API_KEY: "grok",
+  MISTRAL_API_KEY: "mistral",
+  CEREBRAS_API_KEY: "cerebras",
+  TOGETHER_API_KEY: "together",
+  TOGETHER_AI_API_KEY: "together",
+  FIREWORKS_API_KEY: "fireworks",
+  PERPLEXITY_API_KEY: "perplexity",
+  MOONSHOT_API_KEY: "moonshot",
+  ZAI_API_KEY: "zai",
+  ZHIPU_API_KEY: "zai",
+  MINIMAX_API_KEY: "minimax",
+  COHERE_API_KEY: "cohere",
+  OPENCODE_API_KEY: "opencode-zen",
+  OPENCODE_GO_API_KEY: "opencode-go",
+  AZURE_OPENAI_API_KEY: "azure",
+  GITHUB_TOKEN: "copilot",
+  AWS_ACCESS_KEY_ID: "bedrock",
 };
 
 export async function runProvidersCommand(args: string[]): Promise<void> {
@@ -19,12 +59,18 @@ export async function runProvidersCommand(args: string[]): Promise<void> {
     logger.plain("");
     logger.plain("Subcommands:");
     logger.plain("  list     Show configured providers and status");
+    logger.plain("  add      Add a new provider interactively");
     logger.plain("  test     Test each provider in the chain");
     return;
   }
 
   if (sub === "list") {
     await listProviders();
+    return;
+  }
+
+  if (sub === "add") {
+    await addProvider(args.slice(1));
     return;
   }
 
@@ -124,4 +170,372 @@ async function testProviders(): Promise<void> {
       logger.plain(`  ${i + 1}. ${p.name}`);
     });
   }
+}
+
+// ── Add provider ─────────────────────────────────────────────────────────
+
+function handleCancel<T>(v: T): T {
+  if (isCancel(v)) {
+    cancel("Cancelled.");
+    process.exit(0);
+  }
+  return v;
+}
+
+async function addProvider(args: string[]): Promise<void> {
+  const directId = args[0];
+  let selectedId: string;
+
+  if (directId && PROVIDER_CATALOG[directId]) {
+    selectedId = directId;
+  } else {
+    const categories = [
+      { key: "subscription" as const, emoji: "\u{1F3AB}", label: "Subscription plans" },
+      { key: "apikey" as const, emoji: "\u{1F511}", label: "API keys (pay per token)" },
+      { key: "opencode" as const, emoji: "\u{1F7E2}", label: "OpenCode subscriptions" },
+      { key: "cloud" as const, emoji: "\u2601\uFE0F", label: "Cloud credentials" },
+      { key: "local" as const, emoji: "\u{1F3E0}", label: "Local (free, private)" },
+    ];
+
+    const options: Array<{ value: string; label: string; hint?: string }> = [];
+    for (const cat of categories) {
+      const providers = getProvidersByCategory(cat.key);
+      for (const [id, meta] of providers) {
+        options.push({
+          value: id,
+          label: `${cat.emoji} ${id.padEnd(16)} ${meta.menuLabel}`,
+          hint: meta.menuHint,
+        });
+      }
+    }
+
+    selectedId = handleCancel(
+      await select({ message: "How do you want to add a provider?", options }),
+    ) as string;
+  }
+
+  const meta = PROVIDER_CATALOG[selectedId]!;
+
+  // Show warning if present
+  if (meta.warning) {
+    console.log(`\n${meta.warning}\n`);
+    const accepted = handleCancel(
+      await confirm({ message: "Do you understand and want to proceed?", initialValue: false }),
+    ) as boolean;
+    if (!accepted) {
+      cancel("Cancelled.");
+      return;
+    }
+  }
+
+  const entry: ProviderConfigEntry = { type: selectedId as ProviderConfigEntry["type"] };
+
+  // Auth-specific prompts
+  if (meta.authMethod === "apikey") {
+    await promptApiKey(entry, selectedId, meta);
+  } else if (meta.authMethod === "local") {
+    await promptLocalProvider(entry, selectedId, meta);
+  } else if (meta.authMethod === "device-oauth" && selectedId === "copilot") {
+    await promptCopilotAuth(entry);
+  } else if (meta.authMethod === "setup-token") {
+    await promptSetupToken(entry);
+  } else if (meta.authMethod === "credentials" && selectedId === "bedrock") {
+    await promptBedrockAuth(entry);
+  } else if (meta.authMethod === "credentials" && selectedId === "vertex") {
+    await promptVertexAuth(entry);
+  } else if (meta.authMethod === "oauth") {
+    note("OAuth flow will open your browser to authenticate.", "OAuth");
+    logger.plain(pc.yellow("  OAuth flow not yet implemented in CLI. Coming soon."));
+    logger.plain(pc.dim("  Workaround: use API key instead."));
+    return;
+  }
+
+  // Model selection
+  if (meta.models.length > 0) {
+    const modelOptions = [
+      ...meta.models.map((m) => ({ value: m.id, label: m.label, hint: m.hint })),
+      { value: "__custom__", label: "Other (enter manually)" },
+    ];
+    const modelChoice = handleCancel(
+      await select({ message: "Choose a model:", options: modelOptions }),
+    ) as string;
+    if (modelChoice === "__custom__") {
+      const custom = handleCancel(
+        await text({
+          message: "Enter model name:",
+          placeholder: meta.models[0]?.id ?? "model-name",
+        }),
+      ) as string;
+      entry.model = custom.trim();
+    } else {
+      entry.model = modelChoice;
+    }
+  }
+
+  // Save to config
+  const config = readGlobalConfigWithDefaults();
+  const providers = config.providers ?? [];
+  const filtered = providers.filter((p) => p.type !== entry.type);
+  filtered.push(entry);
+  config.providers = filtered;
+  writeGlobalConfig(config);
+
+  logger.plain(`\n${pc.green("\u2713")} Provider ${pc.bold(meta.name)} added successfully.`);
+  if (entry.model) logger.plain(`  Model: ${entry.model}`);
+  logger.plain(pc.dim("  Run: teamclaw providers test"));
+}
+
+async function promptApiKey(
+  entry: ProviderConfigEntry,
+  providerId: string,
+  meta: ProviderMeta,
+): Promise<void> {
+  // Check env vars first
+  for (const envKey of meta.envKeys) {
+    const envVal = process.env[envKey];
+    if (envVal) {
+      logger.plain(`  Found ${pc.bold(envKey)} in environment: ${pc.dim(maskApiKey(envVal))}`);
+      const useEnv = handleCancel(
+        await confirm({ message: `Use ${envKey} from environment?`, initialValue: true }),
+      ) as boolean;
+      if (useEnv) {
+        entry.apiKey = envVal;
+        return;
+      }
+    }
+  }
+
+  // Show key URL
+  if (meta.keyUrl) {
+    logger.plain(`  Get your API key at: ${pc.cyan(meta.keyUrl)}`);
+  }
+  if (meta.keyPrefix) {
+    logger.plain(pc.dim(`  Key starts with: ${meta.keyPrefix}`));
+  }
+
+  const key = handleCancel(
+    await password({ message: `Enter your ${meta.name} API key:` }),
+  ) as string;
+
+  const trimmed = key.trim();
+  const validation = validateApiKeyFormat(providerId, trimmed);
+  if (!validation.valid) {
+    logger.plain(pc.yellow(`  Warning: ${validation.hint}`));
+    const proceed = handleCancel(
+      await confirm({ message: "Use this key anyway?", initialValue: false }),
+    ) as boolean;
+    if (!proceed) {
+      cancel("Cancelled.");
+      process.exit(0);
+    }
+  }
+
+  entry.apiKey = trimmed;
+}
+
+async function promptLocalProvider(
+  entry: ProviderConfigEntry,
+  providerId: string,
+  meta: ProviderMeta,
+): Promise<void> {
+  const defaultUrl = meta.baseURL ?? (providerId === "ollama" ? "http://localhost:11434/v1" : "http://localhost:1234/v1");
+
+  const url = handleCancel(
+    await text({
+      message: `Enter ${meta.name} URL:`,
+      placeholder: defaultUrl,
+      defaultValue: defaultUrl,
+    }),
+  ) as string;
+
+  entry.baseURL = url.trim();
+
+  // Probe endpoint
+  const s = spinner();
+  s.start(`Checking ${meta.name}...`);
+  try {
+    const probeUrl = providerId === "ollama"
+      ? entry.baseURL.replace(/\/v1$/, "/api/tags")
+      : `${entry.baseURL}/models`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2000);
+    const res = await fetch(probeUrl, { signal: controller.signal });
+    clearTimeout(timeout);
+    if (res.ok) {
+      s.stop(`${meta.name} is running`);
+    } else {
+      s.stop(`${meta.name} responded with ${res.status}`);
+      logger.plain(pc.yellow("  Provider may not be ready. You can still save and try later."));
+    }
+  } catch {
+    s.stop(`${meta.name} not reachable`);
+    logger.plain(pc.yellow(`  Could not connect to ${entry.baseURL}`));
+    logger.plain(pc.dim(`  Make sure ${meta.name} is running and try again.`));
+  }
+}
+
+async function promptCopilotAuth(entry: ProviderConfigEntry): Promise<void> {
+  entry.authMethod = "device-oauth";
+
+  // Check GITHUB_TOKEN
+  const ghToken = process.env.GITHUB_TOKEN;
+  if (ghToken) {
+    logger.plain(`  Found ${pc.bold("GITHUB_TOKEN")} in environment: ${pc.dim(maskApiKey(ghToken))}`);
+    const useEnv = handleCancel(
+      await confirm({ message: "Use GITHUB_TOKEN from environment?", initialValue: true }),
+    ) as boolean;
+    if (useEnv) {
+      entry.githubToken = ghToken;
+      return;
+    }
+  }
+
+  // Run device flow
+  const { runCopilotDeviceFlow, pollCopilotDeviceToken } = await import(
+    "../providers/copilot-provider.js"
+  );
+
+  const s = spinner();
+  s.start("Starting GitHub device flow...");
+
+  let deviceData: { device_code: string; user_code: string; verification_uri: string; interval?: number };
+  try {
+    const raw = await runCopilotDeviceFlow();
+    deviceData = JSON.parse(raw);
+    s.stop("Device flow started");
+  } catch (err) {
+    s.stop("Failed to start device flow");
+    logger.plain(pc.red(`  Error: ${err instanceof Error ? err.message : String(err)}`));
+    return;
+  }
+
+  note(
+    `Open: ${pc.cyan(deviceData.verification_uri)}\nEnter code: ${pc.bold(deviceData.user_code)}`,
+    "GitHub Device Auth",
+  );
+
+  const pollS = spinner();
+  pollS.start("Waiting for authorization...");
+
+  const interval = (deviceData.interval ?? 5) * 1000;
+  const maxAttempts = 60;
+  let token: string | null = null;
+
+  for (let i = 0; i < maxAttempts; i++) {
+    await new Promise((r) => setTimeout(r, interval));
+    try {
+      token = await pollCopilotDeviceToken(deviceData.device_code);
+      if (token) break;
+    } catch {
+      // Keep polling
+    }
+  }
+
+  if (token) {
+    pollS.stop("Authorized");
+    entry.githubToken = token;
+  } else {
+    pollS.stop("Authorization timed out");
+    logger.plain(pc.yellow("  Device flow timed out. Please try again."));
+  }
+}
+
+async function promptSetupToken(entry: ProviderConfigEntry): Promise<void> {
+  entry.authMethod = "setup-token";
+
+  note(
+    "Run this command in another terminal:\n" +
+      `  ${pc.cyan("claude setup-token")}\n\n` +
+      "Then paste the token below.",
+    "Claude Pro/Max Setup",
+  );
+
+  const token = handleCancel(
+    await password({ message: "Paste setup token:" }),
+  ) as string;
+
+  entry.setupToken = token.trim();
+}
+
+async function promptBedrockAuth(entry: ProviderConfigEntry): Promise<void> {
+  entry.authMethod = "credentials";
+
+  // Check env vars
+  const accessKey = process.env.AWS_ACCESS_KEY_ID;
+  const secretKey = process.env.AWS_SECRET_ACCESS_KEY;
+  const region = process.env.AWS_DEFAULT_REGION ?? process.env.AWS_REGION;
+
+  if (accessKey && secretKey) {
+    logger.plain(`  Found AWS credentials in environment`);
+    logger.plain(`    AWS_ACCESS_KEY_ID: ${pc.dim(maskApiKey(accessKey))}`);
+    if (region) logger.plain(`    Region: ${pc.dim(region)}`);
+
+    const useEnv = handleCancel(
+      await confirm({ message: "Use AWS credentials from environment?", initialValue: true }),
+    ) as boolean;
+    if (useEnv) {
+      entry.accessKeyId = accessKey;
+      entry.secretAccessKey = secretKey;
+      if (region) entry.region = region;
+      return;
+    }
+  }
+
+  const ak = handleCancel(
+    await text({ message: "AWS Access Key ID:", placeholder: "AKIA..." }),
+  ) as string;
+  entry.accessKeyId = ak.trim();
+
+  const sk = handleCancel(
+    await password({ message: "AWS Secret Access Key:" }),
+  ) as string;
+  entry.secretAccessKey = sk.trim();
+
+  const reg = handleCancel(
+    await text({ message: "AWS Region:", placeholder: "us-east-1", defaultValue: "us-east-1" }),
+  ) as string;
+  entry.region = reg.trim();
+}
+
+async function promptVertexAuth(entry: ProviderConfigEntry): Promise<void> {
+  entry.authMethod = "credentials";
+
+  // Check env
+  const saPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+  if (saPath) {
+    logger.plain(`  Found GOOGLE_APPLICATION_CREDENTIALS: ${pc.dim(saPath)}`);
+    const useEnv = handleCancel(
+      await confirm({ message: "Use existing service account credentials?", initialValue: true }),
+    ) as boolean;
+    if (useEnv) {
+      entry.serviceAccountPath = saPath;
+      const projectId = handleCancel(
+        await text({ message: "GCP Project ID:", placeholder: "my-project-id" }),
+      ) as string;
+      entry.projectId = projectId.trim();
+      const region = handleCancel(
+        await text({ message: "Region:", placeholder: "us-central1", defaultValue: "us-central1" }),
+      ) as string;
+      entry.region = region.trim();
+      return;
+    }
+  }
+
+  const sa = handleCancel(
+    await text({
+      message: "Path to service account JSON:",
+      placeholder: "/path/to/service-account.json",
+    }),
+  ) as string;
+  entry.serviceAccountPath = sa.trim();
+
+  const projectId = handleCancel(
+    await text({ message: "GCP Project ID:", placeholder: "my-project-id" }),
+  ) as string;
+  entry.projectId = projectId.trim();
+
+  const region = handleCancel(
+    await text({ message: "Region:", placeholder: "us-central1", defaultValue: "us-central1" }),
+  ) as string;
+  entry.region = region.trim();
 }
