@@ -38,7 +38,23 @@ export async function runCheck(_args: string[]): Promise<void> {
   // Config file
   const configPath = path.join(os.homedir(), ".teamclaw", "config.json");
   if (existsSync(configPath)) {
-    lines.push(`  ${pc.green("✓")}  Config       ~/.teamclaw/config.json`);
+    try {
+      const { readFileSync } = await import("node:fs");
+      const { validateConfig } = await import("./core/config-validator.js");
+      const raw = JSON.parse(readFileSync(configPath, "utf-8"));
+      const result = validateConfig(raw);
+      if (result.success) {
+        const providerCount = result.data.providers?.length ?? 0;
+        lines.push(`  ${pc.green("✓")}  Config       ~/.teamclaw/config.json ${pc.dim(`(${providerCount} provider${providerCount !== 1 ? "s" : ""})`)}`);
+      } else {
+        lines.push(`  ${pc.yellow("⚠")}  Config       ~/.teamclaw/config.json ${pc.yellow("(validation warnings)")}`);
+        for (const err of result.errors.slice(0, 3)) {
+          lines.push(`    ${pc.dim("  " + err)}`);
+        }
+      }
+    } catch {
+      lines.push(`  ${pc.yellow("⚠")}  Config       ~/.teamclaw/config.json ${pc.yellow("(could not parse)")}`);
+    }
   } else {
     lines.push(`  ${pc.red("✗")}  Config       ${pc.dim("Not found")}`);
     issues.push("No config file. Run: teamclaw setup");
@@ -119,6 +135,17 @@ export async function runCheck(_args: string[]): Promise<void> {
     if (err instanceof Error) {
       lines.push(`    ${pc.dim("              " + err.message)}`);
     }
+  }
+
+  // Langfuse
+  lines.push("");
+  lines.push("  Observability:");
+  const hasLangfuse = !!(process.env.LANGFUSE_SECRET_KEY && process.env.LANGFUSE_PUBLIC_KEY);
+  if (hasLangfuse) {
+    lines.push(`    ${pc.green("✓")}  Langfuse     ${pc.dim("Tracing active")}`);
+  } else {
+    lines.push(`    ${pc.dim("-")}  Langfuse     ${pc.dim("Not configured (optional)")}`);
+    lines.push(`    ${pc.dim("              Set LANGFUSE_SECRET_KEY + LANGFUSE_PUBLIC_KEY to enable")}`);
   }
 
   // Summary
