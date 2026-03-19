@@ -17,9 +17,6 @@ export interface TokenOptStats {
   payloadTruncations: number;
   charsSavedByTruncation: number;
 
-  // Layer 2C: Memory top-K
-  memoryItemsReduced: number;
-
   // Layer 3: Semantic cache
   semanticCacheHits: number;
   semanticCacheMisses: number;
@@ -39,7 +36,6 @@ function createEmpty(): TokenOptStats {
     cacheCreationTokens: 0,
     payloadTruncations: 0,
     charsSavedByTruncation: 0,
-    memoryItemsReduced: 0,
     semanticCacheHits: 0,
     semanticCacheMisses: 0,
     tierDowngrades: 0,
@@ -68,10 +64,6 @@ export function recordPromptCacheCreation(creationTokens: number): void {
 export function recordPayloadTruncation(charsSaved: number): void {
   stats.payloadTruncations++;
   stats.charsSavedByTruncation += charsSaved;
-}
-
-export function recordMemoryReduction(itemsReduced: number): void {
-  stats.memoryItemsReduced += itemsReduced;
 }
 
 export function recordSemanticCacheHit(): void {

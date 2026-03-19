@@ -83,19 +83,20 @@ export class SemanticCache {
       const now = Date.now();
       const results = await this.table
         .vectorSearch(vector)
+        .distanceType("cosine")
         .limit(3)
         .toArray();
 
       for (const result of results) {
         const record = result as unknown as CacheRecord & { _distance?: number };
-        // LanceDB returns L2 distance; convert to cosine similarity approximation
-        // For normalized vectors: similarity ≈ 1 - distance/2
+        // With cosine distance: 0 = identical, 2 = opposite. similarity = 1 - distance.
         const distance = record._distance ?? Infinity;
-        const similarity = 1 - distance / 2;
+        const similarity = 1 - distance;
 
         if (
           similarity >= SIMILARITY_THRESHOLD &&
           record.role === agentRole &&
+          record.model === model &&
           record.expires_at > now
         ) {
           recordSemanticCacheHit();

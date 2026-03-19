@@ -20,7 +20,8 @@ const {
 } = vi.hoisted(() => {
   const mockToArray = vi.fn().mockResolvedValue([]);
   const mockLimit = vi.fn().mockReturnValue({ toArray: mockToArray });
-  const mockVectorSearch = vi.fn().mockReturnValue({ limit: mockLimit });
+  const mockDistanceType = vi.fn().mockReturnValue({ limit: mockLimit });
+  const mockVectorSearch = vi.fn().mockReturnValue({ distanceType: mockDistanceType });
   const mockAdd = vi.fn().mockResolvedValue(undefined);
   const mockTable = {
     vectorSearch: mockVectorSearch,
@@ -165,6 +166,26 @@ describe("SemanticCache", () => {
 
     await cache.init();
     const result = await cache.lookup("test prompt", "sonnet", "worker");
+    expect(result).toBeNull();
+  });
+
+  it("returns null when model does not match", async () => {
+    const now = Date.now();
+    mockToArray.mockResolvedValue([
+      {
+        id: "sc-1",
+        role: "worker",
+        model: "claude-sonnet-4-6", // different from lookup model
+        response: "cached response",
+        created_at: now,
+        expires_at: now + 30 * 60 * 1000,
+        vector: [0.1, 0.2, 0.3],
+        _distance: 0.01,
+      },
+    ]);
+
+    await cache.init();
+    const result = await cache.lookup("test prompt", "gpt-4o-mini", "worker");
     expect(result).toBeNull();
   });
 
