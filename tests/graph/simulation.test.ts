@@ -325,7 +325,7 @@ describe("simulation.ts — TeamOrchestration", () => {
       expect(edges).toContainEqual(["sprint_planning", "system_design"]);
       expect(edges).toContainEqual(["system_design", "rfc_phase"]);
       expect(edges).toContainEqual(["rfc_phase", "coordinator"]);
-      expect(edges).toContainEqual(["coordinator", "preview_gate"]);
+      // coordinator → preview_gate is now a conditional edge (replanning loop)
       expect(edges).toContainEqual(["worker_task", "confidence_router"]);
       expect(edges).toContainEqual(["confidence_router", "worker_collect"]);
       // partial_approval → increment_cycle is now a conditional edge (rework loop)
@@ -336,6 +336,7 @@ describe("simulation.ts — TeamOrchestration", () => {
       const conditionalSources = mockAddConditionalEdges.mock.calls.map(
         (call: unknown[]) => call[0]
       );
+      expect(conditionalSources).toContain("coordinator");
       expect(conditionalSources).toContain("preview_gate");
       expect(conditionalSources).toContain("approval");
       expect(conditionalSources).toContain("worker_collect");

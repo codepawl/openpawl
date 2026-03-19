@@ -58,6 +58,27 @@ export const GoalDecompositionSchema = z.object({
 export type GoalDecomposition = z.infer<typeof GoalDecompositionSchema>;
 
 // ---------------------------------------------------------------------------
+// Feasibility Check — planner validates task decomposition
+// ---------------------------------------------------------------------------
+
+export const FeasibilityCheckSchema = z.object({
+  feasible: z.boolean().describe("Whether the decomposition is feasible as-is"),
+  issues: z
+    .array(z.string())
+    .describe("Specific problems found (empty if feasible)"),
+  suggestions: z
+    .array(z.string())
+    .describe("How to fix the decomposition (empty if feasible)"),
+  confidence: z
+    .number()
+    .min(0)
+    .max(1)
+    .describe("Confidence in the feasibility assessment (0-1)"),
+});
+
+export type FeasibilityCheck = z.infer<typeof FeasibilityCheckSchema>;
+
+// ---------------------------------------------------------------------------
 // Code Output — coder implementation result
 // ---------------------------------------------------------------------------
 

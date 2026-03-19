@@ -4,9 +4,7 @@ import {
   GoalDecompositionSchema,
   CodeReviewSchema,
   ConfidenceScoreSchema,
-  CodeOutputSchema,
-  DriftAnalysisSchema,
-  ClarityCheckSchema,
+  FeasibilityCheckSchema,
 } from "../schemas.js";
 import type {
   SprintPlan,
@@ -16,6 +14,7 @@ import type {
   CodeOutput,
   DriftAnalysis,
   ClarityCheck,
+  FeasibilityCheck,
 } from "../schemas.js";
 
 vi.mock("../../../core/logger.js", () => ({
@@ -250,6 +249,71 @@ describe("ConfidenceScoreSchema", () => {
 });
 
 // ---------------------------------------------------------------------------
+// FeasibilityCheckSchema
+// ---------------------------------------------------------------------------
+
+describe("FeasibilityCheckSchema", () => {
+  it("validates feasible plan", () => {
+    const check = {
+      feasible: true,
+      issues: [],
+      suggestions: [],
+      confidence: 0.95,
+    };
+    const result = FeasibilityCheckSchema.safeParse(check);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.feasible).toBe(true);
+      expect(result.data.issues).toHaveLength(0);
+    }
+  });
+
+  it("validates infeasible plan with issues", () => {
+    const check = {
+      feasible: false,
+      issues: [
+        "Task 'Deploy to production' requires AWS credentials not available",
+        "Task 'Send email' requires SMTP configuration",
+      ],
+      suggestions: [
+        "Replace deployment task with local build verification",
+        "Mock email sending for development",
+      ],
+      confidence: 0.85,
+    };
+    const result = FeasibilityCheckSchema.safeParse(check);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.feasible).toBe(false);
+      expect(result.data.issues).toHaveLength(2);
+      expect(result.data.suggestions).toHaveLength(2);
+    }
+  });
+
+  it("rejects confidence out of range", () => {
+    const check = {
+      feasible: true,
+      issues: [],
+      suggestions: [],
+      confidence: 1.5,
+    };
+    expect(FeasibilityCheckSchema.safeParse(check).success).toBe(false);
+  });
+
+  it("issues must be non-empty when feasible is false", () => {
+    // Schema itself doesn't enforce this, but we test the shape
+    const check = {
+      feasible: false,
+      issues: [],
+      suggestions: [],
+      confidence: 0.3,
+    };
+    const result = FeasibilityCheckSchema.safeParse(check);
+    expect(result.success).toBe(true); // Schema allows it; business logic enforces
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Type-level test — ensures all schemas export matching TypeScript types
 // ---------------------------------------------------------------------------
 
@@ -257,13 +321,13 @@ describe("All schemas export matching TypeScript types", () => {
   it("type assignments compile correctly", () => {
     // These assertions verify that the inferred types match the schemas.
     // If any schema/type pair is misaligned, this file will fail to compile.
-    const _sprintPlan: SprintPlan = {
+    void ({
       sprintGoal: "test",
       definitionOfSuccess: ["a"],
       teamAssignments: [{ role: "dev", bot: "bot_0", focus: "code" }],
-    };
+    } satisfies SprintPlan);
 
-    const _goalDecomposition: GoalDecomposition = {
+    void ({
       tasks: [
         {
           description: "task",
@@ -273,36 +337,43 @@ describe("All schemas export matching TypeScript types", () => {
           dependencies: [],
         },
       ],
-    };
+    } satisfies GoalDecomposition);
 
-    const _codeOutput: CodeOutput = {
+    void ({
       files: [{ path: "src/index.ts", content: "// code", action: "create" }],
       summary: "Created index",
-    };
+    } satisfies CodeOutput);
 
-    const _codeReview: CodeReview = {
+    void ({
       verdict: "approve",
       comments: [],
       summary: "Looks good",
-    };
+    } satisfies CodeReview);
 
-    const _driftAnalysis: DriftAnalysis = {
+    void ({
       hasDrift: false,
       severity: "none",
       driftPoints: [],
       recommendation: "Stay the course",
-    };
+    } satisfies DriftAnalysis);
 
-    const _clarityCheck: ClarityCheck = {
+    void ({
       score: 0.9,
       issues: [],
-    };
+    } satisfies ClarityCheck);
 
-    const _confidenceScore: ConfidenceScore = {
+    void ({
       score: 0.8,
       reasoning: "solid",
       risks: [],
-    };
+    } satisfies ConfidenceScore);
+
+    void ({
+      feasible: true,
+      issues: [],
+      suggestions: [],
+      confidence: 0.9,
+    } satisfies FeasibilityCheck);
 
     // If we get here, all type assignments are valid
     expect(true).toBe(true);

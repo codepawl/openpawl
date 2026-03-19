@@ -366,7 +366,15 @@ export function createWorkerTaskNode(
       if (currentStatus === "needs_rework" && reviewerFeedback) {
         const rework = buildReworkPrompt(description, reviewerFeedback, retryCount, maxRetries);
         taskDescription = rework.description;
+        // Prepend last_test_failure context from coder-tester inner loop
+        const lastFailure = state.last_test_failure ?? null;
+        if (lastFailure) {
+          taskDescription = `Your previous implementation failed tests.\nTest output: ${lastFailure}\nFix the specific issues shown. Do not rewrite from scratch unless absolutely necessary.\n\n${taskDescription}`;
+        }
+        const innerAttempt = (state.coder_tester_iterations ?? 0) + 1;
+        const innerMax = state.coder_tester_max ?? 3;
         uiMessages.push(`🔧 [${worker.bot.name}] reworking ${taskId} (${rework.uiLabel})`);
+        uiMessages.push(`🔄 Coder → Tester (attempt ${innerAttempt}/${innerMax})...`);
       } else if (currentStatus === "reviewing") {
         const existingResult = taskItem.result as Record<string, unknown> | null;
         const makerOutput = existingResult?.output ? String(existingResult.output) : "No output";
@@ -414,13 +422,30 @@ export function createWorkerTaskNode(
       let newRetryCount = retryCount;
       const deltaStats: Record<string, Record<string, number>> = {};
 
+      // Coder ↔ Tester inner loop tracking
+      let newCoderTesterIterations: number | undefined;
+      let newLastTestFailure: string | null | undefined;
+
       if (currentStatus === "reviewing" && reviewVerdict) {
         if (reviewVerdict.approved) {
           newStatus = "waiting_for_human";
           uiMessages.push(`\u0007✅ [${worker.bot.name}] approved ${taskId} - awaiting human final approval`);
+          // Reset inner loop counters on approval
+          newCoderTesterIterations = 0;
+          newLastTestFailure = null;
         } else {
           newRetryCount = retryCount + 1;
-          if (newRetryCount > maxRetries) {
+          const innerIterations = (state.coder_tester_iterations ?? 0) + 1;
+          const innerMax = state.coder_tester_max ?? 3;
+
+          if (innerIterations >= innerMax) {
+            // Max coder-tester iterations reached — escalate to failed
+            newStatus = "failed";
+            uiMessages.push(`❌ Max coder-tester iterations reached, escalating`);
+            deltaStats[assignedTo] = { tasks_failed: 1 };
+            newCoderTesterIterations = innerIterations;
+            newLastTestFailure = reviewVerdict.feedback || result.output;
+          } else if (newRetryCount > maxRetries) {
             newStatus = "failed";
             uiMessages.push(`❌ [${worker.bot.name}] failed: ${taskId}`);
             deltaStats[assignedTo] = { tasks_failed: 1 };
@@ -429,6 +454,8 @@ export function createWorkerTaskNode(
             newAssignedTo = makerBot?.id ?? assignedTo;
             newFeedback = reviewVerdict.feedback;
             uiMessages.push(`🔄 [${worker.bot.name}] rework: ${taskId}`);
+            newCoderTesterIterations = innerIterations;
+            newLastTestFailure = reviewVerdict.feedback || result.output;
           }
           // Track reworks_triggered on the reviewer
           for (const bot of Object.values(workerBots)) {
@@ -491,13 +518,23 @@ export function createWorkerTaskNode(
         cleanupAgentBranch(taskId, assignedTo);
       }
 
-      return {
+      const partialState: Partial<GraphState> = {
         task_queue: [updatedTask],
         bot_stats: deltaStats,
         messages: uiMessages,
         agent_messages: [...standupMessages, completionMsg],
         __node__: "worker_task",
       };
+
+      // Include coder-tester inner loop state when set
+      if (newCoderTesterIterations !== undefined) {
+        partialState.coder_tester_iterations = newCoderTesterIterations;
+      }
+      if (newLastTestFailure !== undefined) {
+        partialState.last_test_failure = newLastTestFailure;
+      }
+
+      return partialState;
     } catch (err) {
       // Cleanup sandbox runtime on error
       cleanupAgentBranch(taskId, botId);

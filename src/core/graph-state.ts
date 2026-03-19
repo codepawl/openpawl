@@ -149,6 +149,21 @@ export const GameStateAnnotation = Annotation.Root({
   clarified_goal: Annotation<string | null>(lastValue<string | null>(() => null)),
   goal_splits: Annotation<string[]>(lastValue<string[]>(() => [])),
 
+  // Replanning retry loop (coordinator ↔ feasibility check)
+  replanning_count: Annotation<number>(lastValue(() => 0)),
+  replanning_max: Annotation<number>(lastValue(() => 3)),
+  replanning_feedback: Annotation<string | null>(lastValue<string | null>(() => null)),
+
+  // Coder ↔ Tester inner loop tracking
+  coder_tester_iterations: Annotation<number>(lastValue(() => 0)),
+  coder_tester_max: Annotation<number>(lastValue(() => 3)),
+  last_test_failure: Annotation<string | null>(lastValue<string | null>(() => null)),
+
+  // Confidence gate retry tracking
+  confidence_retry_count: Annotation<number>(lastValue(() => 0)),
+  confidence_retry_max: Annotation<number>(lastValue(() => 2)),
+  confidence_failure_reasons: Annotation<string[]>(lastValue<string[]>(() => [])),
+
   // Send-payload fields: transient, set by Send() args during parallel worker superstep
   _send_task: Annotation<Record<string, unknown> | null>(lastValue<Record<string, unknown> | null>(() => null)),
   _send_bot_id: Annotation<string>(lastValue(() => "")),

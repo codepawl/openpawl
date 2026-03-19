@@ -290,7 +290,14 @@ export class TeamOrchestration {
       .addEdge("sprint_planning", "system_design")
       .addEdge("system_design", "rfc_phase")
       .addEdge("rfc_phase", "coordinator")
-      .addEdge("coordinator", "preview_gate")
+      .addConditionalEdges(
+        "coordinator",
+        (s) => {
+          if (s.replanning_feedback) return "coordinator";
+          return "preview_gate";
+        },
+        { coordinator: "coordinator", preview_gate: "preview_gate" }
+      )
       .addConditionalEdges(
         "preview_gate",
         (s) => {

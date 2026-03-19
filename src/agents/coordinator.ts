@@ -12,6 +12,7 @@ import { UniversalWorkerAdapter } from "../adapters/worker-adapter.js";
 import { resolveModelForAgent } from "../core/model-config.js";
 import { coordinatorEvents } from "../core/coordinator-events.js";
 import { compressIfLarge } from "../token-opt/payload-compressor.js";
+import { FeasibilityCheckSchema } from "../llm/schemas.js";
 
 function log(msg: string): void {
   if (isDebugMode()) {
@@ -47,7 +48,8 @@ export class CoordinatorAgent {
     ancestralLessons: string[] = [],
     projectContext: string = "",
     preferencesContext: string = "",
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    replanningFeedback?: string | null,
   ): Promise<Array<{ description: string; assigned_to: string; worker_tier: "light" | "heavy"; complexity: "LOW" | "MEDIUM" | "HIGH" | "ARCHITECTURE"; dependencies?: number[] }>> {
     const roleSummary: string[] = [];
     const rosterAgg = new Map<string, { count: number; descriptions: Set<string> }>();
@@ -102,10 +104,14 @@ ${ancestralLessons.map((l, i) => `  ${i + 1}. ${l}`).join("\n")}
         ? `\n\n## User Preferences (from past projects - MUST ADHERE TO THESE):\n${compressedPreferences}\n\nIMPORTANT: Follow these preferences exactly when decomposing the goal and assigning tasks.`
         : "";
 
+    const replanningBlock = replanningFeedback
+        ? `\n\n${replanningFeedback}\n\nCreate a REVISED decomposition that addresses these specific issues. Do not repeat the same approach that failed.\n`
+        : "";
+
     const prompt = `You are a team coordinator. Break this goal into 3-6 concrete subtasks.
 RETURN ONLY RAW JSON — no preamble. Start with '[' and end with ']'.
 Assign each subtask to ONE team member. Create at least one task per roster role.
-${lessonsBlock}${projectContextBlock}${preferencesBlock}
+${lessonsBlock}${projectContextBlock}${preferencesBlock}${replanningBlock}
 
 Goal: ${goal}
 
@@ -218,6 +224,60 @@ Array MUST have >= ${Math.max(3, team.length)} tasks covering all roles. No othe
     }
   }
 
+  async checkFeasibility(
+    goal: string,
+    tasks: Record<string, unknown>[],
+    signal?: AbortSignal,
+  ): Promise<{ feasible: boolean; issues: string[]; suggestions: string[]; confidence: number }> {
+    const taskSummary = tasks.map((t, i) =>
+      `${i + 1}. [${t.complexity}] ${t.description} (assigned to: ${t.assigned_to})`
+    ).join("\n");
+
+    const prompt = `Review this task decomposition for feasibility:
+
+Goal: ${goal}
+
+Tasks:
+${taskSummary}
+
+Flag any tasks that are:
+- Too vague to implement
+- Missing required dependencies
+- Contradicting each other
+- Requiring unavailable external services
+- Fundamentally misunderstanding the goal
+
+Respond with ONLY a JSON object: {"feasible": boolean, "issues": string[], "suggestions": string[], "confidence": number (0-1)}.
+If feasible, issues and suggestions should be empty arrays.`;
+
+    try {
+      const messages = [
+        { role: "system", content: "You are a technical planner. Evaluate task feasibility. Return ONLY raw JSON." },
+        { role: "user", content: prompt },
+      ];
+      const raw = await Promise.race([
+        this.llmAdapter.complete(messages, { signal }),
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () => reject(new Error("Feasibility check timed out")),
+            CoordinatorAgent.DECOMPOSITION_TIMEOUT_MS,
+          ),
+        ),
+      ]);
+
+      const parsed = parseLlmJson<Record<string, unknown>>(raw);
+      const validated = FeasibilityCheckSchema.safeParse(parsed);
+      if (validated.success) {
+        return validated.data;
+      }
+      log(`[coordinator] Feasibility check response didn't match schema, treating as feasible`);
+      return { feasible: true, issues: [], suggestions: [], confidence: 0.5 };
+    } catch (err) {
+      log(`[coordinator] Feasibility check failed: ${err instanceof Error ? err.message : String(err)}`);
+      return { feasible: true, issues: [], suggestions: [], confidence: 0.5 };
+    }
+  }
+
   async coordinateNode(state: GraphState, signal?: AbortSignal): Promise<Partial<GraphState>> {
     const team = state.team ?? [];
     const userGoal = state.user_goal;
@@ -234,10 +294,19 @@ Array MUST have >= ${Math.max(3, team.length)} tasks covering all roles. No othe
 
     if (userGoal) {
       const lessons = (state.ancestral_lessons ?? []) as string[];
-      const decomposed = await this.decomposeGoalWithLlm(userGoal, team, lessons, projectContext, preferencesContext, signal);
+      const replanningFeedback = state.replanning_feedback ?? null;
+      const replanningCount = state.replanning_count ?? 0;
+      const replanningMax = state.replanning_max ?? 3;
+
+      const decomposed = await this.decomposeGoalWithLlm(
+        userGoal, team, lessons, projectContext, preferencesContext, signal, replanningFeedback,
+      );
+
+      // Build candidate task list for feasibility check
+      const candidateTasks: Record<string, unknown>[] = [];
       for (const item of decomposed) {
         const derived = complexityMap[item.complexity] ?? complexityMap.MEDIUM;
-        taskQueue.push({
+        candidateTasks.push({
           task_id: this.nextTaskId(),
           assigned_to: item.assigned_to,
           status: "pending",
@@ -252,19 +321,71 @@ Array MUST have >= ${Math.max(3, team.length)} tasks covering all roles. No othe
           in_progress_at: null,
         });
       }
+
       // Resolve dependency indices to task_ids
-      const newTaskStart = taskQueue.length - decomposed.length;
       for (let i = 0; i < decomposed.length; i++) {
-        const task = taskQueue[newTaskStart + i];
+        const task = candidateTasks[i];
         const rawDeps = decomposed[i].dependencies ?? [];
         const resolved: string[] = [];
         for (const depIdx of rawDeps) {
           if (depIdx >= 0 && depIdx < decomposed.length && depIdx !== i) {
-            const depTask = taskQueue[newTaskStart + depIdx];
+            const depTask = candidateTasks[depIdx];
             resolved.push(depTask.task_id as string);
           }
         }
         task.dependencies = resolved;
+      }
+
+      // Feasibility check
+      const feasibility = await this.checkFeasibility(userGoal, candidateTasks, signal);
+
+      if (!feasibility.feasible) {
+        const newCount = replanningCount + 1;
+
+        if (newCount >= replanningMax) {
+          // Exhausted replanning attempts — surface to user
+          const issueList = feasibility.issues.map(i => `  - ${i}`).join("\n");
+          log(`❌ Replanning exhausted after ${newCount} attempts`);
+          return {
+            user_goal: null,
+            replanning_count: newCount,
+            replanning_feedback: null,
+            messages: [
+              `❌ Could not create a feasible plan after ${newCount} attempts.\n` +
+              `Remaining issues:\n${issueList}\n\n` +
+              `Try rephrasing your goal or breaking it into smaller steps.`,
+            ],
+            last_action: "Coordinator processed",
+            __node__: "coordinator",
+          };
+        }
+
+        // Send back for replanning with specific feedback
+        const issueList = feasibility.issues.map(i => `  - ${i}`).join("\n");
+        const suggestionList = feasibility.suggestions.map(s => `  - ${s}`).join("\n");
+        const feedback =
+          `[REPLANNING REQUIRED — ATTEMPT ${newCount}/${replanningMax}]\n` +
+          `Issues with current decomposition:\n${issueList}\n\n` +
+          `Suggestions:\n${suggestionList}`;
+
+        log(`⚠️ Plan infeasible (attempt ${newCount}/${replanningMax}), replanning`);
+
+        return {
+          // Keep user_goal set so coordinator re-decomposes on next call
+          replanning_count: newCount,
+          replanning_feedback: feedback,
+          messages: [
+            `⚠️  Plan infeasible (attempt ${newCount}/${replanningMax}):\n${issueList}\n` +
+            `🔄 Coordinator is revising the plan...`,
+          ],
+          last_action: "Coordinator processed",
+          __node__: "coordinator",
+        };
+      }
+
+      // Feasible — add tasks and proceed
+      for (const task of candidateTasks) {
+        taskQueue.push(task);
       }
 
       coordinatorEvents.emit("progress", {
@@ -277,6 +398,8 @@ Array MUST have >= ${Math.max(3, team.length)} tasks covering all roles. No othe
         user_goal: null,
         task_queue: taskQueue,
         total_tasks: decomposed.length,
+        replanning_count: 0,
+        replanning_feedback: null,
         messages: [`🎯 Coordinator: Decomposed goal into ${decomposed.length} tasks (check DOCS/PLANNING.md & DOCS/RFC.md)`],
         last_action: "Coordinator processed",
         __node__: "coordinator",

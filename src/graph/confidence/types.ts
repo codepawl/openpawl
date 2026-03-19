@@ -41,6 +41,32 @@ const _knownFlags = new Set<string>([
 
 export const KNOWN_FLAGS: ReadonlySet<string> = _knownFlags;
 
+/** Result of confidence evaluation with retryability classification. */
+export interface ConfidenceResult {
+  score: number;
+  approved: boolean;
+  reasons: string[];
+  retryable: boolean;
+}
+
+/** Patterns indicating non-retryable failures — these need human intervention. */
+export const NON_RETRYABLE_PATTERNS = [
+  "contradicts existing architecture",
+  "requires external service",
+  "security vulnerability",
+  "fundamental design",
+  "not available",
+  "outside project scope",
+] as const;
+
+/** Check if failure reasons indicate a retryable issue. */
+export function isRetryableFailure(reasons: string[]): boolean {
+  const lowerReasons = reasons.map((r) => r.toLowerCase());
+  return !lowerReasons.some((r) =>
+    NON_RETRYABLE_PATTERNS.some((pattern) => r.includes(pattern)),
+  );
+}
+
 /** Register additional confidence flags (used by custom agents). */
 export function registerConfidenceFlags(flags: string[]): void {
   for (const f of flags) _knownFlags.add(f);

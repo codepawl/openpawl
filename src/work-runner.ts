@@ -77,6 +77,8 @@ import type { SuccessPattern } from "./memory/success/types.js";
 import { GlobalMemoryManager } from "./memory/global/store.js";
 import { PromotionEngine } from "./memory/global/promoter.js";
 import { GlobalPruner } from "./memory/global/pruner.js";
+import { finalizeSprintMemories } from "./memory/realtime-promoter.js";
+import { getSprintScratchpad } from "./memory/sprint-scratchpad.js";
 
 let DEBUG_LOG_PATH = "";
 let WORK_HISTORY_LOG_PATH = "";
@@ -438,14 +440,14 @@ export async function runWork(
     logger.plain(pc.gray(`>>> Session: ${sessionSummary}`));
 
     // ---------------------------------------------------------------------------
-    // Drift detection — check goal against past decisions
+    // Pre-flight checks — drift detection + goal clarity run in parallel
     // ---------------------------------------------------------------------------
     if (effectiveGoal && canRenderSpinner) {
-        let driftRetries = 0;
-        const MAX_DRIFT_RETRIES = 3;
-        let goalToCheck = effectiveGoal;
+        // Capture narrowed goal for closures
+        const goalForChecks: string = effectiveGoal;
 
-        while (true) {
+        // Run both checks concurrently
+        const runDriftCheck = async (): Promise<import("./drift/types.js").DriftResult | null> => {
             try {
                 const { detectDrift } = await import("./drift/detector.js");
                 const { DecisionStore } = await import("./journal/store.js");
@@ -467,18 +469,102 @@ export async function runWork(
                     }
                 }
 
-                const driftResult = detectDrift(goalToCheck, decisions);
+                return detectDrift(goalForChecks, decisions);
+            } catch {
+                return null;
+            }
+        };
 
-                if (driftResult.hasDrift) {
+        const runClarityCheck = async (): Promise<import("./clarity/types.js").ClarityResult | null> => {
+            try {
+                const { analyzeClarity } = await import("./clarity/analyzer.js");
+                return analyzeClarity(goalForChecks);
+            } catch {
+                return null;
+            }
+        };
+
+        const [driftResult, clarityResult] = await Promise.all([
+            runDriftCheck(),
+            runClarityCheck(),
+        ]);
+
+        // Surface combined results if both have issues
+        const hasDriftIssues = driftResult?.hasDrift === true;
+        const hasClarityIssues = clarityResult && !clarityResult.isClear;
+
+        if (hasDriftIssues && hasClarityIssues) {
+            // Show both sets of issues together
+            const { select, text: clackText, isCancel: clackIsCancel } = await import("@clack/prompts");
+
+            logger.plain(`\n⚠️  ${pc.yellow("Goal clarity issues:")}`);
+            for (const issue of clarityResult.issues) {
+                const badge = issue.severity === "blocking"
+                    ? pc.red("[blocking]")
+                    : pc.yellow("[advisory]");
+                logger.plain(`  - ${badge} ${issue.question}`);
+            }
+
+            const icon = driftResult.severity === "hard" ? "🚨" : "⚠️";
+            logger.plain(`\n${icon} ${pc.yellow("Drift conflicts:")}`);
+            for (const conflict of driftResult.conflicts) {
+                logger.plain(`  - ${conflict.explanation}`);
+            }
+
+            const hasBlocking = clarityResult.issues.some((i) => i.severity === "blocking")
+                || driftResult.severity === "hard";
+
+            if (hasBlocking) {
+                logger.plain(pc.red("\nBlocking issues detected — must be resolved before proceeding."));
+            }
+
+            const choice = await select({
+                message: "Both clarity and drift issues found. How would you like to proceed?",
+                options: [
+                    { label: "Rephrase my goal", value: "rephrase" },
+                    { label: "Proceed anyway", value: "proceed" },
+                    { label: "Abort", value: "abort" },
+                ],
+            });
+
+            if (clackIsCancel(choice) || choice === "abort") {
+                cancel("Work session cancelled.");
+                process.exit(0);
+            }
+
+            if (choice === "rephrase") {
+                const newGoal = await clackText({
+                    message: "Enter your revised goal:",
+                    placeholder: effectiveGoal,
+                });
+                if (clackIsCancel(newGoal) || !newGoal) {
+                    cancel("Work session cancelled.");
+                    process.exit(0);
+                }
+                effectiveGoal = String(newGoal).trim();
+                logger.plain(pc.green("✓ Goal updated. Proceeding to decomposition."));
+            }
+            // choice === "proceed" → continue with original goal
+        } else {
+            // Handle drift issues only
+            if (hasDriftIssues && driftResult) {
+                let driftRetries = 0;
+                const MAX_DRIFT_RETRIES = 3;
+                let goalToCheck = effectiveGoal;
+
+                // Re-run drift detection in a loop only if user adjusts goal
+                let currentDriftResult: import("./drift/types.js").DriftResult | null = driftResult;
+
+                while (currentDriftResult?.hasDrift) {
                     const { select, text: clackText, isCancel: clackIsCancel } = await import("@clack/prompts");
 
-                    const icon = driftResult.severity === "hard" ? "🚨" : "⚠";
-                    const label = driftResult.severity === "hard" ? "Strong drift detected" : "Drift detected";
-                    logger.plain(`\n${icon} ${pc.yellow(`${label} — ${driftResult.conflicts.length} conflict(s) with past decisions`)}`);
+                    const dIcon = currentDriftResult.severity === "hard" ? "🚨" : "⚠";
+                    const dLabel = currentDriftResult.severity === "hard" ? "Strong drift detected" : "Drift detected";
+                    logger.plain(`\n${dIcon} ${pc.yellow(`${dLabel} — ${currentDriftResult.conflicts.length} conflict(s) with past decisions`)}`);
 
-                    const hasPermanent = driftResult.conflicts.some((c) => c.decision.permanent);
+                    const hasPermanent = currentDriftResult.conflicts.some((c) => c.decision.permanent);
 
-                    for (const conflict of driftResult.conflicts) {
+                    for (const conflict of currentDriftResult.conflicts) {
                         const d = conflict.decision;
                         const date = new Date(d.capturedAt).toISOString().slice(0, 10);
                         const lockIcon = d.permanent ? " 🔒" : "";
@@ -511,19 +597,27 @@ export async function runWork(
                     }
 
                     if (choice === "reconsider") {
-                        // Mark conflicting decisions as reconsidered
-                        if (embedderForDrift) {
-                            const gmRecon = new GlobalMemoryManager();
-                            await gmRecon.init(embedderForDrift);
-                            const dbRecon = gmRecon.getDb();
-                            if (dbRecon) {
-                                const reconStore = new DecisionStore();
-                                await reconStore.init(dbRecon);
-                                for (const c of driftResult.conflicts) {
-                                    await reconStore.markReconsidered(c.decision.id);
+                        try {
+                            const { DecisionStore } = await import("./journal/store.js");
+                            const { GlobalMemoryManager } = await import("./memory/global/store.js");
+                            const vmRecon = new VectorMemory(CONFIG.vectorStorePath, CONFIG.memoryBackend);
+                            await vmRecon.init();
+                            const embedderRecon = vmRecon.getEmbedder();
+                            if (embedderRecon) {
+                                const gmRecon = new GlobalMemoryManager();
+                                await gmRecon.init(embedderRecon);
+                                const dbRecon = gmRecon.getDb();
+                                if (dbRecon) {
+                                    const reconStore = new DecisionStore();
+                                    await reconStore.init(dbRecon);
+                                    for (const c of currentDriftResult.conflicts) {
+                                        await reconStore.markReconsidered(c.decision.id);
+                                    }
+                                    logger.success(`Reconsidered ${currentDriftResult.conflicts.length} past decision(s).`);
                                 }
-                                logger.success(`Reconsidered ${driftResult.conflicts.length} past decision(s).`);
                             }
+                        } catch {
+                            // Non-critical
                         }
                         break;
                     }
@@ -544,137 +638,152 @@ export async function runWork(
                         }
                         goalToCheck = String(newGoalInput).trim();
                         effectiveGoal = goalToCheck;
-                        continue; // Re-run drift detection
+
+                        // Re-run drift detection with new goal
+                        try {
+                            const { detectDrift } = await import("./drift/detector.js");
+                            const { DecisionStore } = await import("./journal/store.js");
+                            const { GlobalMemoryManager } = await import("./memory/global/store.js");
+                            const vmRe = new VectorMemory(CONFIG.vectorStorePath, CONFIG.memoryBackend);
+                            await vmRe.init();
+                            const embedderRe = vmRe.getEmbedder();
+                            let reDecisions: import("./journal/types.js").Decision[] = [];
+                            if (embedderRe) {
+                                const gmRe = new GlobalMemoryManager();
+                                await gmRe.init(embedderRe);
+                                const dbRe = gmRe.getDb();
+                                if (dbRe) {
+                                    const dStoreRe = new DecisionStore();
+                                    await dStoreRe.init(dbRe);
+                                    reDecisions = await dStoreRe.getAll();
+                                }
+                            }
+                            currentDriftResult = detectDrift(goalToCheck, reDecisions);
+                        } catch {
+                            break;
+                        }
+                        continue;
                     }
 
                     // choice === "proceed"
                     break;
-                } else {
-                    // No drift — silent continue
-                    break;
                 }
-            } catch {
-                // Drift detection must never crash work session
-                break;
             }
-        }
-    }
 
-    // ---------------------------------------------------------------------------
-    // Goal clarity check — challenge ambiguous goals before sprint planning
-    // ---------------------------------------------------------------------------
-    if (effectiveGoal && canRenderSpinner) {
-        try {
-            const { analyzeClarity } = await import("./clarity/analyzer.js");
-            const { generateQuestions } = await import("./clarity/questioner.js");
-            const { rewriteGoal } = await import("./clarity/rewriter.js");
-            const { suggestSplits } = await import("./clarity/breadth-analyzer.js");
+            // Handle clarity issues only
+            if (hasClarityIssues && clarityResult) {
+                try {
+                    const { generateQuestions } = await import("./clarity/questioner.js");
+                    const { rewriteGoal } = await import("./clarity/rewriter.js");
+                    const { suggestSplits } = await import("./clarity/breadth-analyzer.js");
+                    const { select, text: clackText, isCancel: clackIsCancel } = await import("@clack/prompts");
 
-            const clarityResult = analyzeClarity(effectiveGoal);
+                    const cIcon = clarityResult.score < 0.5 ? "🚨" : "🔍";
+                    const cLabel = clarityResult.score < 0.5
+                        ? "This goal needs clarification before the team can plan"
+                        : "This goal could be clearer";
 
-            if (clarityResult.isClear) {
-                logger.plain(pc.green("✓ Goal is clear."));
-            } else {
-                const { select, text: clackText, isCancel: clackIsCancel } = await import("@clack/prompts");
-                const icon = clarityResult.score < 0.5 ? "🚨" : "🔍";
-                const label = clarityResult.score < 0.5
-                    ? "This goal needs clarification before the team can plan"
-                    : "This goal could be clearer";
-
-                logger.plain(`\n${icon} ${pc.yellow("Goal clarity check...")}`);
-                logger.plain(pc.dim("┌─────────────────────────────────────────────────────────────┐"));
-                logger.plain(`│ ${label}`);
-                logger.plain(pc.dim("├─────────────────────────────────────────────────────────────┤"));
-                for (const issue of clarityResult.issues) {
-                    const badge = issue.severity === "blocking"
-                        ? pc.red("[blocking]")
-                        : pc.yellow("[advisory]");
-                    logger.plain(`│ ${badge} ${issue.question}`);
-                }
-                logger.plain(pc.dim("└─────────────────────────────────────────────────────────────┘"));
-
-                if (clarityResult.suggestions.length > 0) {
-                    logger.plain(pc.dim("Suggestions:"));
-                    for (const s of clarityResult.suggestions) {
-                        logger.plain(pc.dim(`  → ${s}`));
+                    logger.plain(`\n${cIcon} ${pc.yellow("Goal clarity check...")}`);
+                    logger.plain(pc.dim("┌─────────────────────────────────────────────────────────────┐"));
+                    logger.plain(`│ ${cLabel}`);
+                    logger.plain(pc.dim("├─────────────────────────────────────────────────────────────┤"));
+                    for (const issue of clarityResult.issues) {
+                        const badge = issue.severity === "blocking"
+                            ? pc.red("[blocking]")
+                            : pc.yellow("[advisory]");
+                        logger.plain(`│ ${badge} ${issue.question}`);
                     }
-                }
+                    logger.plain(pc.dim("└─────────────────────────────────────────────────────────────┘"));
 
-                const hasTooWide = clarityResult.issues.some((i) => i.type === "too_broad");
-                const options: Array<{ label: string; value: string }> = [
-                    { label: "Answer the questions — I'll clarify the goal", value: "clarify" },
-                    { label: "Proceed anyway — I want the team to interpret it", value: "proceed" },
-                    { label: "Rephrase my goal", value: "rephrase" },
-                ];
-                if (hasTooWide) {
-                    options.push({ label: "Split into focused goals", value: "split" });
-                }
-
-                const choice = await select({ message: "How would you like to proceed?", options });
-
-                if (clackIsCancel(choice)) {
-                    cancel("Work session cancelled.");
-                    process.exit(0);
-                }
-
-                if (choice === "clarify") {
-                    const questions = generateQuestions(clarityResult.issues);
-                    const answers: Array<{ issue: (typeof questions)[0]["issue"]; answer: string }> = [];
-                    for (const q of questions) {
-                        const answer = await clackText({
-                            message: q.question,
-                            placeholder: q.placeholder,
-                        });
-                        if (clackIsCancel(answer)) {
-                            cancel("Work session cancelled.");
-                            process.exit(0);
+                    if (clarityResult.suggestions.length > 0) {
+                        logger.plain(pc.dim("Suggestions:"));
+                        for (const s of clarityResult.suggestions) {
+                            logger.plain(pc.dim(`  → ${s}`));
                         }
-                        answers.push({ issue: q.issue, answer: String(answer).trim() });
                     }
-                    const clarified = rewriteGoal(effectiveGoal, answers);
-                    logger.plain(pc.bold("Clarified goal:"));
-                    logger.plain(pc.green(`"${clarified}"`));
-                    effectiveGoal = clarified;
-                    logger.plain(pc.green("✓ Goal is clear. Proceeding to decomposition."));
-                } else if (choice === "rephrase") {
-                    const newGoal = await clackText({
-                        message: "Enter your rephrased goal:",
-                        placeholder: effectiveGoal,
-                    });
-                    if (clackIsCancel(newGoal) || !newGoal) {
+
+                    const hasTooWide = clarityResult.issues.some((i) => i.type === "too_broad");
+                    const options: Array<{ label: string; value: string }> = [
+                        { label: "Answer the questions — I'll clarify the goal", value: "clarify" },
+                        { label: "Proceed anyway — I want the team to interpret it", value: "proceed" },
+                        { label: "Rephrase my goal", value: "rephrase" },
+                    ];
+                    if (hasTooWide) {
+                        options.push({ label: "Split into focused goals", value: "split" });
+                    }
+
+                    const choice = await select({ message: "How would you like to proceed?", options });
+
+                    if (clackIsCancel(choice)) {
                         cancel("Work session cancelled.");
                         process.exit(0);
                     }
-                    effectiveGoal = String(newGoal).trim();
-                    logger.plain(pc.green("✓ Goal updated. Proceeding to decomposition."));
-                } else if (choice === "split") {
-                    const breadthIssue = clarityResult.issues.find((i) => i.type === "too_broad");
-                    const domains = breadthIssue
-                        ? breadthIssue.question.match(/domains?:\s*(.+?)\./)?.[1]?.split(", ") ?? []
-                        : [];
-                    const splits = suggestSplits(effectiveGoal, domains);
-                    if (splits.length > 0) {
-                        logger.plain(pc.bold("Suggested sub-goals:"));
-                        const splitOptions = splits.map((s, i) => ({
-                            label: s,
-                            value: String(i),
-                        }));
-                        const picked = await select({
-                            message: "Pick one to run now (others saved to backlog):",
-                            options: splitOptions,
+
+                    if (choice === "clarify") {
+                        const questions = generateQuestions(clarityResult.issues);
+                        const answers: Array<{ issue: (typeof questions)[0]["issue"]; answer: string }> = [];
+                        for (const q of questions) {
+                            const answer = await clackText({
+                                message: q.question,
+                                placeholder: q.placeholder,
+                            });
+                            if (clackIsCancel(answer)) {
+                                cancel("Work session cancelled.");
+                                process.exit(0);
+                            }
+                            answers.push({ issue: q.issue, answer: String(answer).trim() });
+                        }
+                        const clarified = rewriteGoal(effectiveGoal, answers);
+                        logger.plain(pc.bold("Clarified goal:"));
+                        logger.plain(pc.green(`"${clarified}"`));
+                        effectiveGoal = clarified;
+                        logger.plain(pc.green("✓ Goal is clear. Proceeding to decomposition."));
+                    } else if (choice === "rephrase") {
+                        const newGoal = await clackText({
+                            message: "Enter your rephrased goal:",
+                            placeholder: effectiveGoal,
                         });
-                        if (!clackIsCancel(picked)) {
-                            const idx = Number(picked);
-                            effectiveGoal = splits[idx] ?? effectiveGoal;
-                            logger.plain(pc.green(`✓ Running: "${effectiveGoal}"`));
+                        if (clackIsCancel(newGoal) || !newGoal) {
+                            cancel("Work session cancelled.");
+                            process.exit(0);
+                        }
+                        effectiveGoal = String(newGoal).trim();
+                        logger.plain(pc.green("✓ Goal updated. Proceeding to decomposition."));
+                    } else if (choice === "split") {
+                        const breadthIssue = clarityResult.issues.find((i) => i.type === "too_broad");
+                        const domains = breadthIssue
+                            ? breadthIssue.question.match(/domains?:\s*(.+?)\./)?.[1]?.split(", ") ?? []
+                            : [];
+                        const splits = suggestSplits(effectiveGoal, domains);
+                        if (splits.length > 0) {
+                            logger.plain(pc.bold("Suggested sub-goals:"));
+                            const splitOptions = splits.map((s, i) => ({
+                                label: s,
+                                value: String(i),
+                            }));
+                            const picked = await select({
+                                message: "Pick one to run now (others saved to backlog):",
+                                options: splitOptions,
+                            });
+                            if (!clackIsCancel(picked)) {
+                                const idx = Number(picked);
+                                effectiveGoal = splits[idx] ?? effectiveGoal;
+                                logger.plain(pc.green(`✓ Running: "${effectiveGoal}"`));
+                            }
                         }
                     }
+                    // choice === "proceed" → continue with original goal
+                } catch {
+                    logger.warn("Clarity check interaction failed — proceeding without it.");
                 }
-                // choice === "proceed" → continue with original goal
             }
-        } catch {
-            // Clarity check must never crash work session
-            logger.warn("Clarity check failed — proceeding without it.");
+
+            // Neither has issues
+            if (!hasDriftIssues && !hasClarityIssues) {
+                if (clarityResult?.isClear) {
+                    logger.plain(pc.green("✓ Goal is clear."));
+                }
+            }
         }
     }
 
@@ -1305,6 +1414,32 @@ export async function runWork(
                             }
                         } catch (promoErr) {
                             log("warn", `Global memory promotion failed: ${promoErr}`);
+                        }
+
+                        // Finalize sprint scratchpad — confirm or reject provisional memories
+                        try {
+                            const sprintId = `work-${runId}`;
+                            const scratchpad = vmDb && vmEmbedder
+                                ? getSprintScratchpad(sprintId, vmDb, vmEmbedder)
+                                : null;
+                            const globalMgr = new GlobalMemoryManager();
+                            await globalMgr.init(vmEmbedder);
+                            const finResult = await finalizeSprintMemories(
+                                sprintId,
+                                !failed,
+                                globalMgr,
+                                scratchpad,
+                            );
+                            if ((finResult.confirmed > 0 || finResult.removed > 0) && canRenderSpinner) {
+                                if (finResult.confirmed > 0) {
+                                    logger.success(`📝 Confirmed ${finResult.confirmed} provisional memory/memories`);
+                                }
+                                if (finResult.removed > 0) {
+                                    logger.success(`🗑️ Removed ${finResult.removed} provisional memory/memories from failed sprint`);
+                                }
+                            }
+                        } catch (finErr) {
+                            log("warn", `Sprint memory finalization failed: ${finErr}`);
                         }
 
                         // Build/update agent performance profiles

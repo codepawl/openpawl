@@ -168,7 +168,9 @@ describe("createConfidenceRouterNode", () => {
         retry_count: 2,
         max_retries: 2,
       },
-    });
+      confidence_retry_count: 2,
+      confidence_retry_max: 2,
+    } as Partial<GraphState>);
     const result = router(state);
     const updatedTask = (result.task_queue as Record<string, unknown>[])?.[0];
     expect(updatedTask?.status).toBe("waiting_for_human");
