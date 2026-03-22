@@ -119,7 +119,7 @@ describe("renderWelcome", () => {
 });
 
 describe("renderInterRunSummary", () => {
-  it("renders compact summary within 5 lines", () => {
+  it("renders compact summary within 7 lines", () => {
     const output = renderInterRunSummary({
       completedRun: 1,
       nextRun: 2,
@@ -128,10 +128,10 @@ describe("renderInterRunSummary", () => {
       newLessons: 3,
     });
     const lines = output.split("\n");
-    expect(lines.length).toBeLessThanOrEqual(5);
+    expect(lines.length).toBeLessThanOrEqual(7);
     expect(output).toContain("Run 1 complete");
     expect(output).toContain("Starting Run 2");
-    expect(output).toContain("0.81");
+    expect(output).toContain("81%");
     expect(output).toContain("3 new lessons");
   });
 
@@ -143,6 +143,6 @@ describe("renderInterRunSummary", () => {
       targetConfidence: 0.87,
       newLessons: 0,
     });
-    expect(output).toContain("No new lessons");
+    expect(output).toContain("no new lessons");
   });
 });

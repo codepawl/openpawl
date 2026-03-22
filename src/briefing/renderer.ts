@@ -142,15 +142,17 @@ export function renderWelcome(): string {
 
 /** Render compact inter-run summary (max 5 lines). */
 export function renderInterRunSummary(summary: InterRunSummary): string {
-  const confStr = summary.averageConfidence.toFixed(2);
-  const targetStr = summary.targetConfidence.toFixed(2);
+  const confPct = Math.round(summary.averageConfidence * 100);
+  const targetPct = Math.round(summary.targetConfidence * 100);
+  const lessonsStr = summary.newLessons > 0
+    ? `${summary.newLessons} new lessons`
+    : "no new lessons";
   return [
-    color(pc.dim, "━".repeat(37)),
-    color(pc.cyan, `Run ${summary.completedRun} complete → Starting Run ${summary.nextRun}`),
-    `Confidence: ${confStr} → target ${targetStr}`,
-    summary.newLessons > 0
-      ? `Patterns retrieved: ${summary.newLessons} new lessons available`
-      : "No new lessons from this run",
-    color(pc.dim, "━".repeat(37)),
+    "",
+    color(pc.dim, "─".repeat(50)),
+    color(pc.cyan, `  Run ${summary.completedRun} complete`) + color(pc.dim, ` → `) + `Starting Run ${summary.nextRun}`,
+    `  Confidence: ${confPct}% → target ${targetPct}%  |  ${lessonsStr}`,
+    color(pc.dim, "─".repeat(50)),
+    "",
   ].join("\n");
 }

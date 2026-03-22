@@ -379,7 +379,7 @@ async function promptApiKey(
     if (prefix) logger.plain(`  Starts with: ${pc.dim(prefix)}`);
   } else {
     if (meta.keyUrl) {
-      logger.plain(`  Get your API key at: ${pc.cyan(meta.keyUrl)}`);
+      logger.plain(`  Get your API key at: ${pc.green(meta.keyUrl)}`);
     }
     if (meta.keyPrefix) {
       logger.plain(pc.dim(`  Key starts with: ${meta.keyPrefix}`));

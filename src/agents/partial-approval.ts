@@ -245,11 +245,24 @@ export function createPartialApprovalNode(options: {
     if (escalatedCount > 0) summaryParts.push(`→ Escalated: ${escalatedCount}`);
     const summary = `Review summary: ${summaryParts.join(" | ")}`;
 
+    // Build bot_stats delta so the run summary counts approved tasks correctly
+    const approvedBotStats: Record<string, Record<string, unknown>> = {};
+    for (const task of updatedTasks) {
+      if ((task.status as string) === "completed") {
+        const botId = (task.assigned_to as string) ?? "";
+        if (botId) {
+          if (!approvedBotStats[botId]) approvedBotStats[botId] = { tasks_completed: 0 };
+          (approvedBotStats[botId].tasks_completed as number)++;
+        }
+      }
+    }
+
     return {
       task_queue: updatedTasks,
       next_sprint_backlog: escalatedTasks,
       new_success_patterns: newPatternIds,
       approval_stats: stats,
+      bot_stats: approvedBotStats,
       messages: [...interventionMessages, summary],
       last_action: `Partial approval: ${summaryParts.join(", ")}`,
       __node__: "partial_approval",

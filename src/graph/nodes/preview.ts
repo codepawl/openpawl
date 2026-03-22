@@ -14,6 +14,7 @@ import type {
 import { estimateCost, type CostConfig } from "../preview/estimator.js";
 import { renderPreviewTable, promptPreviewAction } from "../../cli/preview.js";
 import { logger, isDebugMode } from "../../core/logger.js";
+import { coordinatorEvents } from "../../core/coordinator-events.js";
 
 function log(msg: string): void {
   if (isDebugMode()) {
@@ -138,6 +139,11 @@ export function createPreviewNode(
     );
 
     if (canRenderSpinner) {
+      coordinatorEvents.emit("progress", {
+        step: "preview_ready",
+        detail: "Sprint preview ready",
+        timestamp: Date.now(),
+      });
       renderPreviewTable(previewTasks, estimate);
 
       if (previewProvider) {

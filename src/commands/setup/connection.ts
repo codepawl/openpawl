@@ -150,7 +150,7 @@ async function promptProviderEntry(): Promise<ProviderConfigEntry> {
             `  It's completely free — no API key needed.`,
             "",
             `  Requirements:`,
-            `  \u00b7 Ollama installed: ${pc.cyan("https://ollama.ai/download")}`,
+            `  \u00b7 Ollama installed: ${pc.green("https://ollama.ai/download")}`,
             `  \u00b7 At least one model pulled: ${pc.dim("ollama pull llama3")}`,
             "",
         ].join("\n"));
@@ -173,7 +173,7 @@ async function promptProviderEntry(): Promise<ProviderConfigEntry> {
                 `  ${pc.yellow("\u26a0")} Ollama is not running at ${entry.baseURL}`,
                 "",
                 `  To install Ollama:`,
-                `    1. Download from: ${pc.cyan("https://ollama.ai/download")}`,
+                `    1. Download from: ${pc.green("https://ollama.ai/download")}`,
                 `    2. Install and open it`,
                 `    3. Pull a model: ${pc.dim("ollama pull llama3")}`,
                 `    4. Come back and run: ${pc.dim("teamclaw setup")}`,
@@ -278,7 +278,7 @@ async function promptProviderEntry(): Promise<ProviderConfigEntry> {
                     console.log(`  ${pc.dim(step)}`);
                 }
             } else if (catalogMeta?.keyUrl) {
-                console.log(`  Get your key at: ${pc.cyan(catalogMeta.keyUrl)}`);
+                console.log(`  Get your key at: ${pc.green(catalogMeta.keyUrl)}`);
             }
             if (prefix) console.log(`  Starts with: ${pc.dim(prefix)}`);
             console.log(`  ${pc.dim("Your key is stored locally in ~/.teamclaw/config.json")}`);
@@ -348,7 +348,7 @@ async function promptProviderEntry(): Promise<ProviderConfigEntry> {
                 console.log(`  ${pc.dim(step)}`);
             }
         } else if (urls?.keyUrl) {
-            console.log(`\n  Get your key at: ${pc.cyan(urls.keyUrl)}`);
+            console.log(`\n  Get your key at: ${pc.green(urls.keyUrl)}`);
         }
         if (prefix) {
             console.log(`  Starts with: ${pc.dim(prefix)}`);

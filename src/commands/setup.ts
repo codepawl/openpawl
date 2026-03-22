@@ -504,7 +504,7 @@ export async function runSetup(): Promise<void> {
             `Provider:   ${providerSummary}`,
             `Team:       ${rosterSummary}`,
             `Model:      ${state.selectedModel || "default"}`,
-            `Dashboard:  ${pc.cyan("http://localhost:9001")}`,
+            `Dashboard:  ${pc.green("http://localhost:9001")}`,
             "",
             `${pc.bold("What to do next:")}`,
             "",

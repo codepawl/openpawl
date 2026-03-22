@@ -370,10 +370,10 @@ describe("simulation.ts — TeamOrchestration", () => {
       expect(state.team).toHaveLength(2);
     });
 
-    it("pushes 'Work session started' to messages", () => {
+    it("includes run start message", () => {
       const orch = createTeamOrchestration({ team: makeTeam() });
-      const state = orch.getInitialState({});
-      expect(state.messages).toContain("Work session started");
+      const state = orch.getInitialState({ runId: 2 });
+      expect(state.messages).toContain("TeamClaw - Run 2 started");
     });
 
     it("merges initialTasks into task_queue with correct IDs", () => {
@@ -906,7 +906,7 @@ describe("simulation.ts — TeamOrchestration", () => {
       expect(result.mid_sprint_reported).toBe(true);
       expect(result.messages).toBeDefined();
       const msgs = result.messages as string[];
-      expect(msgs[0]).toContain("MID-SPRINT SUMMARY");
+      expect(msgs[0]).toContain("Sprint progress");
       expect(msgs[0]).toContain("2/4");
     });
 
@@ -1066,17 +1066,16 @@ describe("simulation.ts — TeamOrchestration", () => {
       } as unknown as Partial<GraphState>);
 
       const msg = (result.messages as string[])?.[0] ?? "";
-      expect(msg).toContain("MID-SPRINT SUMMARY");
+      expect(msg).toContain("Sprint progress");
     });
 
-    it("truncates long task descriptions to 50 chars", () => {
+    it("shows remaining count in summary", () => {
       const node = getIncrementCycleNode();
-      const longDesc = "A".repeat(100);
       const result = node({
         cycle_count: 0,
         task_queue: [
-          makeTask({ status: "completed", task_id: "T1", description: longDesc }),
-          makeTask({ status: "pending", task_id: "T2", description: "short" }),
+          makeTask({ status: "completed", task_id: "T1", description: "Done task" }),
+          makeTask({ status: "pending", task_id: "T2", description: "Pending task" }),
         ],
         total_tasks: 2,
         mid_sprint_reported: false,
@@ -1085,9 +1084,8 @@ describe("simulation.ts — TeamOrchestration", () => {
       } as unknown as Partial<GraphState>);
 
       const msg = (result.messages as string[])?.[0] ?? "";
-      // The truncated description should be 50 chars of 'A'
-      expect(msg).toContain("A".repeat(50));
-      expect(msg).not.toContain("A".repeat(51));
+      expect(msg).toContain("1/2 tasks done");
+      expect(msg).toContain("1 remaining");
     });
   });
 

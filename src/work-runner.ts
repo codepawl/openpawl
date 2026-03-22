@@ -851,9 +851,9 @@ export async function runWork(
     const selectedMemoryBackend: MemoryBackend =
         memoryConfig?.memory_backend ?? CONFIG.memoryBackend;
     if (selectedMemoryBackend === "local_json") {
-        log("info", "   Using local JSON memory backend (fast startup, no Docker).");
+        log("info", "   Using local JSON memory backend");
     } else {
-        log("info", "   Using embedded LanceDB memory backend (fast startup, no Docker).");
+        log("info", "   Using embedded LanceDB memory backend");
     }
 
     const vectorMemory = new VectorMemory(CONFIG.vectorStorePath, selectedMemoryBackend);
@@ -934,12 +934,23 @@ export async function runWork(
     };
     workerEvents.on("reasoning", reasoningListener);
 
-    // Display streaming LLM output in terminal
+    // Display streaming LLM output in terminal — single updating line
     const streamingEnabled = setupConfig.streaming?.enabled !== false && !parsed.noStream;
     const streamChunkListener = streamingEnabled && canRenderSpinner
-        ? (data: { botId: string; chunk: string }) => {
-            process.stdout.write(pc.dim(data.chunk));
-        }
+        ? (() => {
+            let lastLine = "";
+            return (data: { botId: string; chunk: string }) => {
+                const text = (lastLine + data.chunk).replace(/\r/g, "");
+                const lines = text.split("\n").filter(l => l.trim());
+                lastLine = lines.length > 0 ? lines[lines.length - 1] : "";
+                const cols = process.stdout.columns || 80;
+                const prefix = `  [${data.botId}] `;
+                const maxContent = cols - prefix.length - 1;
+                const preview = lastLine.slice(0, maxContent).replace(/[\r\n]/g, "");
+                const pad = Math.max(0, cols - prefix.length - preview.length);
+                process.stderr.write(`\r${pc.dim(prefix + preview)}${" ".repeat(pad)}`);
+            };
+        })()
         : null;
     if (streamChunkListener) workerEvents.on("stream-chunk", streamChunkListener);
 
@@ -1121,16 +1132,56 @@ export async function runWork(
             if (canRenderSpinner) {
                 const sPlan = spinner();
                 const startTime = Date.now();
-                let elapsedSeconds = 0;
                 sPlan.start(randomPhrase("plan"));
 
+                // Track cumulative token usage from LLM events
+                let totalTokens = 0;
+                let spinnerStopped = false;
+                const { llmEvents } = await import("./core/llm-events.js");
+                const { coordinatorEvents } = await import("./core/coordinator-events.js");
+
+                const formatTokens = (n: number): string =>
+                    n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+
+                const updateSpinnerMessage = (detail: string) => {
+                    const elapsed = Math.floor((Date.now() - startTime) / 1000);
+                    const tokenStr = totalTokens > 0 ? `, ${formatTokens(totalTokens)} tokens` : "";
+                    sPlan.message(`🧠 ${detail} (${elapsed}s${tokenStr})`);
+                };
+
+                const onLlmLog = (entry: { action: string; meta?: Record<string, unknown> }) => {
+                    if (entry.action === "request_end" && entry.meta) {
+                        totalTokens += ((entry.meta.promptTokens as number) ?? 0) + ((entry.meta.completionTokens as number) ?? 0);
+                    }
+                };
+                llmEvents.on("log", onLlmLog);
+
                 const heartbeatInterval = setInterval(() => {
-                    const newElapsed = Math.floor((Date.now() - startTime) / 5000) * 5;
-                    if (newElapsed > elapsedSeconds) {
-                        elapsedSeconds = newElapsed;
-                        sPlan.message(`🧠 Coordinator is decomposing the goal (${elapsedSeconds}s)`);
+                    if (!spinnerStopped) {
+                        updateSpinnerMessage("Planning");
                     }
                 }, 5000);
+
+                const stopSpinner = (msg: string) => {
+                    if (!spinnerStopped) {
+                        clearInterval(heartbeatInterval);
+                        llmEvents.off("log", onLlmLog);
+                        coordinatorEvents.off("progress", onCoordinatorProgress);
+                        sPlan.stop(msg);
+                        spinnerStopped = true;
+                    }
+                };
+
+                const onCoordinatorProgress = (data: { step: string; detail: string }) => {
+                    if (!spinnerStopped) {
+                        if (data.step === "preview_ready") {
+                            stopSpinner("Sprint preview ready");
+                        } else {
+                            updateSpinnerMessage(data.detail);
+                        }
+                    }
+                };
+                coordinatorEvents.on("progress", onCoordinatorProgress);
 
                 try {
                     let bridge: { sendNodeEvent: (n: string, s: Record<string, unknown>) => void; sendCycleStart: (c: number, m: number) => void; sendSessionComplete: () => void; sendError: (m: string) => void } | null = null;
@@ -1142,15 +1193,6 @@ export async function runWork(
                     }
 
                     let lastCycle = 0;
-                    let spinnerStopped = false;
-
-                    const stopSpinner = (msg: string) => {
-                        if (!spinnerStopped) {
-                            clearInterval(heartbeatInterval);
-                            sPlan.stop(msg);
-                            spinnerStopped = true;
-                        }
-                    };
 
                     // Nodes that run before workers — spinner is safe during these
                     const PLANNING_NODES = new Set([
@@ -1167,6 +1209,7 @@ export async function runWork(
                             maxRuns,
                             timeoutMinutes,
                             skipPreview: noPreview || runId > 1,
+                            runId,
                         })) {
                             const nodeState = chunk as Record<string, unknown>;
                             const nodeName = (nodeState.__node__ as string) ?? "unknown";
@@ -1181,8 +1224,7 @@ export async function runWork(
                             }
 
                             if (!spinnerStopped) {
-                                const elapsedNow = Math.floor((Date.now() - startTime) / 1000);
-                                sPlan.message(`🧠 ${nodeName} (${elapsedNow}s)`);
+                                updateSpinnerMessage(nodeName);
                             }
 
                             const cycle = (nodeState.cycle_count as number) ?? 0;
@@ -1201,12 +1243,12 @@ export async function runWork(
                         ? streamFn()
                         : withConsoleRedirect(streamFn))) as Record<string, unknown>;
                 } catch (error) {
-                    clearInterval(heartbeatInterval);
+                    stopSpinner("✗ Error");
                     const message =
                         error instanceof Error ? error.message : String(error);
 
                     if (sessionAbort.signal.aborted || message === "Aborted") {
-                        sPlan.stop("Work session cancelled by user.");
+                        if (!spinnerStopped) sPlan.stop("Work session cancelled by user.");
                         break;
                     }
 
@@ -1235,13 +1277,30 @@ export async function runWork(
                     throw error;
                 }
 
-                clearInterval(heartbeatInterval);
-
                 const taskQueue = (finalState.task_queue ?? []) as Record<string, unknown>[];
-                sPlan.stop(`✅ Goal decomposed into ${taskQueue.length} tasks.`);
+                if (!spinnerStopped) {
+                    stopSpinner(`✅ Goal decomposed into ${taskQueue.length} tasks.`);
+                }
 
                 const executionMessages = (finalState.messages ?? []) as string[];
                 for (const msg of executionMessages) {
+                    // Skip verbose messages that clutter the TUI
+                    if (msg.startsWith("🎤 STAND-UP")) continue;
+                    if (msg.startsWith("TeamClaw - Run")) continue;
+                    if (msg.startsWith("Work session started")) continue;
+                    if (msg.startsWith("🔄 Coder")) continue;
+
+                    // Collapse replanning detail — show header, dim the bullet points
+                    if (msg.includes("Plan infeasible") || msg.includes("Coordinator is revising")) {
+                        const lines = msg.split("\n");
+                        const header = lines[0];
+                        clackLog.warn(header);
+                        if (lines.length > 1) {
+                            clackLog.info(pc.dim(lines.slice(1).join("\n")));
+                        }
+                        continue;
+                    }
+
                     if (msg.startsWith("▶")) clackLog.step(msg);
                     else if (msg.startsWith("✅")) clackLog.success(msg);
                     else if (msg.startsWith("❌")) clackLog.error(msg);
@@ -1293,6 +1352,7 @@ export async function runWork(
                     maxRuns,
                     timeoutMinutes,
                     skipPreview: noPreview || runId > 1,
+                    runId,
                 })) {
                     const nodeState = chunk as Record<string, unknown>;
                     const nodeName = (nodeState.__node__ as string) ?? "unknown";
@@ -1309,20 +1369,12 @@ export async function runWork(
                 bridge?.sendSessionComplete();
             }
 
+            // Count from task_queue (authoritative) with bot_stats as fallback
+            const runTaskQueue = ((finalState as Record<string, unknown>).task_queue ?? []) as Record<string, unknown>[];
+            const totalDone = runTaskQueue.filter(t => (t.status as string) === "completed").length;
+            const totalFailed = runTaskQueue.filter(t => (t.status as string) === "failed").length;
             const botStats = (finalState as Record<string, unknown>)
                 .bot_stats as Record<string, Record<string, unknown>> | null;
-            const totalDone = botStats
-                ? Object.values(botStats).reduce(
-                      (s, x) => s + ((x?.tasks_completed as number) ?? 0),
-                      0,
-                  )
-                : 0;
-            const totalFailed = botStats
-                ? Object.values(botStats).reduce(
-                      (s, x) => s + ((x?.tasks_failed as number) ?? 0),
-                      0,
-                  )
-                : 0;
             lastTotalReworks = botStats
                 ? Object.values(botStats).reduce(
                       (s, x) => s + ((x?.reworks_triggered as number) ?? 0),
@@ -1358,9 +1410,7 @@ export async function runWork(
                 );
                 break;
             } else {
-                log("info", `Run ${runId} completed`);
-                log("info", `   Cycles: ${(finalState as Record<string, unknown>).cycle_count}`);
-                log("info", `   Tasks: ${totalDone} completed, ${totalFailed} failed`);
+                log("info", `Run ${runId} completed — ${totalDone} tasks done, ${totalFailed} failed, ${(finalState as Record<string, unknown>).cycle_count} cycle(s)`);
                 if (maxRuns === 1) {
                     const allWarnings = [
                         ...runWarnings,
@@ -1609,7 +1659,12 @@ export async function runWork(
     disposeAllRuntimes();
 
     workerEvents.off("reasoning", reasoningListener);
-    if (streamChunkListener) workerEvents.off("stream-chunk", streamChunkListener);
+    if (streamChunkListener) {
+        workerEvents.off("stream-chunk", streamChunkListener);
+        // Clear the single-line stream preview
+        const cols = process.stdout.columns || 80;
+        process.stderr.write(`\r${" ".repeat(cols)}\r`);
+    }
     stopGatewayTailer();
     clearSessionConfig();
     if (maxRuns > 1) {

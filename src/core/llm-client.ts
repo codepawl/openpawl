@@ -80,6 +80,7 @@ export async function generate(prompt: string, options?: GenerateOptions & { bot
     if (isStreaming) {
       // Streaming mode — yield chunks via callback
       const chunks: string[] = [];
+      let streamUsage: { promptTokens: number; completionTokens: number } | undefined;
       for await (const chunk of mgr.stream(prompt, {
         model: model || undefined,
         temperature,
@@ -95,6 +96,9 @@ export async function generate(prompt: string, options?: GenerateOptions & { bot
             timestamp: Date.now(),
           });
         }
+        if (chunk.done && chunk.usage) {
+          streamUsage = chunk.usage;
+        }
       }
       const text = chunks.join("").trim();
       const elapsedMs = Date.now() - startedAt;
@@ -106,7 +110,7 @@ export async function generate(prompt: string, options?: GenerateOptions & { bot
         model,
         botId,
         message: `Response in ${elapsedMs}ms (${text.length} chars)`,
-        meta: { elapsedMs, responseChars: text.length },
+        meta: { elapsedMs, responseChars: text.length, ...(streamUsage ?? {}) },
         timestamp: Date.now(),
       });
       trafficController.release(botId);
@@ -131,7 +135,7 @@ export async function generate(prompt: string, options?: GenerateOptions & { bot
       model,
       botId,
       message: `Response in ${elapsedMs}ms (${responseText.length} chars)`,
-      meta: { elapsedMs, responseChars: responseText.length },
+      meta: { elapsedMs, responseChars: responseText.length, ...(result.usage ?? {}) },
       timestamp: Date.now(),
     });
     if (isDebugMode()) {

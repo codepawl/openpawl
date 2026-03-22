@@ -59,7 +59,6 @@ function generateMidSprintSummary(state: GraphState): string {
     t.status === "pending" || t.status === "reviewing" || t.status === "needs_rework" || t.status === "rfc_pending"
   );
   
-  const completedList = completedTasks.map((t) => `- ${t.task_id}: ${(t.description as string)?.slice(0, 50) ?? "..."}`).join("\n");
   const remainingCount = remainingTasks.length;
   
   const botStats = state.bot_stats ?? {};
@@ -78,15 +77,7 @@ function generateMidSprintSummary(state: GraphState): string {
     vibe = "🛑 At risk — consider re-evaluating scope";
   }
   
-  return `📊 MID-SPRINT SUMMARY (50% milestone)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-✅ Tasks Completed (${completedTasks.length}/${totalTasks}):
-${completedList || "- (none yet)"}
-
-📋 Tasks Remaining: ${remainingCount}
-
-💡 Project Vibe: ${vibe}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`;
+  return `📊 Sprint progress: ${completedTasks.length}/${totalTasks} tasks done, ${remainingCount} remaining — ${vibe}`;
 }
 
 export class TeamOrchestration {
@@ -418,10 +409,11 @@ export class TeamOrchestration {
     ancestralLessons?: string[];
     projectContext?: string;
     skipPreview?: boolean;
+    runId?: number;
   } = {}): GraphState {
     const lessons = options.ancestralLessons ?? [];
     const projectContext = options.projectContext ?? "";
-    const base = initializeGameState(1, lessons) as Record<string, unknown>;
+    const base = initializeGameState(options.runId ?? 1, lessons) as Record<string, unknown>;
     const teamData = this.team.map((b) => ({
       id: b.id,
       name: b.name,
@@ -449,7 +441,6 @@ export class TeamOrchestration {
       base.task_queue = q;
     }
 
-    (base.messages as string[]).push("Work session started");
     if (options.userGoal) base.user_goal = options.userGoal;
     if (projectContext) base.project_context = projectContext;
     if (options.skipPreview) base.skip_preview = true;
@@ -466,14 +457,22 @@ export class TeamOrchestration {
     maxRuns?: number;
     timeoutMinutes?: number;
     skipPreview?: boolean;
+    runId?: number;
   } = {}): Promise<GraphState> {
     this.sessionStartTime = Date.now();
     this.sessionTimeoutMs = (options.timeoutMinutes ?? 0) * 60 * 1000;
     this.sessionMaxRuns = options.maxRuns ?? 0;
     
     const state = this.getInitialState(options);
-    const config = { configurable: { thread_id: randomUUID() } };
-    
+    // Recursion limit must exceed the worst-case node visits:
+    // 5 linear setup nodes + maxCycles × (4 coordinator + 1 preview + 3×tasks + 2 approval/increment)
+    // Use team size as upper bound for tasks per cycle, with generous padding.
+    const effectiveMaxCycles = this.sessionMaxRuns > 0
+      ? Math.min(this.sessionMaxRuns, CONFIG.maxCycles) : CONFIG.maxCycles;
+    const maxTasksPerCycle = Math.max(this.team.length * 2, 10);
+    const recursionLimit = 10 + effectiveMaxCycles * (3 * maxTasksPerCycle + 10);
+    const config = { configurable: { thread_id: randomUUID() }, recursionLimit };
+
     let endedDueToTimeout = false;
     let elapsedMs = 0;
     
@@ -522,13 +521,19 @@ export class TeamOrchestration {
     maxRuns?: number;
     timeoutMinutes?: number;
     skipPreview?: boolean;
+    runId?: number;
   } = {}): AsyncGenerator<Record<string, GraphState>> {
     this.sessionStartTime = Date.now();
     this.sessionTimeoutMs = (options.timeoutMinutes ?? 0) * 60 * 1000;
     this.sessionMaxRuns = options.maxRuns ?? 0;
     
     const state = this.getInitialState(options);
-    const config = { streamMode: "values" as const, configurable: { thread_id: randomUUID() } };
+    // Dynamic recursion limit — same formula as run()
+    const effectiveMaxCycles = this.sessionMaxRuns > 0
+      ? Math.min(this.sessionMaxRuns, CONFIG.maxCycles) : CONFIG.maxCycles;
+    const maxTasksPerCycle = Math.max(this.team.length * 2, 10);
+    const recursionLimit = 10 + effectiveMaxCycles * (3 * maxTasksPerCycle + 10);
+    const config = { streamMode: "values" as const, configurable: { thread_id: randomUUID() }, recursionLimit };
     let lastChunk: Record<string, GraphState> | null = null;
     let endedDueToTimeout = false;
     let elapsedMs = 0;

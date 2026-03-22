@@ -108,9 +108,9 @@ export const CONFIG = {
     confidenceScoringEnabled: (() => {
         const cs = (globalCfg as Record<string, unknown>).confidenceScoring;
         if (cs && typeof cs === "object" && !Array.isArray(cs)) {
-            return (cs as Record<string, unknown>).enabled === true;
+            return (cs as Record<string, unknown>).enabled !== false;
         }
-        return false;
+        return true;
     })(),
     personalityEnabled: (() => {
         const p = (globalCfg as Record<string, unknown>).personality;
