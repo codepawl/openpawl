@@ -21,7 +21,7 @@ describe("TemplatePublisher", () => {
   const validTemplate = {
     id: "test-template",
     name: "Test Template",
-    version: "1.0.0",
+    version: "0.0.1",
     author: "tester",
     description: "A test template for testing",
     tags: ["test"],

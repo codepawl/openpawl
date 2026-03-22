@@ -1128,7 +1128,7 @@ export async function runWork(
                     const newElapsed = Math.floor((Date.now() - startTime) / 5000) * 5;
                     if (newElapsed > elapsedSeconds) {
                         elapsedSeconds = newElapsed;
-                        sPlan.message(`🧠 Coordinator is decomposing the goal... (${elapsedSeconds}s)`);
+                        sPlan.message(`🧠 Coordinator is decomposing the goal (${elapsedSeconds}s)`);
                     }
                 }, 5000);
 
@@ -1142,6 +1142,22 @@ export async function runWork(
                     }
 
                     let lastCycle = 0;
+                    let spinnerStopped = false;
+
+                    const stopSpinner = (msg: string) => {
+                        if (!spinnerStopped) {
+                            clearInterval(heartbeatInterval);
+                            sPlan.stop(msg);
+                            spinnerStopped = true;
+                        }
+                    };
+
+                    // Nodes that run before workers — spinner is safe during these
+                    const PLANNING_NODES = new Set([
+                        "memory_retrieval", "sprint_planning", "system_design",
+                        "rfc_phase", "coordinator",
+                    ]);
+
                     const streamFn = async () => {
                         let result: Record<string, unknown> = {};
                         for await (const chunk of orchestration.stream({
@@ -1157,8 +1173,17 @@ export async function runWork(
                             if (!nodeName || nodeName === "unknown") continue;
                             result = nodeState;
 
-                            const elapsedNow = Math.floor((Date.now() - startTime) / 1000);
-                            sPlan.message(`🧠 ${nodeName} (${elapsedNow}s)`);
+                            // Stop spinner once we leave the planning phase
+                            if (!spinnerStopped && !PLANNING_NODES.has(nodeName)) {
+                                stopSpinner(nodeName === "preview_gate"
+                                    ? "Sprint preview ready"
+                                    : `Planning complete — ${nodeName}`);
+                            }
+
+                            if (!spinnerStopped) {
+                                const elapsedNow = Math.floor((Date.now() - startTime) / 1000);
+                                sPlan.message(`🧠 ${nodeName} (${elapsedNow}s)`);
+                            }
 
                             const cycle = (nodeState.cycle_count as number) ?? 0;
                             if (cycle > lastCycle) {

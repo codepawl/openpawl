@@ -69,7 +69,7 @@ describe("Global Memory Portability", () => {
     ]);
 
     const result = await exportGlobalMemory(mockGlobalManager as never);
-    expect(result.version).toBe("1.0.0");
+    expect(result.version).toBe("0.0.1");
     expect(result.globalSuccessPatterns).toHaveLength(1);
     expect(result.globalFailureLessons).toHaveLength(1);
     expect(result.exportedAt).toBeGreaterThan(0);
@@ -100,7 +100,7 @@ describe("Global Memory Portability", () => {
 
     const data: MemoryExport = {
       exportedAt: Date.now(),
-      version: "1.0.0",
+      version: "0.0.1",
       globalSuccessPatterns: [existingPattern], // Same pattern
       globalFailureLessons: [],
       knowledgeGraph: [],
@@ -117,7 +117,7 @@ describe("Global Memory Portability", () => {
 
     const data: MemoryExport = {
       exportedAt: Date.now(),
-      version: "1.0.0",
+      version: "0.0.1",
       globalSuccessPatterns: [{
         id: "new-pat",
         sessionId: "s1",
@@ -161,7 +161,7 @@ describe("Global Memory Portability", () => {
     mockPatternStore.getAll.mockResolvedValue([]);
     const data: MemoryExport = {
       exportedAt: Date.now(),
-      version: "1.0.0",
+      version: "0.0.1",
       globalSuccessPatterns: [{
         id: "pat-once",
         sessionId: "s1",

@@ -106,6 +106,8 @@ async function testProviderConnection(entry: ProviderConfigEntry): Promise<boole
     const meta = PROVIDER_CATALOG[entry.type];
     if (meta?.authMethod === "credentials" || meta?.authMethod === "local") return true;
     if (!entry.apiKey) return true;
+    // Providers without a /models listing endpoint — healthCheck uses models.list() which would fail
+    if (entry.type === "opencode-zen" || entry.type === "opencode-go") return true;
 
     const { providerFromConfig } = await import("../../providers/provider-factory.js");
     const provider = providerFromConfig(entry);
@@ -399,7 +401,10 @@ async function promptProviderEntry(): Promise<ProviderConfigEntry> {
     let modelOptions: Array<{ value: string; label: string; hint?: string }> = [];
     let sourceHint = "";
 
-    if (entry.apiKey || entry.type === "ollama" || entry.type === "lmstudio") {
+    // Providers with no model listing endpoint — skip fetch, use catalog directly
+    const CATALOG_ONLY_PROVIDERS = new Set(["opencode-zen", "opencode-go", "bedrock", "vertex", "azure"]);
+
+    if (!CATALOG_ONLY_PROVIDERS.has(entry.type) && (entry.apiKey || entry.type === "ollama" || entry.type === "lmstudio")) {
         // Try cache first, then live fetch
         const cached = await getCachedModels(entry.type);
         if (cached && cached.length > 0) {
@@ -424,8 +429,8 @@ async function promptProviderEntry(): Promise<ProviderConfigEntry> {
                 setCachedModels(entry.type, ids).catch(() => {});
                 s.stop(`${pc.green(`${result.models.length} models available`)}`);
             } else {
-                if (result.error) logger.debug(`Model fetch failed: ${result.error}`);
-                s.stop(pc.dim("Using default model list"));
+                s.stop(pc.yellow("Could not fetch models \u2014 using defaults"));
+                if (result.error) logger.warn(`Model fetch: ${result.error}. Run ${pc.bold("teamclaw model refresh")} later to update.`);
             }
         }
     }

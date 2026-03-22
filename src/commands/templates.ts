@@ -602,7 +602,7 @@ async function runInit(): Promise<void> {
   const template: TeamClawTemplate = {
     id,
     name,
-    version: "1.0.0",
+    version: "0.0.1",
     author: "",
     description,
     tags,

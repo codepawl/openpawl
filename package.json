@@ -1,6 +1,6 @@
 {
   "name": "teamclaw",
-  "version": "1.0.0",
+  "version": "0.0.1",
   "description": "Orchestrate AI agent teams with memory, learning, and structured collaboration",
   "type": "module",
   "license": "MIT",

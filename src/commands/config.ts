@@ -15,6 +15,7 @@ import {
     writeTeamclawConfig,
 } from "../core/jsonConfigManager.js";
 import {
+    readGlobalConfig,
     readGlobalConfigWithDefaults,
     writeGlobalConfig,
     type TeamClawGlobalConfig,
@@ -28,6 +29,7 @@ import { maskApiKey } from "../core/errors.js";
 
 type MemoryBackend = "lancedb" | "local_json";
 type LoggingLevel = "info" | "verbose";
+type TeamMode = "autonomous" | "manual";
 type RosterEntry = { role: string; count: number; description: string };
 
 interface DashboardState {
@@ -44,6 +46,12 @@ interface DashboardState {
     webhookOnTaskComplete: string;
     webhookOnCycleEnd: string;
     webhookSecret: string;
+    // Project settings
+    workspaceDir: string;
+    projectName: string;
+    goal: string;
+    teamMode: TeamMode;
+    templateId: string;
 }
 
 function parsePort(value: string): number | null {
@@ -124,6 +132,15 @@ async function loadDashboardState(): Promise<DashboardState> {
             : "") ||
         (typeof data.webhook_secret === "string" ? data.webhook_secret : "");
 
+    const workspaceDir =
+        (typeof globalCfg.workspaceDir === "string" ? globalCfg.workspaceDir : "") ||
+        (typeof data.workspace_dir === "string" ? data.workspace_dir : "");
+    const projectName = typeof data.project_name === "string" ? data.project_name : "";
+    const goal = typeof data.goal === "string" ? data.goal : "";
+    const teamModeRaw = data.team_mode ?? parsed?.team_mode;
+    const teamMode: TeamMode = teamModeRaw === "manual" ? "manual" : "autonomous";
+    const templateId = typeof data.template === "string" ? data.template : "";
+
     return {
         model,
         streamingEnabled: globalCfg.streaming?.enabled !== false,
@@ -138,6 +155,11 @@ async function loadDashboardState(): Promise<DashboardState> {
         webhookOnTaskComplete,
         webhookOnCycleEnd,
         webhookSecret,
+        workspaceDir,
+        projectName,
+        goal,
+        teamMode,
+        templateId,
     };
 }
 
@@ -410,6 +432,109 @@ async function teamMenu(state: DashboardState): Promise<void> {
     }
 }
 
+async function projectMenu(state: DashboardState): Promise<void> {
+    let back = false;
+    while (!back) {
+        const truncGoal = state.goal.length > 50 ? state.goal.slice(0, 47) + "..." : state.goal;
+        const choice = handleCancel(
+            await select({
+                message: "Project Settings",
+                options: clampSelectOptions([
+                    {
+                        value: "workspace",
+                        label: `Workspace Directory`,
+                        hint: state.workspaceDir || "not set",
+                    },
+                    {
+                        value: "project",
+                        label: `Project Name`,
+                        hint: state.projectName || "not set",
+                    },
+                    {
+                        value: "goal",
+                        label: `Goal`,
+                        hint: truncGoal || "not set",
+                    },
+                    {
+                        value: "teammode",
+                        label: `Team Mode`,
+                        hint: state.teamMode,
+                    },
+                    {
+                        value: "template",
+                        label: `Template`,
+                        hint: state.templateId || "none",
+                    },
+                    { value: "back", label: "Back to Main Menu" },
+                ]),
+            }),
+        ) as "workspace" | "project" | "goal" | "teammode" | "template" | "back";
+
+        if (choice === "back") {
+            back = true;
+            continue;
+        }
+        if (choice === "workspace") {
+            const raw = handleCancel(
+                await text({
+                    message: "Workspace directory (absolute path)",
+                    initialValue: state.workspaceDir,
+                    placeholder: "~/teamclaw-workspace",
+                }),
+            ) as string;
+            state.workspaceDir = raw.trim() || state.workspaceDir;
+            continue;
+        }
+        if (choice === "project") {
+            const raw = handleCancel(
+                await text({
+                    message: "Project name",
+                    initialValue: state.projectName,
+                    placeholder: "my-project",
+                }),
+            ) as string;
+            state.projectName = raw.trim() || state.projectName;
+            continue;
+        }
+        if (choice === "goal") {
+            const raw = handleCancel(
+                await text({
+                    message: "What does your team need to build?",
+                    initialValue: state.goal,
+                    placeholder: "Describe your goal",
+                }),
+            ) as string;
+            state.goal = raw.trim() || state.goal;
+            continue;
+        }
+        if (choice === "teammode") {
+            const selected = handleCancel(
+                await select({
+                    message: "Team mode",
+                    initialValue: state.teamMode,
+                    options: [
+                        { value: "autonomous", label: "Autonomous", hint: "Coordinator picks agents for each task" },
+                        { value: "manual", label: "Manual", hint: "Use roster as-is" },
+                    ],
+                }),
+            ) as TeamMode;
+            state.teamMode = selected;
+            continue;
+        }
+        if (choice === "template") {
+            const raw = handleCancel(
+                await text({
+                    message: "Template ID (e.g. fullstack, dev_team, or leave empty for custom)",
+                    initialValue: state.templateId,
+                    placeholder: "template-id",
+                }),
+            ) as string;
+            state.templateId = raw.trim();
+            continue;
+        }
+    }
+}
+
 async function systemMenu(state: DashboardState): Promise<void> {
     let back = false;
     while (!back) {
@@ -470,6 +595,7 @@ function saveState(state: DashboardState): void {
         ...globalCfg,
         model: state.model,
         dashboardPort: state.webPort,
+        workspaceDir: state.workspaceDir || globalCfg.workspaceDir,
         streaming: { enabled: state.streamingEnabled, showThinking: globalCfg.streaming?.showThinking ?? false },
         ...({
             webhookOnTaskComplete: state.webhookOnTaskComplete || undefined,
@@ -491,12 +617,42 @@ function saveState(state: DashboardState): void {
         workers: state.workers,
         creativity: state.creativity,
         max_cycles: state.maxCycles,
+        project_name: state.projectName || undefined,
+        goal: state.goal || undefined,
+        workspace_dir: state.workspaceDir || undefined,
+        team_mode: state.teamMode,
+        template: state.templateId || undefined,
     } as Record<string, unknown>;
     writeTeamclawConfig(cfg.path, next);
     clearTeamConfigCache();
 }
 
 export async function runConfigDashboard(): Promise<void> {
+    const existingConfig = readGlobalConfig();
+
+    if (!existingConfig) {
+        intro(pc.bold(pc.cyan("TeamClaw Configuration")));
+        note(
+            `No configuration found.\nRun ${pc.bold("teamclaw setup")} first to configure providers,\nworkspace, and team — then use ${pc.bold("teamclaw config")} to fine-tune.`,
+            "Setup required",
+        );
+
+        const shouldSetup = handleCancel(
+            await confirm({
+                message: "Would you like to run setup now?",
+                initialValue: true,
+            }),
+        );
+
+        if (shouldSetup) {
+            const { runSetup } = await import("./setup.js");
+            await runSetup();
+        } else {
+            outro("Run " + pc.bold("teamclaw setup") + " when you're ready.");
+        }
+        return;
+    }
+
     intro(pc.bold(pc.cyan("TeamClaw Configuration Dashboard")));
     const state = await loadDashboardState();
 
@@ -506,6 +662,7 @@ export async function runConfigDashboard(): Promise<void> {
             await select({
                 message: "Main Menu",
                 options: clampSelectOptions([
+                    { value: "project", label: "📁 Project Settings" },
                     { value: "providers", label: "🔌 LLM Provider Settings" },
                     { value: "models", label: "🧩 Model Management" },
                     { value: "memory", label: "🧠 Memory & Database" },
@@ -515,8 +672,12 @@ export async function runConfigDashboard(): Promise<void> {
                     { value: "save", label: "💾 Save & Exit" },
                 ]),
             }),
-        ) as "providers" | "models" | "memory" | "team" | "advanced" | "system" | "save";
+        ) as "project" | "providers" | "models" | "memory" | "team" | "advanced" | "system" | "save";
 
+        if (choice === "project") {
+            await projectMenu(state);
+            continue;
+        }
         if (choice === "providers") {
             await providerMenu(state);
             continue;

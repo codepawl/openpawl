@@ -1,6 +1,6 @@
 # Changelog
 
-## [1.0.0] - 2026-03-18
+## [0.0.1] - 2026-03-18
 
 ### Added
 - Multi-provider LLM support: Anthropic, OpenAI, OpenRouter, Ollama, DeepSeek, Groq, and custom endpoints

@@ -52,15 +52,15 @@ const PRESETS: Record<OpenAIPreset, { baseURL: string; envKey: string; defaultMo
   grok: { baseURL: "https://api.x.ai/v1", envKey: "XAI_API_KEY", defaultModel: "grok-4" },
   mistral: { baseURL: "https://api.mistral.ai/v1", envKey: "MISTRAL_API_KEY", defaultModel: "codestral" },
   cerebras: { baseURL: "https://api.cerebras.ai/v1", envKey: "CEREBRAS_API_KEY", defaultModel: "qwen3-coder-480b" },
-  together: { baseURL: "https://api.together.ai/v1", envKey: "TOGETHER_API_KEY", defaultModel: "kimi-k2.5-instruct" },
+  together: { baseURL: "https://api.together.xyz/v1", envKey: "TOGETHER_API_KEY", defaultModel: "moonshotai/Kimi-K2.5" },
   fireworks: { baseURL: "https://api.fireworks.ai/inference/v1", envKey: "FIREWORKS_API_KEY", defaultModel: "accounts/fireworks/models/deepseek-v3-2" },
   perplexity: { baseURL: "https://api.perplexity.ai", envKey: "PERPLEXITY_API_KEY", defaultModel: "sonar-pro" },
   moonshot: { baseURL: "https://api.moonshot.cn/v1", envKey: "MOONSHOT_API_KEY", defaultModel: "kimi-k2.5-instruct" },
   zai: { baseURL: "https://api.z.ai/api/paas/v4", envKey: "ZAI_API_KEY", defaultModel: "glm-5" },
-  minimax: { baseURL: "https://api.minimax.io/v1", envKey: "MINIMAX_API_KEY", defaultModel: "minimax-m2.5" },
+  minimax: { baseURL: "https://api.minimax.io/v1", envKey: "MINIMAX_API_KEY", defaultModel: "minimax-m2.7" },
   cohere: { baseURL: "https://api.cohere.com/v2", envKey: "COHERE_API_KEY", defaultModel: "command-a-03-2025" },
-  "opencode-zen": { baseURL: "https://api.opencode.ai/v1", envKey: "OPENCODE_API_KEY", defaultModel: "claude-sonnet-4-6" },
-  "opencode-go": { baseURL: "https://api.opencode.ai/v1", envKey: "OPENCODE_GO_API_KEY", defaultModel: "kimi-k2.5" },
+  "opencode-zen": { baseURL: "https://opencode.ai/zen/v1", envKey: "OPENCODE_API_KEY", defaultModel: "claude-sonnet-4-6" },
+  "opencode-go": { baseURL: "https://opencode.ai/zen/go/v1", envKey: "OPENCODE_GO_API_KEY", defaultModel: "kimi-k2.5" },
   azure: { baseURL: "", envKey: "AZURE_OPENAI_API_KEY", defaultModel: "gpt-4o" },
   lmstudio: { baseURL: "http://localhost:1234/v1", envKey: "", defaultModel: "" },
 };
@@ -170,12 +170,24 @@ export class OpenAICompatibleProvider implements StreamProvider {
     }
   }
 
+  // Providers without a /models listing endpoint
+  private static readonly NO_MODELS_ENDPOINT = new Set(["opencode-zen", "opencode-go"]);
+
   async healthCheck(): Promise<boolean> {
     if (!this.apiKey && this.config.preset !== "ollama" && this.config.preset !== "lmstudio") return false;
     if (this.lastSuccessAt > 0 && Date.now() - this.lastSuccessAt < 5 * 60 * 1000) return true;
     try {
       const client = this.getClient();
-      await client.models.list();
+      if (OpenAICompatibleProvider.NO_MODELS_ENDPOINT.has(this.config.preset)) {
+        // No /models endpoint — use a minimal chat completion instead
+        await client.chat.completions.create({
+          model: this.model,
+          messages: [{ role: "user", content: "hi" }],
+          max_tokens: 1,
+        });
+      } else {
+        await client.models.list();
+      }
       return true;
     } catch {
       return false;

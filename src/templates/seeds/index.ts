@@ -17,7 +17,7 @@ const SEED_TEMPLATES: TeamClawTemplate[] = [
   {
     id: "content-creator",
     name: "Content Creator Team",
-    version: "1.0.0",
+    version: "0.0.1",
     author: "nxank4",
     description: "Research, script, SEO, and review pipeline for content creators",
     tags: ["content", "youtube", "social-media", "writing"],
@@ -49,7 +49,7 @@ const SEED_TEMPLATES: TeamClawTemplate[] = [
   {
     id: "indie-hacker",
     name: "Indie Hacker Team",
-    version: "1.0.0",
+    version: "0.0.1",
     author: "nxank4",
     description: "Architect, engineer, QA, and RFC pipeline for solo builders",
     tags: ["coding", "saas", "startup"],
@@ -81,7 +81,7 @@ const SEED_TEMPLATES: TeamClawTemplate[] = [
   {
     id: "research-intelligence",
     name: "Research Intelligence Team",
-    version: "1.0.0",
+    version: "0.0.1",
     author: "nxank4",
     description: "Deep research, synthesis, and report generation for market intelligence",
     tags: ["research", "analysis", "intelligence"],
@@ -108,7 +108,7 @@ const SEED_TEMPLATES: TeamClawTemplate[] = [
   {
     id: "business-ops",
     name: "Business Operations Team",
-    version: "1.0.0",
+    version: "0.0.1",
     author: "nxank4",
     description: "Process automation, documentation, and workflow optimization",
     tags: ["business", "operations", "automation"],
@@ -135,7 +135,7 @@ const SEED_TEMPLATES: TeamClawTemplate[] = [
   {
     id: "full-stack-sprint",
     name: "Full-Stack Sprint Team",
-    version: "1.0.0",
+    version: "0.0.1",
     author: "nxank4",
     description: "Frontend, backend, and DevOps for rapid full-stack feature sprints",
     tags: ["fullstack", "sprint", "devops"],

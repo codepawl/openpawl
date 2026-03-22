@@ -5,7 +5,7 @@ describe("validateTemplate", () => {
   const validTemplate = {
     id: "content-creator",
     name: "Content Creator Team",
-    version: "1.0.0",
+    version: "0.0.1",
     author: "nxank4",
     description: "Research → Script → SEO → Review pipeline",
     tags: ["content", "youtube"],

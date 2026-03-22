@@ -9,7 +9,7 @@ const TEST_DIR = path.join(os.tmpdir(), "teamclaw-test-marketplace-" + Date.now(
 const originalHomedir = os.homedir;
 
 const mockIndex: TemplateIndex = {
-  version: "1.0.0",
+  version: "0.0.1",
   updatedAt: "2026-03-18",
   templates: [
     {
@@ -17,7 +17,7 @@ const mockIndex: TemplateIndex = {
       name: "Content Creator Team",
       description: "Research → Script → SEO → Review pipeline",
       author: "nxank4",
-      version: "1.0.0",
+      version: "0.0.1",
       tags: ["content", "youtube", "social-media"],
       estimatedCostPerRun: 0.07,
       stars: 142,
@@ -30,7 +30,7 @@ const mockIndex: TemplateIndex = {
       name: "Indie Hacker Team",
       description: "Architect → Engineer → QA → RFC pipeline",
       author: "nxank4",
-      version: "1.0.0",
+      version: "0.0.1",
       tags: ["coding", "saas"],
       estimatedCostPerRun: 0.12,
       stars: 89,
@@ -64,7 +64,7 @@ describe("MarketplaceClient", () => {
     const client = new MarketplaceClient();
     const index = await client.fetchIndex();
 
-    expect(index.version).toBe("1.0.0");
+    expect(index.version).toBe("0.0.1");
     expect(index.templates).toHaveLength(2);
     expect(index.templates[0].id).toBe("content-creator");
   });

@@ -203,7 +203,7 @@ Create a package with a default export:
   "main": "dist/index.js",
   "type": "module",
   "peerDependencies": {
-    "@teamclaw/sdk": "^0.1.0"
+    "@teamclaw/sdk": "^0.0.1"
   }
 }
 ```

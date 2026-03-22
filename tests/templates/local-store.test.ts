@@ -26,7 +26,7 @@ describe("LocalTemplateStore", () => {
   const sampleTemplate = {
     id: "test-template",
     name: "Test Template",
-    version: "1.0.0",
+    version: "0.0.1",
     author: "tester",
     description: "A test template",
     tags: ["test"],
@@ -64,7 +64,7 @@ describe("LocalTemplateStore", () => {
     expect(result).not.toBeNull();
     expect(result!.id).toBe("test-template");
     expect(result!.installedAt).toBeTypeOf("number");
-    expect(result!.installedVersion).toBe("1.0.0");
+    expect(result!.installedVersion).toBe("0.0.1");
   });
 
   it("returns null for non-existent template", async () => {

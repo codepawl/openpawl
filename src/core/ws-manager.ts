@@ -320,7 +320,7 @@ export class WebSocketManager {
           maxProtocol: 3,
           client: {
             id: clientId,
-            version: opts.clientVersion ?? "0.1.0",
+            version: opts.clientVersion ?? "0.0.1",
             platform,
             deviceFamily,
             mode: clientMode,

@@ -14,7 +14,7 @@ function log(msg: string): void {
   }
 }
 
-const EXPORT_VERSION = "1.0.0";
+const EXPORT_VERSION = "0.0.1";
 
 export interface ImportResult {
   patternsImported: number;
