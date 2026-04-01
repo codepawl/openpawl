@@ -62,7 +62,12 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Run tests
+        if: matrix.os != 'ubuntu-latest' || matrix.node != '20'
         run: pnpm run test
+
+      - name: Run tests with coverage
+        if: matrix.os == 'ubuntu-latest' && matrix.node == '20'
+        run: pnpm run test:coverage
 
   build:
     name: Build

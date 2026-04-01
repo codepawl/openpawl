@@ -6,6 +6,26 @@ export default defineConfig({
     globals: true,
     environment: "node",
     setupFiles: ["tests/setup.ts"],
+    coverage: {
+      provider: "v8",
+      include: ["src/**/*.ts"],
+      exclude: [
+        "src/web/client/**",
+        "**/*.d.ts",
+        "**/index.ts",
+        "src/cli.ts",
+      ],
+      reporter: ["text-summary", "json-summary", "lcov"],
+      reportsDirectory: "coverage",
+      thresholds: {
+        // Floor = actual coverage minus 2% (ratchet — prevents regression)
+        // Measured 2026-03-31: statements=47.66%, branches=73.23%, functions=66.5%, lines=47.66%
+        lines: 45,
+        functions: 64,
+        branches: 71,
+        statements: 45,
+      },
+    },
   },
   resolve: {
     alias: {

@@ -1,5 +1,5 @@
 # Makefile for TeamClaw
-.PHONY: help install install-hooks test lint typecheck check test-full web work clean release
+.PHONY: help install install-hooks test test-commands test-coverage test-coverage-report lint typecheck check test-full web work clean release
 
 help:
 	@echo "TeamClaw - Available Commands:"
@@ -9,7 +9,10 @@ help:
 	@echo "    make install-hooks - Set up pre-commit quality gate"
 	@echo ""
 	@echo "  Quality"
-	@echo "    make test     - Run test suite"
+	@echo "    make test          - Run test suite"
+	@echo "    make test-commands       - Run CLI command tests only"
+	@echo "    make test-coverage       - Run tests with coverage thresholds"
+	@echo "    make test-coverage-report - Run tests + open HTML report"
 	@echo "    make lint     - Lint code"
 	@echo "    make typecheck - Run type checker"
 	@echo "    make check     - Lint + typecheck + test"
@@ -37,6 +40,20 @@ install-hooks:
 test:
 	@echo "Running tests..."
 	pnpm run test
+
+test-commands:
+	@echo "Running command integration tests..."
+	pnpm exec vitest run --config vitest.config.commands.ts
+
+test-coverage:
+	@echo "Running tests with coverage..."
+	pnpm run test:coverage
+
+test-coverage-report:
+	@echo "Running tests with coverage (HTML report)..."
+	pnpm exec vitest run --coverage --coverage.reporter=html
+	@echo "Open coverage/index.html in your browser"
+	open coverage/index.html 2>/dev/null || xdg-open coverage/index.html 2>/dev/null || true
 
 lint:
 	@echo "Linting..."
