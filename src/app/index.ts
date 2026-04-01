@@ -16,6 +16,66 @@ import { createAutocompleteProvider } from "./autocomplete.js";
 import { resolveFileRef } from "./file-ref.js";
 import { executeShell } from "./shell.js";
 
+import type { AppLayout } from "./layout.js";
+
+/**
+ * Handle natural language input — route to the work pipeline.
+ * This is the primary interaction: user types goals/questions, agent works on them.
+ */
+async function handleNaturalInput(
+  text: string,
+  layout: AppLayout,
+  ctx: { addMessage: (role: string, content: string) => void },
+): Promise<void> {
+  const { workerEvents } = await import("../core/worker-events.js");
+
+  let streamingActive = false;
+  const onChunk = (data: { botId: string; chunk: string }) => {
+    if (!streamingActive) {
+      layout.messages.addMessage({ role: "assistant", content: "", timestamp: new Date() });
+      streamingActive = true;
+    }
+    layout.messages.appendToLast(data.chunk);
+    layout.tui.requestRender();
+  };
+  const onReasoning = (data: { botId: string; reasoning: string }) => {
+    const preview = data.reasoning.slice(0, 200).replace(/\n/g, " ");
+    layout.messages.addMessage({
+      role: "agent",
+      agentName: data.botId,
+      content: `thinking: ${preview}${data.reasoning.length > 200 ? "..." : ""}`,
+      timestamp: new Date(),
+    });
+    layout.tui.requestRender();
+  };
+
+  workerEvents.on("stream-chunk", onChunk);
+  workerEvents.on("reasoning", onReasoning);
+
+  layout.statusBar.setLeft("TeamClaw", "Working...");
+  layout.tui.requestRender();
+
+  try {
+    const { runWork } = await import("../work-runner.js");
+    await runWork({ goal: text.trim(), noWeb: true, args: [] });
+    streamingActive = false;
+    ctx.addMessage("system", "Done.");
+  } catch (err) {
+    streamingActive = false;
+    const msg = err instanceof Error ? err.message : String(err);
+    if (err instanceof Error && err.name === "UserCancelError") {
+      ctx.addMessage("system", "Cancelled.");
+    } else {
+      ctx.addMessage("error", `Failed: ${msg}`);
+    }
+  } finally {
+    workerEvents.off("stream-chunk", onChunk);
+    workerEvents.off("reasoning", onReasoning);
+    layout.statusBar.setLeft("TeamClaw", "Ready");
+    layout.tui.requestRender();
+  }
+}
+
 export interface LaunchOptions {
   /** Custom terminal for testing (VirtualTerminal). */
   terminal?: Terminal;
@@ -39,8 +99,8 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
     registry.register(cmd);
   }
 
-  // Register TeamClaw-specific commands
-  registerAllCommands(registry, layout, session);
+  // Register control commands (natural language goes to agent pipeline)
+  registerAllCommands(registry, session);
 
   // Set up autocomplete
   layout.editor.setAutocompleteProvider(
@@ -101,8 +161,9 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
       }
 
       case "message": {
+        // Natural language → send to agent pipeline
         ctx.addMessage("user", text);
-        ctx.addMessage("system", "Use /work <goal> to start, or /help for commands.");
+        await handleNaturalInput(text, layout, ctx);
         break;
       }
     }
@@ -120,11 +181,11 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
   }
   layout.messages.addMessage({
     role: "system",
-    content: `TeamClaw v${versionStr} | Type /work <goal> to start, /help for commands.`,
+    content: `TeamClaw v${versionStr} — just type what you want to build. /help for commands.`,
     timestamp: new Date(),
   });
   layout.statusBar.setLeft("TeamClaw", "Ready");
-  layout.statusBar.setRight("/help for commands");
+  layout.statusBar.setRight("/help");
 
   // Graceful shutdown on any exit
   const cleanup = () => {

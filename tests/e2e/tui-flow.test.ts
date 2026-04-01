@@ -83,12 +83,12 @@ describe("TUI E2E", () => {
       await harness.waitFor("/help", 5000);
       const output = harness.getVisibleOutput();
       expect(output).toContain("/help");
-      expect(output).toContain("/work");
+      expect(output).toContain("just type");
     });
   });
 
   describe("/help command", () => {
-    it("lists available commands", async () => {
+    it("lists control commands (not /work — that's natural language)", async () => {
       harness = new TUIHarness();
       await harness.start();
 
@@ -96,10 +96,12 @@ describe("TUI E2E", () => {
       await harness.waitFor("Available commands", 5000);
 
       const output = harness.getVisibleOutput();
-      expect(output).toContain("/work");
+      // Control commands should be listed
       expect(output).toContain("/status");
       expect(output).toContain("/config");
       expect(output).toContain("/quit");
+      // /work should NOT be a slash command anymore
+      expect(output).not.toMatch(/\/work\b/);
     });
   });
 
@@ -142,17 +144,19 @@ describe("TUI E2E", () => {
     });
   });
 
-  describe("plain text input", () => {
-    it("shows guidance to use /work", async () => {
+  describe("natural language input", () => {
+    it("routes natural language to agent pipeline (not /work required)", async () => {
       harness = new TUIHarness();
       await harness.start();
 
-      harness.submit("just a message");
-      // Wait for the message to be processed and rendered
-      await harness.waitFor("Use /work", 5000);
+      harness.submit("Build an auth system");
+      // Should show user message and start working (or show error if no providers)
+      await harness.waitFor("Build an auth system", 5000);
 
       const output = harness.getVisibleOutput();
-      expect(output).toContain("/work");
+      // Should NOT show "Use /work" guidance — natural language goes to agent
+      expect(output).not.toContain("Use /work");
+      expect(output).toContain("Build an auth system");
     });
   });
 

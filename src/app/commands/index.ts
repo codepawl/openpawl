@@ -1,27 +1,25 @@
 /**
- * Register all TeamClaw TUI slash commands.
+ * Register TeamClaw TUI slash commands.
+ *
+ * Only CONTROL actions are slash commands. Natural language input
+ * (goals, questions) goes directly to the agent pipeline.
  */
 import type { CommandRegistry } from "../../tui/index.js";
-import type { AppLayout } from "../layout.js";
 import type { SessionManager } from "../session.js";
 import { createStatusCommand } from "./status.js";
 import { createConfigCommand } from "./config.js";
 import { createModelCommand } from "./model.js";
-import { createJournalCommand } from "./journal.js";
 import { createCostCommand } from "./cost.js";
 import { createSessionsCommand } from "./sessions.js";
-import { createWorkCommand } from "./work.js";
 
 export function registerAllCommands(
   registry: CommandRegistry,
-  layout: AppLayout,
   session: SessionManager,
 ): void {
-  registry.register(createWorkCommand(layout));
+  // Control commands only — natural language handled by prompt-handler
   registry.register(createStatusCommand());
   registry.register(createConfigCommand());
   registry.register(createModelCommand());
-  registry.register(createJournalCommand());
   registry.register(createCostCommand(session));
   registry.register(createSessionsCommand());
 }
