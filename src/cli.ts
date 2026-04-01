@@ -129,8 +129,17 @@ function printHelp(): void {
 
 async function main(): Promise<void> {
     const args = process.argv.slice(2);
-    if (args.length === 0 || args[0] === "--help" || args[0] === "-h") {
+    if (args[0] === "--help" || args[0] === "-h") {
         printHelp();
+        return;
+    }
+    if (args.length === 0) {
+        if (!process.stdin.isTTY) {
+            printHelp();
+            return;
+        }
+        const { launchTUI } = await import("./app/index.js");
+        await launchTUI();
         return;
     }
     if (args[0] === "--version" || args[0] === "-V") {
