@@ -115,7 +115,7 @@ export async function runWork(
 
     const trafficController = getTrafficController();
     trafficController.setPauseCallback(async () => {
-        if (!canRenderSpinner) return false;
+        if (!canRenderSpinner || noInteractive) return false;
         const { select } = await import("@clack/prompts");
         const choice = await select({
             message: pc.yellow("⚠️ Safety limit reached! The team has made 50 requests. Continue?"),
@@ -230,7 +230,7 @@ export async function runWork(
 
     if (savedWorkspace && existsSync(savedWorkspace)) {
         workspacePath = path.resolve(savedWorkspace);
-    } else if (canRenderSpinner) {
+    } else if (canRenderSpinner && !noInteractive) {
         const selectedPath = await promptPath({
             message: "Select workspace directory:",
             cwd: process.cwd(),
@@ -247,15 +247,15 @@ export async function runWork(
 
     workspacePath ||= path.resolve(process.cwd());
 
-    if (effectiveGoal && canRenderSpinner) {
+    if (effectiveGoal && canRenderSpinner && !noInteractive) {
         const wsCheck = await checkWorkspaceContent(workspacePath, effectiveGoal, canRenderSpinner);
         effectiveGoal = wsCheck.goal;
     }
 
     // ---------------------------------------------------------------------------
-    // Pre-launch confirmation
+    // Pre-launch confirmation — skip in non-interactive mode (TUI handles its own UX)
     // ---------------------------------------------------------------------------
-    if (canRenderSpinner && hasConfiguredSession) {
+    if (canRenderSpinner && hasConfiguredSession && !noInteractive) {
         const model = setupConfig.model || "";
         const confirmed = await promptPreLaunchConfirmation(
             canRenderSpinner, effectiveGoal!, workspacePath,
@@ -276,7 +276,7 @@ export async function runWork(
     // ---------------------------------------------------------------------------
     // Pre-flight checks — drift detection + goal clarity (extracted to goal-resolver.ts)
     // ---------------------------------------------------------------------------
-    if (effectiveGoal && canRenderSpinner) {
+    if (effectiveGoal && canRenderSpinner && !noInteractive) {
         effectiveGoal = await runPreFlightChecks(effectiveGoal);
     }
 
@@ -592,7 +592,7 @@ export async function runWork(
                 // Build custom inclusion rules from registered agents
                 const customRules = buildCustomCompositionRules();
                 teamComposition = analyzeGoal(goal, { runCount: maxRuns, customRules });
-                if (canRenderSpinner && runId === 1) {
+                if (canRenderSpinner && runId === 1 && !noInteractive) {
                     renderCompositionTable(teamComposition);
                     const compAction = await promptCompositionAction(teamComposition);
                     if (compAction.action === "manual") {

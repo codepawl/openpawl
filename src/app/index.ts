@@ -135,7 +135,7 @@ async function handleNaturalInput(
   try {
     const { runWork } = await import("../work-runner.js");
     // Pass noWeb + noInteractive to skip clack interactive prompts
-    await runWork({ goal: text.trim(), noWeb: true, args: ["--no-interactive"] });
+    await runWork({ goal: text.trim(), noWeb: true, args: ["--no-interactive", "--no-briefing"] });
     streamingActive = false;
     ctx.addMessage("system", "Done.");
   } catch (err) {
