@@ -8,6 +8,7 @@ import type { KeyEvent } from "../../tui/core/input.js";
 import type { TUI } from "../../tui/core/tui.js";
 import { defaultTheme } from "../../tui/themes/default.js";
 import { visibleWidth } from "../../tui/utils/text-width.js";
+import { renderPanel } from "../../tui/components/panel.js";
 
 export abstract class InteractiveView {
   protected selectedIndex = 0;
@@ -91,9 +92,22 @@ export abstract class InteractiveView {
 
   protected render(): void {
     this.rowToItem.clear();
-    const lines = this.renderLines();
-    this.tui.setInteractiveView(lines);
+    const contentLines = this.renderLines();
+    // Wrap in Panel if subclass provides a panelTitle
+    const title = this.getPanelTitle();
+    const footer = this.getPanelFooter();
+    if (title) {
+      const panelLines = renderPanel({ title, footer }, contentLines);
+      this.tui.setInteractiveView(panelLines);
+    } else {
+      this.tui.setInteractiveView(contentLines);
+    }
   }
+
+  /** Override to wrap content in a Panel. Return null for no panel. */
+  protected getPanelTitle(): string | null { return null; }
+  /** Override to add footer hints to the panel. */
+  protected getPanelFooter(): string | undefined { return undefined; }
 
   /** Register a rendered line as clickable for a specific item index.
    *  Call during renderLines() — lineIndex is 0-based within the interactive content. */

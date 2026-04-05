@@ -2,6 +2,7 @@
  * Built-in slash commands: /help, /clear, /quit.
  */
 import type { SlashCommand, CommandContext } from "./registry.js";
+import { renderPanel, panelSection } from "../components/panel.js";
 
 export function createBuiltinCommands(
   getRegistry: () => { getAll: () => SlashCommand[] },
@@ -13,13 +14,22 @@ export function createBuiltinCommands(
       description: "Show available commands",
       async execute(_args: string, ctx: CommandContext) {
         const commands = getRegistry().getAll();
-        const lines = ["Available commands:", ""];
+        const contentLines = [...panelSection("Commands")];
         for (const cmd of commands) {
           const aliases = cmd.aliases?.length ? ` (${cmd.aliases.join(", ")})` : "";
           const args = cmd.args ? ` ${cmd.args}` : "";
-          lines.push(`  /${cmd.name}${args}${aliases} — ${cmd.description}`);
+          contentLines.push(`  /${cmd.name}${args}${aliases} — ${cmd.description}`);
         }
-        ctx.addMessage("system", lines.join("\n"));
+        contentLines.push("");
+        contentLines.push(...panelSection("Shortcuts"));
+        contentLines.push("  @file          Attach file to prompt");
+        contentLines.push("  @agent         Route to specific agent");
+        contentLines.push("  !command       Run shell command");
+        contentLines.push("  Shift+Tab      Cycle mode (DEF/AUTO/PLAN)");
+        contentLines.push("  Ctrl+P         Command palette");
+        contentLines.push("  Ctrl+X + key   Leader shortcuts");
+        const panel = renderPanel({ title: "Help", footer: "Press any key to close" }, contentLines);
+        ctx.addMessage("system", panel.join("\n"));
       },
     },
     {

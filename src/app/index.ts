@@ -1188,16 +1188,17 @@ function registerRouterCommands(
     name: "agents",
     description: "List available agents",
     async execute(_args, ctx) {
+      const { renderPanel, panelSection } = await import("../tui/components/panel.js");
       const agents = router.getRegistry().getAll();
-      const lines = ["Available agents:", ""];
+      const contentLines = [...panelSection("Built-in")];
       for (const a of agents) {
         const colorFn = getAgentColorFn(a.id);
-        const label = colorFn(a.id.padEnd(14));
-        lines.push(`  ${label} ${a.description}`);
+        contentLines.push(`  ${colorFn("@" + a.id.padEnd(14))} ${ctp.overlay1(a.description)}`);
       }
-      lines.push("");
-      lines.push("  Use @agent in your prompt to route directly.");
-      ctx.addMessage("system", lines.join("\n"));
+      contentLines.push("");
+      contentLines.push(ctp.overlay0("Use @agent in your prompt to route directly."));
+      const panel = renderPanel({ title: "Agents", footer: "Press any key to close" }, contentLines);
+      ctx.addMessage("system", panel.join("\n"));
     },
   });
 

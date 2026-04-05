@@ -54,12 +54,12 @@ export class ModeView extends InteractiveView {
     return true;
   }
 
+  protected override getPanelTitle(): string { return "\u26a1 Execution Mode"; }
+  protected override getPanelFooter(): string { return "\u2191\u2193 navigate \u00b7 Enter select \u00b7 Esc close"; }
+
   protected renderLines(): string[] {
     const t = this.theme;
     const lines: string[] = [];
-
-    lines.push(this.makeHeader("\u26a1 Execution Mode", "[\u2191\u2193 navigate \u00b7 Enter select \u00b7 Esc close]"));
-    lines.push("");
 
     for (let i = 0; i < MODES.length; i++) {
       const mode = MODES[i]!;

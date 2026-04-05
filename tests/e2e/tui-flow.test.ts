@@ -93,7 +93,7 @@ describe("TUI E2E", () => {
       await harness.start();
 
       harness.command("help");
-      await harness.waitFor("Available commands", 5000);
+      await harness.waitFor("Commands", 5000);
 
       const output = harness.getVisibleOutput();
       // Control commands should be listed

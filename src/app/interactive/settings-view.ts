@@ -219,12 +219,12 @@ export class SettingsView extends InteractiveView {
     this.startEditing();
   }
 
+  protected override getPanelTitle(): string { return "\u2699 Settings"; }
+  protected override getPanelFooter(): string { return "\u2191\u2193 navigate \u00b7 Enter edit \u00b7 Esc close"; }
+
   protected renderLines(): string[] {
     const t = this.theme;
     const lines: string[] = [];
-
-    lines.push(this.makeHeader("\u2699 Settings", "[\u2191\u2193 navigate \u00b7 Enter edit \u00b7 Esc close]"));
-    lines.push("");
 
     for (let i = 0; i < FIELDS.length; i++) {
       const field = FIELDS[i]!;

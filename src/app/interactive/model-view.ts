@@ -74,12 +74,12 @@ export class ModelView extends InteractiveView {
     return true;
   }
 
+  protected override getPanelTitle(): string { return "\u26a1 Models"; }
+  protected override getPanelFooter(): string { return "\u2191\u2193 navigate \u00b7 Enter select \u00b7 Esc close"; }
+
   protected renderLines(): string[] {
     const t = this.theme;
     const lines: string[] = [];
-
-    lines.push(this.makeHeader("\u26a1 Models", "[\u2191\u2193 navigate \u00b7 Enter select \u00b7 Esc close]"));
-    lines.push("");
 
     if (this.loading) {
       lines.push(`    ${ctp.teal("\u25d0")} Discovering available models...`);
