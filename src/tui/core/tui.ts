@@ -44,6 +44,7 @@ export class TUI {
   private hitTester = new HitTester();
   private hoverManager = new HoverManager();
   private lastScreenLines: string[] = [];
+  private lastFullContentLines: string[] = [];  // all content lines (not just visible)
   private contentRowEnd = 0;   // last row of messages content region (1-based)
   private editorRowStart = 0;  // first row of editor region (1-based)
   private editorRowEnd = 0;    // last row of editor region (1-based)
@@ -365,6 +366,10 @@ export class TUI {
 
     const visibleEnd = totalContent - this.scrollOffset;
     const visibleStart = Math.max(0, visibleEnd - scrollableHeight);
+
+    // Store full content lines and update selection scroll offset
+    this.lastFullContentLines = allContentLines;
+    this.selectionManager.setScrollOffset(visibleStart);
     const visibleContentLines = allContentLines.slice(visibleStart, visibleEnd);
 
     // 5. Pad with empty lines if content doesn't fill the area
@@ -540,7 +545,7 @@ export class TUI {
 
     // Clipboard copy (only when selection exists — already resolved)
     if (action === "editor.clipboard.copy" && this.selectionManager.hasSelection()) {
-      const text = this.selectionManager.getSelectedText(this.lastScreenLines);
+      const text = this.selectionManager.getSelectedText(this.lastFullContentLines);
       if (text.trim()) this.selectionManager.copyToClipboard(this.terminal, text);
       this.selectionManager.clearSelection();
       this.requestRender();
@@ -613,7 +618,7 @@ export class TUI {
   private handleCtrlC(): void {
     // Priority 0: If there's a text selection → copy to clipboard, consume event
     if (this.selectionManager.hasSelection()) {
-      const text = this.selectionManager.getSelectedText(this.lastScreenLines);
+      const text = this.selectionManager.getSelectedText(this.lastFullContentLines);
       if (text.trim()) {
         this.selectionManager.copyToClipboard(this.terminal, text);
       }

@@ -1,29 +1,49 @@
 /**
- * Text selection manager — tracks mouse selection state,
- * provides hit-testing, text extraction, and clipboard copy via OSC 52.
+ * Text selection manager — content-based selection that survives scrolling.
+ * Stores selection as absolute content row/col (not screen coordinates).
+ * Converts to screen coordinates at render time based on current scroll offset.
  */
 import type { Terminal } from "./terminal.js";
 import { stripAnsi } from "../utils/text-width.js";
 
 export interface Selection {
-  startRow: number;
-  startCol: number;
-  endRow: number;
-  endCol: number;
+  startRow: number;   // absolute content row (1-based)
+  startCol: number;   // column (1-based)
+  endRow: number;     // absolute content row (1-based)
+  endCol: number;     // column (1-based)
 }
 
 export class SelectionManager {
   private selection: Selection | null = null;
   private selecting = false;
+  /** Current scroll offset — set by TUI before each render. */
+  private scrollOffset = 0;
 
-  startSelection(row: number, col: number): void {
-    this.selection = { startRow: row, startCol: col, endRow: row, endCol: col };
+  /** Update scroll offset (called by TUI on scroll/render). */
+  setScrollOffset(offset: number): void {
+    this.scrollOffset = offset;
+  }
+
+  /** Convert screen row to absolute content row. */
+  private screenToContent(screenRow: number): number {
+    return screenRow + this.scrollOffset;
+  }
+
+  /** Convert absolute content row to screen row. Returns null if not visible. */
+  private contentToScreen(contentRow: number): number | null {
+    const screen = contentRow - this.scrollOffset;
+    return screen >= 1 ? screen : null;
+  }
+
+  startSelection(screenRow: number, col: number): void {
+    const contentRow = this.screenToContent(screenRow);
+    this.selection = { startRow: contentRow, startCol: col, endRow: contentRow, endCol: col };
     this.selecting = true;
   }
 
-  updateSelection(row: number, col: number): void {
+  updateSelection(screenRow: number, col: number): void {
     if (!this.selecting || !this.selection) return;
-    this.selection.endRow = row;
+    this.selection.endRow = this.screenToContent(screenRow);
     this.selection.endCol = col;
   }
 
@@ -48,28 +68,29 @@ export class SelectionManager {
     this.selecting = false;
   }
 
-  /** Check if a cell (1-based row, 1-based col) is within the selection. */
-  isSelected(row: number, col: number): boolean {
+  /** Check if a SCREEN cell (1-based row, 1-based col) is within the selection. */
+  isSelected(screenRow: number, col: number): boolean {
     if (!this.selection) return false;
+    const contentRow = this.screenToContent(screenRow);
     const s = this.normalize(this.selection);
 
-    if (row < s.startRow || row > s.endRow) return false;
-    if (row === s.startRow && row === s.endRow) {
+    if (contentRow < s.startRow || contentRow > s.endRow) return false;
+    if (contentRow === s.startRow && contentRow === s.endRow) {
       return col >= s.startCol && col <= s.endCol;
     }
-    if (row === s.startRow) return col >= s.startCol;
-    if (row === s.endRow) return col <= s.endCol;
+    if (contentRow === s.startRow) return col >= s.startCol;
+    if (contentRow === s.endRow) return col <= s.endCol;
     return true;
   }
 
-  /** Extract selected text from screen lines (0-indexed array, but selection is 1-based). */
-  getSelectedText(screenLines: string[]): string {
+  /** Extract selected text from the FULL content lines (0-indexed). */
+  getSelectedText(allContentLines: string[]): string {
     if (!this.selection) return "";
     const s = this.normalize(this.selection);
 
     const lines: string[] = [];
     for (let row = s.startRow; row <= s.endRow; row++) {
-      const line = stripAnsi(screenLines[row - 1] ?? "");
+      const line = stripAnsi(allContentLines[row - 1] ?? "");
       if (row === s.startRow && row === s.endRow) {
         lines.push(line.slice(s.startCol - 1, s.endCol));
       } else if (row === s.startRow) {
@@ -90,32 +111,29 @@ export class SelectionManager {
     terminal.write(`\x1b]52;c;${b64}\x07`);
   }
 
-  /** Get the start row of the current selection (1-based). */
-  getStartRow(): number {
-    return this.selection?.startRow ?? 0;
-  }
-
-  /** Select the word at position (1-based row/col). */
-  selectWordAt(row: number, col: number, screenLines: string[]): void {
-    const line = stripAnsi(screenLines[row - 1] ?? "");
+  /** Select the word at screen position (1-based row/col). */
+  selectWordAt(screenRow: number, col: number, screenLines: string[]): void {
+    const line = stripAnsi(screenLines[screenRow - 1] ?? "");
     if (!line || col < 1 || col > line.length) {
-      this.selectLine(row, screenLines);
+      this.selectLine(screenRow, screenLines);
       return;
     }
+    const contentRow = this.screenToContent(screenRow);
     const idx = col - 1;
     const wordChar = /[\w\-\.@\/]/;
     let start = idx;
     while (start > 0 && wordChar.test(line[start - 1]!)) start--;
     let end = idx;
     while (end < line.length - 1 && wordChar.test(line[end + 1]!)) end++;
-    this.selection = { startRow: row, startCol: start + 1, endRow: row, endCol: end + 1 };
+    this.selection = { startRow: contentRow, startCol: start + 1, endRow: contentRow, endCol: end + 1 };
     this.selecting = false;
   }
 
-  /** Select an entire line (1-based row). */
-  selectLine(row: number, screenLines: string[]): void {
-    const line = stripAnsi(screenLines[row - 1] ?? "");
-    this.selection = { startRow: row, startCol: 1, endRow: row, endCol: Math.max(1, line.length) };
+  /** Select an entire line at screen position (1-based row). */
+  selectLine(screenRow: number, screenLines: string[]): void {
+    const line = stripAnsi(screenLines[screenRow - 1] ?? "");
+    const contentRow = this.screenToContent(screenRow);
+    this.selection = { startRow: contentRow, startCol: 1, endRow: contentRow, endCol: Math.max(1, line.length) };
     this.selecting = false;
   }
 
