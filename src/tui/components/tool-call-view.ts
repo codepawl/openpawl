@@ -3,7 +3,7 @@
  * Shows spinner → result with collapsible output.
  */
 
-import { defaultTheme } from "../themes/default.js";
+import { defaultTheme, ctp } from "../themes/default.js";
 
 export interface ToolCallViewState {
   executionId: string;
@@ -139,11 +139,11 @@ export class ToolCallView {
 
   private getIconColor(): (s: string) => string {
     switch (this.state.status) {
-      case "pending": return defaultTheme.dim;
-      case "running": return defaultTheme.primary;
-      case "completed": return defaultTheme.success;
-      case "failed": return defaultTheme.error;
-      case "aborted": return defaultTheme.dim;
+      case "pending": return ctp.surface2;
+      case "running": return ctp.teal;
+      case "completed": return ctp.green;
+      case "failed": return ctp.red;
+      case "aborted": return ctp.surface2;
     }
   }
 

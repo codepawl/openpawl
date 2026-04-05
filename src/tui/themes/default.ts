@@ -1,40 +1,73 @@
 /**
- * Default dark theme using true color (24-bit RGB).
+ * Default theme — Catppuccin Mocha.
+ * Exact hex values from github.com/catppuccin (MIT license).
+ * Warm dark palette with pastel accents, optimized for long coding sessions.
  */
-import { rgb, bold, dim, italic, underline, cyan, green, yellow, red, magenta, blue } from "../core/ansi.js";
+import { rgb, bgRgb, bold, italic, underline } from "../core/ansi.js";
 import type { Theme } from "./theme.js";
 
-export const defaultTheme: Theme = {
-  primary: cyan,
-  secondary: blue,
-  success: green,
-  warning: yellow,
-  error: red,
-  dim: dim,
-  bold: bold,
-  italic: italic,
-  underline: underline,
+// ── Catppuccin Mocha palette ─────────────────────────────────────
+const ctp = {
+  rosewater: rgb(0xf5, 0xe0, 0xdc),
+  flamingo:  rgb(0xf2, 0xcd, 0xcd),
+  pink:      rgb(0xf5, 0xc2, 0xe7),
+  mauve:     rgb(0xcb, 0xa6, 0xf7),
+  red:       rgb(0xf3, 0x8b, 0xa8),
+  maroon:    rgb(0xeb, 0xa0, 0xac),
+  peach:     rgb(0xfa, 0xb3, 0x87),
+  yellow:    rgb(0xf9, 0xe2, 0xaf),
+  green:     rgb(0xa6, 0xe3, 0xa1),
+  teal:      rgb(0x94, 0xe2, 0xd5),
+  sky:       rgb(0x89, 0xdc, 0xeb),
+  sapphire:  rgb(0x74, 0xc7, 0xec),
+  blue:      rgb(0x89, 0xb4, 0xfa),
+  lavender:  rgb(0xb4, 0xbe, 0xfe),
+  text:      rgb(0xcd, 0xd6, 0xf4),
+  subtext1:  rgb(0xba, 0xc2, 0xde),
+  subtext0:  rgb(0xa6, 0xad, 0xc8),
+  overlay2:  rgb(0x93, 0x99, 0xb2),
+  overlay1:  rgb(0x7f, 0x84, 0x9c),
+  overlay0:  rgb(0x6c, 0x70, 0x86),
+  surface2:  rgb(0x58, 0x5b, 0x70),
+  surface1:  rgb(0x45, 0x47, 0x5a),
+  surface0:  rgb(0x31, 0x32, 0x44),
+  base:      rgb(0x1e, 0x1e, 0x2e),
+  mantle:    rgb(0x18, 0x18, 0x25),
+  crust:     rgb(0x11, 0x11, 0x1b),
+};
 
+// Background variants
+const bgMantle  = bgRgb(0x18, 0x18, 0x25);
+const bgSurface0 = bgRgb(0x31, 0x32, 0x44);
+
+export const defaultTheme: Theme = {
+  // Semantic styles
+  primary: ctp.blue,
+  secondary: ctp.subtext1,
+  success: ctp.green,
+  warning: ctp.yellow,
+  error: ctp.red,
+  dim: ctp.overlay0,
+  bold,
+  italic,
+  underline,
+
+  // Agent colors — each agent gets a distinct Catppuccin accent
   agentColors: [
-    cyan,
-    green,
-    magenta,
-    yellow,
-    blue,
-    rgb(255, 165, 0),  // orange
-    rgb(147, 112, 219), // medium purple
-    rgb(0, 206, 209),   // dark turquoise
+    ctp.mauve,     // coder
+    ctp.green,     // reviewer
+    ctp.pink,      // debugger
+    ctp.peach,     // tester
+    ctp.blue,      // planner
+    ctp.yellow,    // researcher
+    ctp.overlay2,  // assistant
+    ctp.teal,      // custom agents fallback
   ],
 
-  border: {
-    h: "─",
-    v: "│",
-    tl: "┌",
-    tr: "┐",
-    bl: "└",
-    br: "┘",
-  },
+  // Box-drawing characters
+  border: { h: "─", v: "│", tl: "┌", tr: "┐", bl: "└", br: "┘" },
 
+  // UI symbols
   symbols: {
     spinner: ["◒", "◐", "◓", "◑"],
     success: "✓",
@@ -46,24 +79,29 @@ export const defaultTheme: Theme = {
     selected: "❯",
   },
 
+  // Markdown rendering
   markdown: {
-    heading: (s) => bold(cyan(s)),
-    code: (s) => `\x1b[48;5;236m${s}\x1b[49m`, // dark gray background
-    codeBlock: (s) => `\x1b[48;5;236m${s}\x1b[49m`,
-    link: (s) => underline(cyan(s)),
-    blockquote: (s) => dim(`│ ${s}`),
+    heading: (s) => bold(ctp.blue(s)),
+    code: ctp.peach,
+    codeBlock: (s) => bgSurface0(ctp.text(s)),
+    link: (s) => underline(ctp.lavender(s)),
+    blockquote: (s) => ctp.overlay1(`│ ${s}`),
   },
 
-  // Chat bubbles
-  userBubble: (s) => `\x1b[97;48;2;35;65;115m${s}\x1b[0m`,    // white on dark blue
-  agentName: (s) => `\x1b[1;38;2;100;210;210m${s}\x1b[0m`,     // bold teal
+  // Chat — user bubble: text on surface0 bg
+  userBubble: (s) => `\x1b[38;2;205;214;244;48;2;49;50;68m${s}\x1b[0m`,
+  // Agent name: bold + subtext1
+  agentName: (s) => bold(ctp.subtext1(s)),
 
-  // Status bar
-  statusBarBg: (s) => `\x1b[48;2;25;25;35m${s}\x1b[0m`,       // very dark bg
-  statusMode: (s) => `\x1b[38;2;100;200;220m${s}\x1b[0m`,     // cyan
-  statusWorking: (s) => `\x1b[38;2;240;200;80m${s}\x1b[0m`,   // warm yellow
+  // Status bar — mantle background
+  statusBarBg: bgMantle,
+  statusMode: ctp.mauve,
+  statusWorking: ctp.teal,
 
-  // Logo / splash
-  logo: (s) => `\x1b[38;2;80;200;200m${s}\x1b[0m`,            // teal
-  logoBorder: (s) => `\x1b[38;2;50;50;70m${s}\x1b[0m`,        // dim border
+  // Logo — brand mauve
+  logo: ctp.mauve,
+  logoBorder: ctp.surface1,
 };
+
+// ── Convenience re-exports for direct use in app code ────────────
+export { ctp };

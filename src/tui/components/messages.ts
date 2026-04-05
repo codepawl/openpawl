@@ -5,7 +5,7 @@
 import type { Component } from "../core/component.js";
 import { wrapText } from "../utils/wrap.js";
 import { visibleWidth } from "../utils/text-width.js";
-import { defaultTheme } from "../themes/default.js";
+import { defaultTheme, ctp } from "../themes/default.js";
 
 export interface ChatMessage {
   role: "user" | "assistant" | "agent" | "tool" | "system" | "error";
@@ -49,13 +49,13 @@ export class MessagesComponent implements Component {
         }
         case "assistant":
         case "agent": {
-          // LEFT aligned, with agent name label
+          // LEFT aligned, with colored [AgentName] label
           const nameLabel = msg.agentName ?? msg.role;
           const nameFn = msg.agentColor ?? defaultTheme.agentName;
-          allLines.push("  " + nameFn(nameLabel));
+          allLines.push("  " + nameFn(`[${nameLabel}]`));
           const wrapped = wrapText(msg.content || "", maxBubbleWidth);
           for (const line of wrapped) {
-            allLines.push("  " + line);
+            allLines.push("  " + ctp.subtext1(line));
           }
           break;
         }
@@ -69,19 +69,23 @@ export class MessagesComponent implements Component {
           break;
         }
         case "tool": {
-          // LEFT aligned, dim with wrapping
+          // LEFT aligned, overlay1 with teal icon
           const wrapped = wrapText(msg.content || "", maxBubbleWidth - 4);
           for (let i = 0; i < wrapped.length; i++) {
-            const prefix = i === 0 ? "⚙ " : "  ";
-            allLines.push("  " + defaultTheme.dim(prefix + wrapped[i]));
+            const prefix = i === 0 ? ctp.teal("⚙ ") : "  ";
+            allLines.push("  " + prefix + ctp.overlay1(wrapped[i]!));
           }
           break;
         }
         default: {
-          // system and others — LEFT aligned, dim
+          // system and others — LEFT aligned
+          // If content already has ANSI codes (pre-styled), pass through as-is.
+          // Otherwise apply overlay1 color.
+          const hasAnsi = (msg.content || "").includes("\x1b[");
+          const colorFn = hasAnsi ? (s: string) => s : ctp.overlay1;
           const wrapped = wrapText(msg.content || "", maxBubbleWidth);
           for (const line of wrapped) {
-            allLines.push("  " + defaultTheme.dim(line));
+            allLines.push("  " + colorFn(line));
           }
           break;
         }

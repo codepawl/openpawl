@@ -21,7 +21,7 @@ import { resolveFileRef } from "./file-ref.js";
 import { executeShell } from "./shell.js";
 import { detectConfig, showConfigWarning } from "./config-check.js";
 import { setLoggerMuted } from "../core/logger.js";
-import { defaultTheme } from "../tui/themes/default.js";
+import { defaultTheme, ctp } from "../tui/themes/default.js";
 import { ModeSystem } from "../tui/keybindings/mode-system.js";
 import { LeaderKeyHandler } from "../tui/keybindings/leader-key.js";
 import { CommandPalette, type PaletteSource } from "../tui/keybindings/command-palette.js";
@@ -94,7 +94,7 @@ function wireRouterEvents(
       content: "",
       timestamp: new Date(),
     });
-    layout.statusBar.updateSegment(3, `${agentDisplayName(agentId)} working...`, defaultTheme.statusWorking);
+    layout.statusBar.updateSegment(3, `${agentDisplayName(agentId)} working...`, ctp.teal);
     layout.tui.requestRender();
   };
 
@@ -116,12 +116,15 @@ function wireRouterEvents(
   };
 
   const onAgentTool = (_sessionId: string, agentId: string, toolName: string, status: string) => {
+    const symbolFn = status === "completed" ? ctp.green
+      : status === "failed" ? ctp.red
+        : ctp.teal;
     const symbol = status === "completed" ? defaultTheme.symbols.success
       : status === "failed" ? defaultTheme.symbols.error
         : defaultTheme.symbols.pending;
     layout.messages.addMessage({
       role: "tool",
-      content: `${symbol} ${toolName} (${status})`,
+      content: `${symbolFn(symbol)} ${toolName} (${status})`,
       agentName: agentDisplayName(agentId),
       timestamp: new Date(),
     });
@@ -130,7 +133,7 @@ function wireRouterEvents(
 
   const onAgentDone = (_sessionId: string, _agentId: string) => {
     streamingForAgent = null;
-    layout.statusBar.updateSegment(3, "idle", defaultTheme.dim);
+    layout.statusBar.updateSegment(3, "idle", ctp.overlay0);
     layout.tui.requestRender();
   };
 
@@ -141,7 +144,7 @@ function wireRouterEvents(
       content: `Dispatch error: ${error.type}`,
       timestamp: new Date(),
     });
-    layout.statusBar.updateSegment(3, "idle", defaultTheme.dim);
+    layout.statusBar.updateSegment(3, "idle", ctp.overlay0);
     layout.tui.requestRender();
   };
 
@@ -170,7 +173,9 @@ function wireSessionEvents(
   layout: AppLayout,
 ): () => void {
   const onCostUpdated = (_sessionId: string, cost: { usd: number }) => {
-    layout.statusBar.updateSegment(4, `$${cost.usd.toFixed(2)}`, defaultTheme.success);
+    // Yellow when cost > $0.50, overlay0 otherwise
+    const costColor = cost.usd > 0.50 ? ctp.yellow : ctp.overlay0;
+    layout.statusBar.updateSegment(4, `$${cost.usd.toFixed(2)}`, costColor);
     layout.tui.requestRender();
   };
 
@@ -199,14 +204,14 @@ async function handleWithRouter(
   layout: AppLayout,
   ctx: { addMessage: (role: string, content: string) => void },
 ): Promise<void> {
-  layout.statusBar.updateSegment(3, "routing...", defaultTheme.statusWorking);
+  layout.statusBar.updateSegment(3, "routing...", ctp.teal);
   layout.tui.requestRender();
 
   const result = await router.route(session.id, text);
 
   if (result.isErr()) {
     ctx.addMessage("error", `Error: ${result.error.type}`);
-    layout.statusBar.updateSegment(3, "idle", defaultTheme.dim);
+    layout.statusBar.updateSegment(3, "idle", ctp.overlay0);
     layout.tui.requestRender();
     return;
   }
@@ -236,11 +241,11 @@ async function handleWithRouter(
     // else: response was already streamed token-by-token via dispatch:agent:token
   }
 
-  layout.statusBar.updateSegment(3, "idle", defaultTheme.dim);
+  layout.statusBar.updateSegment(3, "idle", ctp.overlay0);
 
   // Update cost display
   const cost = session.cost;
-  layout.statusBar.updateSegment(4, `$${cost.usd.toFixed(2)}`, defaultTheme.success);
+  layout.statusBar.updateSegment(4, `$${cost.usd.toFixed(2)}`, ctp.green);
   layout.tui.requestRender();
 }
 
@@ -253,7 +258,7 @@ async function handleChatFallback(
   layout: AppLayout,
   ctx: { addMessage: (role: string, content: string) => void },
 ): Promise<void> {
-  layout.statusBar.updateSegment(3, "thinking...", defaultTheme.statusWorking);
+  layout.statusBar.updateSegment(3, "thinking...", ctp.teal);
   layout.tui.requestRender();
 
   try {
@@ -286,7 +291,7 @@ async function handleChatFallback(
     lines.push("  Type /error for technical details");
     ctx.addMessage("error", lines.join("\n"));
   } finally {
-    layout.statusBar.updateSegment(3, "idle", defaultTheme.dim);
+    layout.statusBar.updateSegment(3, "idle", ctp.overlay0);
     layout.tui.requestRender();
   }
 }
@@ -445,36 +450,38 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
   layout.messages.addMessage({
     role: "system",
     content: [
-      `\u2726  O P E N P A W L  v${versionStr}`,
+      ctp.mauve(`\u2726  O P E N P A W L`) + "  " + ctp.overlay1(`v${versionStr}`),
       "",
-      "Terminal-native AI workspace. Just type what you want to build.",
+      ctp.subtext0("Terminal-native AI workspace. Just type what you want to build."),
       "",
-      "  /help       Show commands       @coder     Route to Coder",
-      "  /settings   Configure provider  @reviewer  Route to Reviewer",
-      "  /agents     List agents         @planner   Route to Planner",
-      "  !command    Run shell command   @tester    Route to Tester",
-      "  @file       Reference a file    @debugger  Route to Debugger",
+      `  ${ctp.blue("/help")}       Show commands       ${ctp.blue("@coder")}     Route to Coder`,
+      `  ${ctp.blue("/settings")}   Configure provider  ${ctp.blue("@reviewer")}  Route to Reviewer`,
+      `  ${ctp.blue("/agents")}     List agents         ${ctp.blue("@planner")}   Route to Planner`,
+      `  ${ctp.peach("!command")}    Run shell command   ${ctp.blue("@tester")}    Route to Tester`,
+      `  ${ctp.blue("@file")}       Reference a file    ${ctp.blue("@debugger")}  Route to Debugger`,
+      "",
+      ctp.surface1("\u2500".repeat(60)),
     ].join("\n"),
     timestamp: new Date(),
   });
 
   // Status bar segments: provider | connection | mode | state | cost
   layout.statusBar.setSegments([
-    { text: "no provider", color: defaultTheme.dim },
-    { text: "\u25cb not configured", color: defaultTheme.error },
-    { text: "auto", color: defaultTheme.statusMode },
-    { text: "idle", color: defaultTheme.dim },
-    { text: "$0.00", color: defaultTheme.success },
+    { text: "no provider", color: ctp.subtext1 },
+    { text: "\u25cb not configured", color: ctp.red },
+    { text: "\u25c6 DEF", color: ctp.mauve },
+    { text: "idle", color: ctp.overlay0 },
+    { text: "$0.00", color: ctp.overlay0 },
   ]);
-  layout.statusBar.setRightText("/help");
+  layout.statusBar.setRightText(ctp.overlay0("/help"));
 
   const configState = await detectConfig();
   if (configState.hasProvider) {
-    layout.statusBar.updateSegment(0, configState.providerName);
+    layout.statusBar.updateSegment(0, configState.providerName, ctp.subtext1);
     if (configState.isConnected) {
-      layout.statusBar.updateSegment(1, "\u25cf connected", defaultTheme.success);
+      layout.statusBar.updateSegment(1, "\u25cf connected", ctp.green);
     } else {
-      layout.statusBar.updateSegment(1, "\u25cb disconnected", defaultTheme.error);
+      layout.statusBar.updateSegment(1, "\u25cb disconnected", ctp.red);
     }
   }
   showConfigWarning(configState, layout);
@@ -483,7 +490,9 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
   const modeSystem = new ModeSystem();
   const updateModeDisplay = () => {
     const info = modeSystem.getModeInfo();
-    layout.statusBar.updateSegment(2, `${info.icon} ${info.shortName}`, defaultTheme.statusMode);
+    // Auto-accept mode uses yellow (visual warning), others use mauve
+    const modeColor = info.mode === "auto-accept" ? ctp.yellow : ctp.mauve;
+    layout.statusBar.updateSegment(2, `${info.icon} ${info.shortName}`, modeColor);
     layout.tui.requestRender();
   };
 

@@ -6,7 +6,7 @@ import type { Component } from "../core/component.js";
 import type { KeyEvent } from "../core/input.js";
 import { visibleWidth } from "../utils/text-width.js";
 import { truncate } from "../utils/truncate.js";
-import { defaultTheme } from "../themes/default.js";
+import { defaultTheme, ctp } from "../themes/default.js";
 
 export interface AutocompleteProvider {
   getSuggestions(input: string, cursorPos: number): AutocompleteSuggestion[];
@@ -41,10 +41,10 @@ export class EditorComponent implements Component {
   onChange?: (text: string) => void;
   autocompleteProvider?: AutocompleteProvider;
 
-  constructor(id: string, placeholder = "Type a message...") {
+  constructor(id: string, placeholder = "Ask anything...") {
     this.id = id;
     this.placeholder = placeholder;
-    this.borderColor = defaultTheme.dim;
+    this.borderColor = ctp.surface0;
   }
 
   render(width: number): string[] {
@@ -80,17 +80,21 @@ export class EditorComponent implements Component {
     const border = this.focused ? this.borderColor : defaultTheme.dim;
     result.push(border("┌" + "─".repeat(width - 2) + "┐"));
 
-    // Content lines or placeholder
+    // Content lines or placeholder — prompt symbol ❯ on first line
+    const promptSymbol = ctp.mauve("❯");
+    const promptWidth = 2; // "❯ " = 2 visible chars
+    const contentWidth = innerWidth - promptWidth;
     const isEmpty = this.lines.length === 1 && this.lines[0] === "";
     if (isEmpty && !this.focused) {
-      const truncatedPlaceholder = truncate(this.placeholder, innerWidth, "");
-      const placeholderPad = Math.max(0, innerWidth - visibleWidth(truncatedPlaceholder));
-      result.push(border("│") + " " + defaultTheme.dim(truncatedPlaceholder) + " ".repeat(placeholderPad) + " " + border("│"));
+      const truncatedPlaceholder = truncate(this.placeholder, contentWidth, "");
+      const placeholderPad = Math.max(0, contentWidth - visibleWidth(truncatedPlaceholder));
+      result.push(border("│") + " " + promptSymbol + " " + ctp.overlay0(truncatedPlaceholder) + " ".repeat(placeholderPad) + " " + border("│"));
     } else {
-      for (const line of this.lines) {
-        const display = truncate(line, innerWidth, "");
-        const padding = Math.max(0, innerWidth - visibleWidth(display));
-        result.push(border("│") + " " + display + " ".repeat(padding) + " " + border("│"));
+      for (let i = 0; i < this.lines.length; i++) {
+        const prefix = i === 0 ? promptSymbol + " " : "  ";
+        const display = truncate(this.lines[i]!, contentWidth, "");
+        const padding = Math.max(0, contentWidth - visibleWidth(display));
+        result.push(border("│") + " " + prefix + display + " ".repeat(padding) + " " + border("│"));
       }
     }
 
@@ -323,7 +327,8 @@ export class EditorComponent implements Component {
   }
 
   setCursorFromClick(termCol: number): void {
-    const contentCol = Math.max(0, termCol - 3);
+    // Account for border(1) + space(1) + prompt "❯ "(2)
+    const contentCol = Math.max(0, termCol - 5);
     const lineLen = this.lines[this.cursorRow]?.length ?? 0;
     this.cursorCol = Math.min(contentCol, lineLen);
   }
@@ -349,10 +354,11 @@ export class EditorComponent implements Component {
     // Calculate how many autocomplete lines are above the editor box
     const acLines = this.getAutocompleteLineCount();
     // row: acLines + 1 for top border + cursorRow (1-based)
-    // col: 2 for "│ " border+padding + cursorCol (1-based)
+    // col: border(1) + space(1) + prompt "❯ "(2) + cursorCol (1-based)
+    // First row has prompt symbol, subsequent rows have 2-space indent
     return {
       row: acLines + 1 + this.cursorRow + 1,
-      col: this.cursorCol + 3,
+      col: this.cursorCol + 5,
     };
   }
 
