@@ -135,6 +135,14 @@ export interface OpenPawlGlobalConfig {
     showRoutingDecision?: boolean;
     customAgentsDir?: string;
   };
+  tools?: {
+    defaults?: Record<string, string>;
+    mcp?: Array<{
+      name: string;
+      url: string;
+      permission?: string;
+    }>;
+  };
 }
 
 const DEFAULT_GATEWAY_HOST = "127.0.0.1";

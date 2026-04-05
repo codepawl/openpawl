@@ -64,7 +64,8 @@
     "picocolors": "^1.1.1",
     "secure-exec": "^0.1.0",
     "ws": "^8.19.0",
-    "zod": "^3.25.76"
+    "zod": "^3.25.76",
+    "zod-to-json-schema": "^3.25.2"
   },
   "pnpm": {
     "overrides": {
