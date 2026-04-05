@@ -4,9 +4,9 @@
  * bullet lists, blockquotes, links, and horizontal rules.
  */
 import type { Component } from "../core/component.js";
-import { bold, italic, dim } from "../core/ansi.js";
+import { bold, italic } from "../core/ansi.js";
 import { wrapText } from "../utils/wrap.js";
-import { defaultTheme } from "../themes/default.js";
+import { defaultTheme, ctp } from "../themes/default.js";
 
 export class MarkdownComponent implements Component {
   readonly id: string;
@@ -39,24 +39,25 @@ export function renderMarkdown(md: string, width: number): string[] {
       if (!inCodeBlock) {
         inCodeBlock = true;
         codeBlockLang = line.trimStart().slice(3).trim();
-        result.push(dim("┌─ " + (codeBlockLang || "code") + " " + "─".repeat(Math.max(0, width - 6 - codeBlockLang.length))));
+        const label = codeBlockLang || "code";
+        result.push(ctp.surface1("┌─ ") + ctp.overlay1(label) + " " + ctp.surface1("─".repeat(Math.max(0, width - 5 - label.length))));
       } else {
         inCodeBlock = false;
         codeBlockLang = "";
-        result.push(dim("└" + "─".repeat(width - 1)));
+        result.push(ctp.surface1("└" + "─".repeat(width - 1)));
       }
       continue;
     }
 
-    // Inside code block — no inline processing
+    // Inside code block — no inline processing, render with border
     if (inCodeBlock) {
-      result.push(defaultTheme.markdown.codeBlock("  " + line));
+      result.push(ctp.surface1("│ ") + ctp.text(line));
       continue;
     }
 
     // Horizontal rule
     if (/^[-*_]{3,}\s*$/.test(line.trim())) {
-      result.push(dim("─".repeat(width)));
+      result.push(ctp.surface1("─".repeat(width)));
       continue;
     }
 
@@ -70,8 +71,8 @@ export function renderMarkdown(md: string, width: number): string[] {
         : bold(text);
       result.push("");
       result.push(styled);
-      if (level === 1) result.push(dim("═".repeat(Math.min(width, text.length + 4))));
-      else if (level === 2) result.push(dim("─".repeat(Math.min(width, text.length + 4))));
+      if (level === 1) result.push(ctp.surface1("═".repeat(Math.min(width, text.length + 4))));
+      else if (level === 2) result.push(ctp.surface1("─".repeat(Math.min(width, text.length + 4))));
       continue;
     }
 
@@ -89,7 +90,7 @@ export function renderMarkdown(md: string, width: number): string[] {
       const text = bulletMatch[2]!;
       const wrapped = wrapText(processInline(text), width - indent.length - 2);
       wrapped.forEach((wl, i) => {
-        const prefix = i === 0 ? indent + "• " : indent + "  ";
+        const prefix = i === 0 ? indent + ctp.blue("• ") : indent + "  ";
         result.push(prefix + wl);
       });
       continue;
@@ -121,7 +122,7 @@ export function renderMarkdown(md: string, width: number): string[] {
 
   // Close unclosed code block
   if (inCodeBlock) {
-    result.push(dim("└" + "─".repeat(width - 1)));
+    result.push(ctp.surface1("└" + "─".repeat(width - 1)));
   }
 
   return result;

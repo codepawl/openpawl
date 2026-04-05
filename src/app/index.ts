@@ -26,6 +26,7 @@ import { ModeSystem } from "../tui/keybindings/mode-system.js";
 import { LeaderKeyHandler } from "../tui/keybindings/leader-key.js";
 import { CommandPalette, type PaletteSource } from "../tui/keybindings/command-palette.js";
 import { KeybindingHelp, buildHelpSections } from "../tui/keybindings/keybinding-help.js";
+import { ThinkingIndicator } from "../tui/components/thinking-indicator.js";
 
 import type { AppLayout } from "./layout.js";
 
@@ -83,22 +84,45 @@ function wireRouterEvents(
   layout: AppLayout,
 ): () => void {
   let streamingForAgent: string | null = null;
+  const thinking = new ThinkingIndicator();
+  let thinkingMsgAdded = false;
+
+  // Thinking indicator updates the last message content
+  thinking.onUpdate = (text) => {
+    if (thinkingMsgAdded) {
+      // Replace last message content with current thinking frame
+      layout.messages.replaceLast(text);
+      layout.tui.requestRender();
+    }
+  };
 
   const onAgentStart = (_sessionId: string, agentId: string) => {
     streamingForAgent = agentId;
-    // Create the initial empty message for this agent — tokens will be appended to it
+
+    // Start thinking indicator
+    thinking.start(agentDisplayName(agentId), getAgentColorFn(agentId));
     layout.messages.addMessage({
       role: "agent",
       agentName: agentDisplayName(agentId),
       agentColor: getAgentColorFn(agentId),
-      content: "",
+      content: thinking.getCurrentText(),
       timestamp: new Date(),
     });
-    layout.statusBar.updateSegment(3, `${agentDisplayName(agentId)} working...`, ctp.teal);
+    thinkingMsgAdded = true;
+
+    layout.statusBar.updateSegment(3, `${agentDisplayName(agentId)} thinking...`, ctp.teal);
     layout.tui.requestRender();
   };
 
   const onAgentToken = (_sessionId: string, agentId: string, token: string) => {
+    // Stop thinking indicator on first token
+    if (thinking.isVisible()) {
+      thinking.stop();
+      thinkingMsgAdded = false;
+      // Clear the thinking message content — real tokens will follow
+      layout.messages.replaceLast("");
+      layout.statusBar.updateSegment(3, `${agentDisplayName(agentId)} working...`, ctp.teal);
+    }
     if (streamingForAgent !== agentId) {
       // New agent started streaming — add a labeled message
       streamingForAgent = agentId;
@@ -133,12 +157,16 @@ function wireRouterEvents(
 
   const onAgentDone = (_sessionId: string, _agentId: string) => {
     streamingForAgent = null;
+    thinking.stop();
+    thinkingMsgAdded = false;
     layout.statusBar.updateSegment(3, "idle", ctp.overlay0);
     layout.tui.requestRender();
   };
 
   const onDispatchError = (_sessionId: string, error: { type: string }) => {
     streamingForAgent = null;
+    thinking.stop();
+    thinkingMsgAdded = false;
     layout.messages.addMessage({
       role: "error",
       content: `Dispatch error: ${error.type}`,

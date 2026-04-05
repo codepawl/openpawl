@@ -6,6 +6,7 @@ import type { Component } from "../core/component.js";
 import { wrapText } from "../utils/wrap.js";
 import { visibleWidth } from "../utils/text-width.js";
 import { defaultTheme, ctp } from "../themes/default.js";
+import { renderMarkdown } from "./markdown.js";
 
 export interface ChatMessage {
   role: "user" | "assistant" | "agent" | "tool" | "system" | "error";
@@ -49,13 +50,14 @@ export class MessagesComponent implements Component {
         }
         case "assistant":
         case "agent": {
-          // LEFT aligned, with colored [AgentName] label
+          // LEFT aligned, colored label + markdown-rendered body
           const nameLabel = msg.agentName ?? msg.role;
           const nameFn = msg.agentColor ?? defaultTheme.agentName;
           allLines.push("  " + nameFn(`[${nameLabel}]`));
-          const wrapped = wrapText(msg.content || "", maxBubbleWidth);
-          for (const line of wrapped) {
-            allLines.push("  " + ctp.subtext1(line));
+          // Render markdown for agent/assistant responses
+          const mdLines = renderMarkdown(msg.content || "", maxBubbleWidth);
+          for (const line of mdLines) {
+            allLines.push("  " + line);
           }
           break;
         }
@@ -98,6 +100,13 @@ export class MessagesComponent implements Component {
 
   addMessage(msg: ChatMessage): void {
     this.messages.push(msg);
+  }
+
+  /** Replace the last message's content entirely (for thinking indicator). */
+  replaceLast(content: string): void {
+    if (this.messages.length > 0) {
+      this.messages[this.messages.length - 1]!.content = content;
+    }
   }
 
   /** Append text to the last message (streaming). */
