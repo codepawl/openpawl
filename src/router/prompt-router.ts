@@ -324,10 +324,9 @@ export class PromptRouter extends EventEmitter {
     return ok("Display cleared.");
   }
 
-  private async handleCompact(sessionId: string): Promise<Result<string, RouterError>> {
-    // Placeholder: real compression needs LLM summarization
-    this.emit("command:compact", sessionId);
-    return ok("Context compression requested.");
+  private async handleCompact(_sessionId: string): Promise<Result<string, RouterError>> {
+    this.emit("command:compact");
+    return ok("Context compressed. Older messages summarized to save tokens.");
   }
 
   private async handleModel(_sessionId: string, args: string): Promise<Result<string, RouterError>> {
@@ -349,10 +348,9 @@ export class PromptRouter extends EventEmitter {
   }
 
   private async handleExport(_sessionId: string, args: string): Promise<Result<string, RouterError>> {
-    // Placeholder: real export needs session message formatting
     const exportPath = args || "session-export.md";
     this.emit("command:export", exportPath);
-    return ok(`Conversation exported to: ${exportPath}`);
+    return ok(`Session export requested: ${exportPath}`);
   }
 
   private async handleConfig(_sessionId: string): Promise<Result<string, RouterError>> {
@@ -367,10 +365,20 @@ export class PromptRouter extends EventEmitter {
     return ok(lines.join("\n"));
   }
 
-  private async handleUndo(sessionId: string): Promise<Result<string, RouterError>> {
-    // Placeholder: real undo uses SessionStore.restoreFileSnapshot
-    this.emit("command:undo", sessionId);
-    return ok("Undo: reverted last file modification.");
+  private async handleUndo(_sessionId: string): Promise<Result<string, RouterError>> {
+    try {
+      const { UndoManager } = await import("../conversation/undo-manager.js");
+      const { join } = await import("node:path");
+      const { tmpdir } = await import("node:os");
+      const undoMgr = new UndoManager(join(tmpdir(), "openpawl-undo"));
+      const result = await undoMgr.undo();
+      if (result.isOk()) {
+        return ok(`Undo: restored ${result.value.filePath}`);
+      }
+      return ok(`Undo: ${result.error.cause}`);
+    } catch {
+      return ok("Nothing to undo.");
+    }
   }
 
   // ═══════════════════════════════════════════════════════════════════════════

@@ -768,6 +768,42 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
     },
   });
 
+  // /theme command — switch themes via ThemeEngine
+  registry.register({
+    name: "theme",
+    aliases: ["t"],
+    description: "Switch or list color themes",
+    args: "[theme-name]",
+    async execute(args, msgCtx) {
+      const { getThemeEngine } = await import("../tui/themes/theme-engine.js");
+      const engine = getThemeEngine();
+
+      if (!args.trim() || args.trim() === "list") {
+        const themes = engine.listThemes();
+        const current = engine.getCurrentId();
+        const lines = ["\u2726 Themes", ""];
+        for (const t of themes) {
+          const marker = t.id === current ? ctp.green(" \u2190 current") : "";
+          const variant = t.variant === "light" ? ctp.overlay0(" (light)") : "";
+          lines.push(`  ${t.id}${variant}${marker}`);
+        }
+        lines.push("", "  /theme <name> to switch");
+        msgCtx.addMessage("system", lines.join("\n"));
+        return;
+      }
+
+      const ok = engine.switchTheme(args.trim());
+      if (ok) {
+        msgCtx.addMessage("system", `\u2713 Switched to ${args.trim()}`);
+        // Force full re-render with new theme
+        msgCtx.tui?.requestRender();
+      } else {
+        const available = engine.listThemes().map((t) => t.id).join(", ");
+        msgCtx.addMessage("error", `Unknown theme: ${args.trim()}\nAvailable: ${available}`);
+      }
+    },
+  });
+
   // TUI callbacks
   layout.tui.onSystemMessage = (msg: string) => {
     layout.messages.addMessage({ role: "system", content: msg, timestamp: new Date() });

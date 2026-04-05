@@ -1,27 +1,4 @@
 {
-  "roster": [
-    {
-      "role": "Frontend Engineer",
-      "count": 1,
-      "description": "frontend, ui, css, accessibility"
-    },
-    {
-      "role": "Backend Engineer",
-      "count": 1,
-      "description": "backend, api, database, systems"
-    },
-    {
-      "role": "QA Reviewer",
-      "count": 1,
-      "description": "code_review, testing, quality, analysis"
-    }
-  ],
-  "worker_url": "",
-  "chat_endpoint": "/v1/chat/completions",
-  "model": "minimax-m2.7",
-  "goal": "a aesthetic webpage for customer buing coffee",
-  "workspace_dir": "/home/nxank4/personal/openpawl-test-projects",
-  "template": "fullstack",
-  "project_name": "coffeeshop",
-  "team_mode": "autonomous"
+  "provider": "auto",
+  "model": "auto"
 }

@@ -40,7 +40,7 @@ const ctp = {
 const bgMantle  = bgRgb(0x18, 0x18, 0x25);
 const bgSurface0 = bgRgb(0x31, 0x32, 0x44);
 
-export const defaultTheme: Theme = {
+const catppuccinMochaTheme: Theme = {
   // Semantic styles
   primary: ctp.blue,
   secondary: ctp.subtext1,
@@ -102,6 +102,25 @@ export const defaultTheme: Theme = {
   logo: ctp.mauve,
   logoBorder: ctp.surface1,
 };
+
+/**
+ * Active theme proxy — delegates to ThemeEngine's current theme.
+ * All existing `import { defaultTheme }` automatically route through the engine.
+ * When theme switches, all components see the new theme without re-importing.
+ */
+let _activeTheme: Theme = catppuccinMochaTheme;
+
+/** Set the active theme (called by ThemeEngine on switch). */
+export function setActiveTheme(theme: Theme): void {
+  _activeTheme = theme;
+}
+
+/** The default theme export — reads from the active theme. */
+export const defaultTheme: Theme = new Proxy({} as Theme, {
+  get(_target, prop: string) {
+    return (_activeTheme as unknown as Record<string, unknown>)[prop];
+  },
+});
 
 // ── Convenience re-exports for direct use in app code ────────────
 export { ctp };

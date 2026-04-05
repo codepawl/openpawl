@@ -6,6 +6,7 @@ import { EventEmitter } from "node:events";
 import type { Theme } from "./theme.js";
 import type { ThemeDefinition } from "./theme-types.js";
 import { getBuiltInThemes } from "./built-in/index.js";
+import { setActiveTheme } from "./default.js";
 
 export class ThemeEngine extends EventEmitter {
   private themes = new Map<string, ThemeDefinition>();
@@ -37,11 +38,12 @@ export class ThemeEngine extends EventEmitter {
     return this.current.id;
   }
 
-  /** Switch to a different theme by ID. */
+  /** Switch to a different theme by ID. Updates the global defaultTheme proxy. */
   switchTheme(themeId: string): boolean {
     const td = this.themes.get(themeId);
     if (!td) return false;
     this.current = td;
+    setActiveTheme(td.theme);
     this.emit("theme:changed", themeId);
     return true;
   }
