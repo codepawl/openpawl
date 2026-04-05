@@ -199,21 +199,14 @@ describe("MessagesComponent", () => {
     expect(msgs.getMessageCount()).toBe(0);
   });
 
-  it("auto-scrolls to bottom when at bottom", () => {
-    const msgs = new MessagesComponent("msgs1", 5);
+  it("renders all lines without internal scroll (TUI manages viewport)", () => {
+    const msgs = new MessagesComponent("msgs1");
     for (let i = 0; i < 20; i++) {
       msgs.addMessage({ role: "user", content: `Message ${i}` });
     }
-    expect(msgs.isAtBottom()).toBe(true);
-  });
-
-  it("manual scroll disables auto-scroll", () => {
-    const msgs = new MessagesComponent("msgs1", 5);
-    for (let i = 0; i < 20; i++) {
-      msgs.addMessage({ role: "user", content: `Message ${i}` });
-    }
-    msgs.scrollUp(3);
-    expect(msgs.isAtBottom()).toBe(false);
+    const lines = msgs.render(80);
+    // All 20 messages rendered (each has content line + empty separator)
+    expect(lines.length).toBeGreaterThanOrEqual(20);
   });
 });
 

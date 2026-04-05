@@ -27,8 +27,7 @@ export interface AppLayout {
 export function createLayout(terminal?: Terminal): AppLayout {
   const tui = new TUI(terminal);
 
-  // maxHeight = very large so Messages returns ALL lines (TUI manages viewport)
-  const messages = new MessagesComponent("messages", 1_000_000);
+  const messages = new MessagesComponent("messages");
   const divider = new DividerComponent("divider");
   const editor = new EditorComponent("editor", "Type a prompt, /command, @file, or !shell...");
   const statusBar = new StatusBarComponent("status", defaultTheme.statusBarBg);

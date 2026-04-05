@@ -76,9 +76,9 @@ export function showConfigWarning(
       role: "system",
       content:
         "No provider configured.\n" +
-        "   Run: /settings provider anthropic\n" +
+        "   Run:  /settings provider anthropic\n" +
         "   Then: /settings apikey sk-ant-...\n" +
-        "   Or set ANTHROPIC_API_KEY environment variable",
+        "   Or:   set ANTHROPIC_API_KEY environment variable",
       timestamp: new Date(),
     });
   } else if (configState.error) {

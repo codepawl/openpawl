@@ -58,7 +58,7 @@ export class ModeView extends InteractiveView {
     const t = this.theme;
     const lines: string[] = [];
 
-    lines.push(t.bold("\u26a1 Execution Mode") + t.dim("                        [\u2191\u2193 navigate \u00b7 Enter select \u00b7 Esc close]"));
+    lines.push(this.makeHeader("\u26a1 Execution Mode", "[\u2191\u2193 navigate \u00b7 Enter select \u00b7 Esc close]"));
     lines.push("");
 
     for (let i = 0; i < MODES.length; i++) {

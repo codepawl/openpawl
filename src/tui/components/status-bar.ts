@@ -56,18 +56,30 @@ export class StatusBarComponent implements Component {
   private renderSegments(width: number): string {
     const separator = " \u2502 ";
     const segments = this.segments!;
+    const right = this.rightText ? this.rightText + " " : "";
+    const rightWidth = visibleWidth(right);
 
     const leftParts = segments.map((s) =>
       s.color ? s.color(s.text) : s.text,
     );
     const left = " " + leftParts.join(separator);
-    const right = this.rightText ? this.rightText + " " : "";
 
     const leftPlain = segments.map((s) => s.text).join(separator);
     const leftWidth = visibleWidth(leftPlain) + 1; // +1 for leading space
-    const rightWidth = visibleWidth(right);
-    const padding = Math.max(1, width - leftWidth - rightWidth);
 
+    // Overflow: truncate left side to fit
+    if (leftWidth + rightWidth + 1 > width) {
+      const availableForLeft = Math.max(4, width - rightWidth - 1);
+      const truncatedLeft = truncate(left, availableForLeft);
+      const truncLeftWidth = visibleWidth(truncatedLeft);
+      const padding = Math.max(1, width - truncLeftWidth - rightWidth);
+      const bar = truncatedLeft + " ".repeat(padding) + right;
+      const barWidth = visibleWidth(bar);
+      const padded = barWidth < width ? bar + " ".repeat(width - barWidth) : bar;
+      return this.style(padded);
+    }
+
+    const padding = Math.max(1, width - leftWidth - rightWidth);
     const bar = left + " ".repeat(padding) + right;
     const barWidth = visibleWidth(bar);
     const padded = barWidth < width ? bar + " ".repeat(width - barWidth) : bar;

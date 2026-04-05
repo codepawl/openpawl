@@ -61,7 +61,7 @@ export class ModelView extends InteractiveView {
     const t = this.theme;
     const lines: string[] = [];
 
-    lines.push(t.bold("\u26a1 Model") + t.dim("                                  [\u2191\u2193 navigate \u00b7 Enter select \u00b7 Esc close]"));
+    lines.push(this.makeHeader("\u26a1 Model", "[\u2191\u2193 navigate \u00b7 Enter select \u00b7 Esc close]"));
     lines.push("");
 
     let lastProvider = "";

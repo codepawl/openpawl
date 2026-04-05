@@ -3,7 +3,6 @@
  * Supports streaming append for token-by-token display.
  */
 import type { Component } from "../core/component.js";
-import type { KeyEvent } from "../core/input.js";
 import { wrapText } from "../utils/wrap.js";
 import { visibleWidth } from "../utils/text-width.js";
 import { defaultTheme } from "../themes/default.js";
@@ -23,13 +22,9 @@ export class MessagesComponent implements Component {
   readonly focusable = true;
 
   private messages: ChatMessage[] = [];
-  private scrollOffset = 0;
-  private maxHeight: number;
-  private autoScroll = true;
 
-  constructor(id: string, maxHeight = 100) {
+  constructor(id: string) {
     this.id = id;
-    this.maxHeight = maxHeight;
   }
 
   render(width: number): string[] {
@@ -65,16 +60,21 @@ export class MessagesComponent implements Component {
           break;
         }
         case "error": {
-          // LEFT aligned, red with prefix
-          const wrapped = wrapText(msg.content || "", maxBubbleWidth - 2);
-          for (const line of wrapped) {
-            allLines.push("  " + defaultTheme.error("✗ " + line));
+          // LEFT aligned, red with prefix on first line only
+          const wrapped = wrapText(msg.content || "", maxBubbleWidth - 4);
+          for (let i = 0; i < wrapped.length; i++) {
+            const prefix = i === 0 ? "✗ " : "  ";
+            allLines.push("  " + defaultTheme.error(prefix + wrapped[i]));
           }
           break;
         }
         case "tool": {
-          // LEFT aligned, dim monospace
-          allLines.push("  " + defaultTheme.dim("⚙ " + (msg.content || "")));
+          // LEFT aligned, dim with wrapping
+          const wrapped = wrapText(msg.content || "", maxBubbleWidth - 4);
+          for (let i = 0; i < wrapped.length; i++) {
+            const prefix = i === 0 ? "⚙ " : "  ";
+            allLines.push("  " + defaultTheme.dim(prefix + wrapped[i]));
+          }
           break;
         }
         default: {
@@ -89,45 +89,11 @@ export class MessagesComponent implements Component {
       allLines.push(""); // spacing between messages
     }
 
-    // Apply scroll viewport
-    const visibleLines = allLines.slice(this.scrollOffset, this.scrollOffset + this.maxHeight);
-    return visibleLines;
-  }
-
-  onKey(event: KeyEvent): boolean {
-    if (event.type === "arrow" && event.direction === "up") {
-      this.scrollUp(3);
-      return true;
-    }
-    if (event.type === "arrow" && event.direction === "down") {
-      this.scrollDown(3);
-      return true;
-    }
-    if (event.type === "pageup") {
-      this.scrollUp(this.maxHeight);
-      return true;
-    }
-    if (event.type === "pagedown") {
-      this.scrollDown(this.maxHeight);
-      return true;
-    }
-    if (event.type === "home") {
-      this.scrollOffset = 0;
-      this.autoScroll = false;
-      return true;
-    }
-    if (event.type === "end") {
-      this.scrollToBottom();
-      return true;
-    }
-    return false;
+    return allLines;
   }
 
   addMessage(msg: ChatMessage): void {
     this.messages.push(msg);
-    if (this.autoScroll) {
-      this.scrollToBottom();
-    }
   }
 
   /** Append text to the last message (streaming). */
@@ -138,47 +104,13 @@ export class MessagesComponent implements Component {
       const last = this.messages[this.messages.length - 1]!;
       last.content += chunk;
     }
-    if (this.autoScroll) {
-      this.scrollToBottom();
-    }
   }
 
   clear(): void {
     this.messages = [];
-    this.scrollOffset = 0;
-    this.autoScroll = true;
-  }
-
-  scrollUp(lines: number): void {
-    this.scrollOffset = Math.max(0, this.scrollOffset - lines);
-    this.autoScroll = false;
-  }
-
-  scrollDown(lines: number): void {
-    this.scrollOffset += lines;
-    // Don't let scroll past content
-    this.autoScroll = false;
-  }
-
-  scrollToBottom(): void {
-    // Will be clamped during render
-    this.scrollOffset = Math.max(0, this.getTotalLines() - this.maxHeight);
-    this.autoScroll = true;
-  }
-
-  isAtBottom(): boolean {
-    return this.autoScroll;
   }
 
   getMessageCount(): number {
     return this.messages.length;
   }
-
-  private getTotalLines(): number {
-    // Approximate — each message is content lines + prefix + separator
-    return this.messages.reduce((total, msg) => {
-      return total + (msg.content?.split("\n").length ?? 1) + 2;
-    }, 0);
-  }
-
 }

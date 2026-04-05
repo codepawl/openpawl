@@ -5,6 +5,7 @@
 import type { Component } from "../core/component.js";
 import type { KeyEvent } from "../core/input.js";
 import { visibleWidth } from "../utils/text-width.js";
+import { truncate } from "../utils/truncate.js";
 import { defaultTheme } from "../themes/default.js";
 
 export interface AutocompleteProvider {
@@ -82,10 +83,12 @@ export class EditorComponent implements Component {
     // Content lines or placeholder
     const isEmpty = this.lines.length === 1 && this.lines[0] === "";
     if (isEmpty && !this.focused) {
-      result.push(border("│") + " " + defaultTheme.dim(this.placeholder.slice(0, innerWidth)) + " ".repeat(Math.max(0, innerWidth - visibleWidth(this.placeholder))) + " " + border("│"));
+      const truncatedPlaceholder = truncate(this.placeholder, innerWidth, "");
+      const placeholderPad = Math.max(0, innerWidth - visibleWidth(truncatedPlaceholder));
+      result.push(border("│") + " " + defaultTheme.dim(truncatedPlaceholder) + " ".repeat(placeholderPad) + " " + border("│"));
     } else {
       for (const line of this.lines) {
-        const display = line.slice(0, innerWidth);
+        const display = truncate(line, innerWidth, "");
         const padding = Math.max(0, innerWidth - visibleWidth(display));
         result.push(border("│") + " " + display + " ".repeat(padding) + " " + border("│"));
       }

@@ -16,9 +16,10 @@ export function createSessionsCommand(): SlashCommand {
         return;
       }
 
+      const maxIdLen = Math.max(...recent.map((s) => s.sessionId.length));
       const lines = recent.map((s) => {
         const date = new Date(s.startedAt).toLocaleString();
-        return `  ${s.sessionId}  ${date}  (${s.messageCount} messages)`;
+        return `  ${s.sessionId.padEnd(maxIdLen + 2)}${date}  (${s.messageCount} messages)`;
       });
 
       ctx.addMessage("system", `Recent sessions:\n\n${lines.join("\n")}`);

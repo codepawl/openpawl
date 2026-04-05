@@ -7,6 +7,7 @@
 import type { KeyEvent } from "../../tui/core/input.js";
 import type { TUI } from "../../tui/core/tui.js";
 import { defaultTheme } from "../../tui/themes/default.js";
+import { visibleWidth } from "../../tui/utils/text-width.js";
 
 export abstract class InteractiveView {
   protected selectedIndex = 0;
@@ -104,6 +105,14 @@ export abstract class InteractiveView {
 
   protected get theme() {
     return defaultTheme;
+  }
+
+  /** Build a header line with title left-aligned and hint right-aligned. */
+  protected makeHeader(title: string, hint: string): string {
+    const t = this.theme;
+    const width = this.tui.getTerminal().columns;
+    const gap = Math.max(2, width - visibleWidth(title) - visibleWidth(hint) - 4);
+    return t.bold(title) + " ".repeat(gap) + t.dim(hint);
   }
 
   private handleScreenClick(screenRow: number): boolean {
