@@ -22,6 +22,10 @@ import { executeShell } from "./shell.js";
 import { detectConfig, showConfigWarning } from "./config-check.js";
 import { setLoggerMuted } from "../core/logger.js";
 import { defaultTheme } from "../tui/themes/default.js";
+import { ModeSystem } from "../tui/keybindings/mode-system.js";
+import { LeaderKeyHandler } from "../tui/keybindings/leader-key.js";
+import { CommandPalette, type PaletteSource } from "../tui/keybindings/command-palette.js";
+import { KeybindingHelp, buildHelpSections } from "../tui/keybindings/keybinding-help.js";
 
 import type { AppLayout } from "./layout.js";
 
@@ -461,6 +465,232 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
     }
   }
   showConfigWarning(configState, layout);
+
+  // ── Mode system ─────────────────────────────────────────────────
+  const modeSystem = new ModeSystem();
+  const updateModeDisplay = () => {
+    const info = modeSystem.getModeInfo();
+    layout.statusBar.updateSegment(2, `${info.icon} ${info.shortName}`, defaultTheme.statusMode);
+    layout.tui.requestRender();
+  };
+
+  // ── Leader key ─────────────────────────────────────────────────
+  const leaderKey = new LeaderKeyHandler();
+  leaderKey.onFeedback = (msg) => {
+    layout.messages.addMessage({ role: "system", content: msg, timestamp: new Date() });
+    layout.tui.requestRender();
+  };
+
+  const makeLeaderCtx = () => ({
+    addMessage: (r: string, c: string) => {
+      layout.messages.addMessage({ role: r as "system", content: c, timestamp: new Date() });
+      layout.tui.requestRender();
+    },
+    requestRender: () => layout.tui.requestRender(),
+    exit: () => {},
+    tui: layout.tui,
+  });
+
+  leaderKey.register("m", "model:list", () => {
+    const result = registry.lookup("/model ");
+    if (result) void result.command.execute("", makeLeaderCtx());
+  }, "Model picker");
+  leaderKey.register("s", "status:view", () => {
+    const result = registry.lookup("/status ");
+    if (result) void result.command.execute("", makeLeaderCtx());
+  }, "Status view");
+  leaderKey.register("k", "cost:show", () => {
+    const result = registry.lookup("/cost ");
+    if (result) void result.command.execute("", makeLeaderCtx());
+  }, "Cost breakdown");
+  leaderKey.register("h", "help:show", () => {
+    const sections = buildHelpSections(leaderKey.getBindings(), leaderKey.getLeaderCombo());
+    kbHelp.show(sections);
+    layout.tui.setInteractiveView(kbHelp.render(layout.tui.getTerminal().columns));
+  }, "Keyboard help");
+
+  // ── Command palette ────────────────────────────────────────────
+  const palette = new CommandPalette();
+  const commandSource: PaletteSource = {
+    name: "Commands",
+    icon: "/",
+    getItems: () => {
+      const allCmds = registry.getAll?.() ?? [];
+      return allCmds.map((cmd) => ({
+        id: `cmd:${cmd.name}`,
+        label: `/${cmd.name}`,
+        description: cmd.description ?? "",
+        category: "Commands",
+        icon: "/",
+        action: async () => {
+          const result = registry.lookup(`/${cmd.name} `);
+          if (result) await result.command.execute("", makeLeaderCtx());
+        },
+        score: 0,
+      }));
+    },
+  };
+  palette.addSource(commandSource);
+  leaderKey.onPalette = () => {
+    palette.show();
+    layout.tui.setInteractiveView(palette.render(layout.tui.getTerminal().columns));
+  };
+
+  // ── Keybinding help ────────────────────────────────────────────
+  const kbHelp = new KeybindingHelp();
+
+  // ── Wire keyboard shortcuts via TUI action handlers ─────────────
+  // We do NOT use pushKeyHandler permanently — that would cause nav.select
+  // (mapped to Enter) to be consumed by the TUI instead of reaching the editor.
+  // Instead, we hook into the TUI's onSystemMessage for mode.cycle and
+  // use onKey interception for leader key, Ctrl+P, Alt+P.
+
+  // Helper to show palette overlay
+  const showPalette = () => {
+    palette.show();
+    layout.tui.pushKeyHandler({
+      handleKey: (event) => {
+        palette.handleKey(event);
+        if (!palette.isVisible()) {
+          layout.tui.clearInteractiveView();
+          layout.tui.popKeyHandler();
+        } else {
+          layout.tui.setInteractiveView(palette.render(layout.tui.getTerminal().columns));
+        }
+        return true;
+      },
+    });
+    layout.tui.setInteractiveView(palette.render(layout.tui.getTerminal().columns));
+  };
+
+  // Helper to show help overlay
+  const showHelp = () => {
+    const sections = buildHelpSections(leaderKey.getBindings(), leaderKey.getLeaderCombo());
+    kbHelp.show(sections);
+    layout.tui.pushKeyHandler({
+      handleKey: (event) => {
+        kbHelp.handleKey(event);
+        if (!kbHelp.isVisible()) {
+          layout.tui.clearInteractiveView();
+          layout.tui.popKeyHandler();
+        } else {
+          layout.tui.setInteractiveView(kbHelp.render(layout.tui.getTerminal().columns));
+        }
+        return true;
+      },
+    });
+    layout.tui.setInteractiveView(kbHelp.render(layout.tui.getTerminal().columns));
+  };
+
+  // Wire leader palette callback
+  leaderKey.onPalette = showPalette;
+  // Update leader 'h' binding to use showHelp
+  leaderKey.register("h", "help:show", showHelp, "Keyboard help");
+
+  // Intercept keyboard events at the editor level via onChange
+  // The editor calls onChange after each keystroke — we use this to detect leader key
+  const origOnChange = layout.editor.onChange;
+  layout.editor.onChange = (text: string) => {
+    origOnChange?.(text);
+    // No-op — leader key and shortcuts are handled below
+  };
+
+  // Override the editor's onKey to intercept shortcuts before normal editing
+  const origEditorOnKey = layout.editor.onKey.bind(layout.editor);
+  layout.editor.onKey = (event) => {
+    // Build combo string
+    let combo = "";
+    if (event.type === "char") {
+      const parts: string[] = [];
+      if (event.ctrl) parts.push("ctrl");
+      if (event.alt) parts.push("alt");
+      parts.push(event.char.toLowerCase());
+      combo = parts.join("+");
+    } else if (event.type === "tab") {
+      combo = ("shift" in event && event.shift) ? "shift+tab" : "tab";
+    } else if (event.type === "escape") {
+      combo = "escape";
+    }
+
+    if (combo) {
+      // Leader key handling
+      if (leaderKey.isAwaitingSecondKey()) {
+        const result = leaderKey.handleKey(combo);
+        if (result.consumed) {
+          layout.statusBar.setRightText("/help");
+          layout.tui.requestRender();
+          return true;
+        }
+      }
+      if (combo === leaderKey.getLeaderCombo()) {
+        const result = leaderKey.handleKey(combo);
+        if (result.consumed) {
+          if ("waiting" in result && result.waiting) {
+            layout.statusBar.setRightText(`${leaderKey.getLeaderCombo()} —`);
+          }
+          layout.tui.requestRender();
+          return true;
+        }
+      }
+
+      // Shift+Tab → mode cycle (only when not in autocomplete)
+      if (combo === "shift+tab" && !layout.editor.isAutocompleteActive()) {
+        modeSystem.cycleNext();
+        const info = modeSystem.getModeInfo();
+        updateModeDisplay();
+        layout.messages.addMessage({
+          role: "system",
+          content: `Mode: ${info.displayName}. ${info.description}`,
+          timestamp: new Date(),
+        });
+        return true;
+      }
+
+      // Ctrl+P → command palette
+      if (combo === "ctrl+p") {
+        showPalette();
+        return true;
+      }
+
+      // Alt+P → model picker
+      if (combo === "alt+p") {
+        const result = registry.lookup("/model ");
+        if (result) void result.command.execute("", makeLeaderCtx());
+        return true;
+      }
+    }
+
+    // Fall through to normal editor handling
+    return origEditorOnKey(event);
+  };
+
+  // Register /keys and /keybindings commands
+  registry.register({
+    name: "keys",
+    description: "Show keyboard shortcuts",
+    async execute(_args, msgCtx) {
+      if (msgCtx.tui) {
+        showHelp();
+      } else {
+        const sections = buildHelpSections(leaderKey.getBindings(), leaderKey.getLeaderCombo());
+        for (const section of sections) {
+          const lines = [`${section.icon} ${section.title}`];
+          for (const e of section.entries) lines.push(`  ${e.key.padEnd(20)} ${e.description}`);
+          msgCtx.addMessage("system", lines.join("\n"));
+        }
+      }
+    },
+  });
+
+  registry.register({
+    name: "keybindings",
+    description: "Create/open keybindings config",
+    async execute(_args, msgCtx) {
+      const { createDefaultConfig, getConfigPath } = await import("../tui/keybindings/keybinding-config.js");
+      createDefaultConfig();
+      msgCtx.addMessage("system", `Keybinding config: ${getConfigPath()}\nEdit this file to customize keyboard shortcuts.`);
+    },
+  });
 
   // TUI callbacks
   layout.tui.onSystemMessage = (msg: string) => {

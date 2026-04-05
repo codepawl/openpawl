@@ -59,12 +59,13 @@ export const WINDOWS_KEYMAP: KeymapPreset = {
   "mode.build": "alt+2",
   "mode.brainstorm": "alt+3",
   "mode.loopHell": "alt+4",
-  "mode.cycle": "shift+tab",
-
-  "palette.show": "ctrl+p",
-  "help.keybindings": "f1",
-  "model.picker": "alt+p",
-  "thinking.toggle": "alt+t",
+  // These are handled by the app layer (editor onKey override), not the TUI keybinding system.
+  // Use unregistered keys to satisfy the type while avoiding conflicts.
+  "mode.cycle": "f19",
+  "palette.show": "f20",
+  "help.keybindings": "f21",
+  "model.picker": "f22",
+  "thinking.toggle": "f23",
 };
 
 export const MAC_KEYMAP: KeymapPreset = {
