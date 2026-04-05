@@ -804,6 +804,20 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
     },
   });
 
+  // /copy command — copy last response to clipboard
+  registry.register({
+    name: "copy",
+    description: "Copy last agent response to clipboard",
+    async execute(_args, msgCtx) {
+      const ok = await layout.messages.copyLastResponse();
+      if (ok) {
+        msgCtx.addMessage("system", ctp.green("\u2713 Copied to clipboard"));
+      } else {
+        msgCtx.addMessage("system", "No agent response to copy.");
+      }
+    },
+  });
+
   // TUI callbacks
   layout.tui.onSystemMessage = (msg: string) => {
     layout.messages.addMessage({ role: "system", content: msg, timestamp: new Date() });
@@ -946,6 +960,20 @@ async function initSessionRouter(
         },
       });
     });
+
+    // Wire ToolExecutor lifecycle events to status bar
+    toolExecutor.on("tool:start", (_id: string, toolName: string) => {
+      layout.statusBar.updateSegment(3, `${toolName}...`, ctp.teal);
+      layout.tui.requestRender();
+    });
+    toolExecutor.on("tool:done", (_id: string, toolName: string) => {
+      layout.statusBar.updateSegment(3, `${toolName} done`, ctp.green);
+      layout.tui.requestRender();
+    });
+    toolExecutor.on("tool:error", (_id: string, toolName: string) => {
+      layout.statusBar.updateSegment(3, `${toolName} failed`, ctp.red);
+      layout.tui.requestRender();
+    });
   } catch {
     // Tools not available — run without tools
   }
@@ -1043,6 +1071,36 @@ async function initSessionRouter(
     });
   } catch {
     // CostTracker not available
+  }
+
+  // ── Wire LatencyTracker — TTFT + tokens/sec metrics ────────────
+  try {
+    const { LatencyTracker } = await import("../performance/latency-tracker.js");
+    const latencyTracker = new LatencyTracker();
+    let activeRequestTracker: ReturnType<typeof latencyTracker.startRequest> | null = null;
+
+    ctx.router.on("dispatch:agent:start", (sessionId: string, agentId: string) => {
+      activeRequestTracker = latencyTracker.startRequest(sessionId, agentId);
+      activeRequestTracker.markSubmitted();
+      activeRequestTracker.markRequestSent();
+    });
+
+    // First token → record TTFT
+    ctx.router.on("dispatch:agent:token", () => {
+      if (activeRequestTracker) {
+        activeRequestTracker.markFirstToken();
+      }
+    });
+
+    ctx.router.on("dispatch:agent:done", (sessionId: string, _agentId: string, result: { outputTokens?: number }) => {
+      if (activeRequestTracker) {
+        activeRequestTracker.markComplete(result.outputTokens ?? 0);
+        latencyTracker.recordMetrics(sessionId, activeRequestTracker.getMetrics());
+        activeRequestTracker = null;
+      }
+    });
+  } catch {
+    // LatencyTracker not available
   }
 
   // ── Wire ErrorPresenter — friendly error messages ──────────────

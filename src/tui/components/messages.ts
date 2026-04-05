@@ -7,6 +7,7 @@ import { wrapText } from "../utils/wrap.js";
 import { visibleWidth } from "../utils/text-width.js";
 import { defaultTheme, ctp } from "../themes/default.js";
 import { renderMarkdown } from "./markdown.js";
+import { CopyManager } from "../text/copy-manager.js";
 
 export interface ChatMessage {
   role: "user" | "assistant" | "agent" | "tool" | "system" | "error";
@@ -137,5 +138,26 @@ export class MessagesComponent implements Component {
 
   getMessageCount(): number {
     return this.messages.length;
+  }
+
+  /** Copy the last agent/assistant message to clipboard. */
+  async copyLastResponse(): Promise<boolean> {
+    const copyMgr = new CopyManager();
+    for (let i = this.messages.length - 1; i >= 0; i--) {
+      const msg = this.messages[i]!;
+      if (msg.role === "agent" || msg.role === "assistant") {
+        return copyMgr.copyMessage(msg.content);
+      }
+    }
+    return false;
+  }
+
+  /** Get the content of the last agent response (for /copy). */
+  getLastResponse(): string | null {
+    for (let i = this.messages.length - 1; i >= 0; i--) {
+      const msg = this.messages[i]!;
+      if (msg.role === "agent" || msg.role === "assistant") return msg.content;
+    }
+    return null;
   }
 }
