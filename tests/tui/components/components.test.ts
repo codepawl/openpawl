@@ -233,7 +233,7 @@ describe("EditorComponent", () => {
     editor.onKey({ type: "char", char: "h", ctrl: false, alt: false, shift: false });
     editor.onKey({ type: "char", char: "i", ctrl: false, alt: false, shift: false });
     editor.onKey({ type: "enter" });
-    expect(onSubmit).toHaveBeenCalledWith("hi");
+    expect(onSubmit).toHaveBeenCalledWith("hi", undefined);
     expect(editor.getText()).toBe(""); // cleared after submit
   });
 

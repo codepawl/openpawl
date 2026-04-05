@@ -396,8 +396,8 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
     createAutocompleteProvider(registry, process.cwd()),
   );
 
-  // Handle editor submit
-  layout.editor.onSubmit = async (text: string) => {
+  // Handle editor submit — text + optional attached files
+  layout.editor.onSubmit = async (text: string, attachedFiles?: string[]) => {
     layout.editor.pushHistory(text);
     const parsed = parseInput(text);
 
@@ -467,13 +467,38 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
       }
 
       case "message": {
-        msgCtx.addMessage("user", text);
+        // Resolve attached files into context
+        let fullPrompt = text;
+        if (attachedFiles && attachedFiles.length > 0) {
+          const { readFileSync, existsSync } = await import("node:fs");
+          const { resolve } = await import("node:path");
+          const fileSections: string[] = [];
+          for (const filePath of attachedFiles) {
+            const resolved = resolve(process.cwd(), filePath);
+            if (existsSync(resolved)) {
+              try {
+                const content = readFileSync(resolved, "utf-8");
+                fileSections.push(`<file path="${filePath}">\n${content}\n</file>`);
+              } catch {
+                fileSections.push(`<file path="${filePath}">[Could not read file]</file>`);
+              }
+            }
+          }
+          if (fileSections.length > 0) {
+            fullPrompt = fileSections.join("\n\n") + "\n\n" + text;
+          }
+          // Show user what was sent (file tags + message)
+          const tags = attachedFiles.map((f) => `[@${f.split("/").pop()}]`).join(" ");
+          msgCtx.addMessage("user", `${tags} ${text}`);
+        } else {
+          msgCtx.addMessage("user", text);
+        }
 
         // Route through PromptRouter if available, else fallback
         if (ctx.router && ctx.chatSession) {
-          await handleWithRouter(text, ctx.chatSession, ctx.router, layout, msgCtx);
+          await handleWithRouter(fullPrompt, ctx.chatSession, ctx.router, layout, msgCtx);
         } else {
-          await handleChatFallback(text, layout, msgCtx);
+          await handleChatFallback(fullPrompt, layout, msgCtx);
         }
         break;
       }

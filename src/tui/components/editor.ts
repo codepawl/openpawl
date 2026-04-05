@@ -37,7 +37,10 @@ export class EditorComponent implements Component {
   private acActive = false;
   private acMaxVisible = 8;
 
-  onSubmit?: (text: string) => void;
+  // Attached files (from @file mentions)
+  private attachedFiles: string[] = [];
+
+  onSubmit?: (text: string, attachedFiles?: string[]) => void;
   onChange?: (text: string) => void;
   autocompleteProvider?: AutocompleteProvider;
 
@@ -84,16 +87,24 @@ export class EditorComponent implements Component {
     const promptSymbol = ctp.mauve("❯");
     const promptWidth = 2; // "❯ " = 2 visible chars
     const contentWidth = innerWidth - promptWidth;
+    // File tags prefix (shown before prompt text on first line)
+    const fileTags = this.attachedFiles.length > 0
+      ? this.attachedFiles.map((f) => ctp.blue(`[@${f.split("/").pop()}]`)).join(" ") + " "
+      : "";
+    const fileTagsWidth = this.attachedFiles.length > 0 ? visibleWidth(fileTags) : 0;
+    const textContentWidth = contentWidth - fileTagsWidth;
+
     const isEmpty = this.lines.length === 1 && this.lines[0] === "";
-    if (isEmpty && !this.focused) {
+    if (isEmpty && !this.focused && this.attachedFiles.length === 0) {
       const truncatedPlaceholder = truncate(this.placeholder, contentWidth, "");
       const placeholderPad = Math.max(0, contentWidth - visibleWidth(truncatedPlaceholder));
       result.push(border("│") + " " + promptSymbol + " " + ctp.overlay0(truncatedPlaceholder) + " ".repeat(placeholderPad) + " " + border("│"));
     } else {
       for (let i = 0; i < this.lines.length; i++) {
-        const prefix = i === 0 ? promptSymbol + " " : "  ";
-        const display = truncate(this.lines[i]!, contentWidth, "");
-        const padding = Math.max(0, contentWidth - visibleWidth(display));
+        const prefix = i === 0 ? promptSymbol + " " + fileTags : "  ";
+        const availWidth = i === 0 ? Math.max(1, textContentWidth) : contentWidth;
+        const display = truncate(this.lines[i]!, availWidth, "");
+        const padding = Math.max(0, availWidth - visibleWidth(display));
         result.push(border("│") + " " + prefix + display + " ".repeat(padding) + " " + border("│"));
       }
     }
@@ -116,25 +127,38 @@ export class EditorComponent implements Component {
         return true;
       }
       if (event.type === "enter") {
-        // Enter: select highlighted item AND submit
         const selected = this.acSuggestions[this.acSelectedIndex];
         if (selected) {
-          const text = selected.insertText.trim();
-          this.dismissAutocomplete();
-          this.pushHistory(text);
-          this.onSubmit?.(text);
-          this.clear();
+          const insertText = selected.insertText.trim();
+          // @file references → attach as file tag, don't submit
+          if (insertText.startsWith("@") && !this.isAgentMention(insertText)) {
+            const filePath = insertText.slice(1); // remove @ prefix
+            this.attachFile(filePath);
+            this.dismissAutocomplete();
+          } else {
+            // Commands and agent mentions → submit immediately
+            this.dismissAutocomplete();
+            this.pushHistory(insertText);
+            this.onSubmit?.(insertText, this.attachedFiles.length > 0 ? [...this.attachedFiles] : undefined);
+            this.clear();
+            this.attachedFiles = [];
+          }
         } else {
           this.dismissAutocomplete();
         }
         return true;
       }
       if (event.type === "tab") {
-        // Tab: fill in suggestion, stay in editor (user can add args)
+        // Tab: for @file → attach file; for commands → fill suggestion
         const selected = this.acSuggestions[this.acSelectedIndex];
         if (selected) {
-          this.setText(selected.insertText);
-          this.cursorCol = selected.insertText.length;
+          const insertText = selected.insertText.trim();
+          if (insertText.startsWith("@") && !this.isAgentMention(insertText)) {
+            this.attachFile(insertText.slice(1));
+          } else {
+            this.setText(selected.insertText);
+            this.cursorCol = selected.insertText.length;
+          }
         }
         this.dismissAutocomplete();
         return true;
@@ -147,19 +171,25 @@ export class EditorComponent implements Component {
       this.dismissAutocomplete();
     }
 
-    // Enter → submit (unless shift held for newline)
+    // Enter → submit with attached files
     if (event.type === "enter") {
       const text = this.getText();
-      if (text.trim()) {
+      if (text.trim() || this.attachedFiles.length > 0) {
         this.pushHistory(text);
-        this.onSubmit?.(text);
+        this.onSubmit?.(text, this.attachedFiles.length > 0 ? [...this.attachedFiles] : undefined);
         this.clear();
+        this.attachedFiles = [];
       }
       return true;
     }
 
-    // Backspace
+    // Backspace — remove file tag when at start of empty line
     if (event.type === "backspace") {
+      if (this.cursorCol === 0 && this.cursorRow === 0 && this.attachedFiles.length > 0) {
+        this.attachedFiles.pop();
+        this.onChange?.(this.getText());
+        return true;
+      }
       if (this.cursorCol > 0) {
         const line = this.lines[this.cursorRow]!;
         this.lines[this.cursorRow] = line.slice(0, this.cursorCol - 1) + line.slice(this.cursorCol);
@@ -351,14 +381,14 @@ export class EditorComponent implements Component {
 
   getCursorPosition(): { row: number; col: number } | null {
     if (!this.focused) return null;
-    // Calculate how many autocomplete lines are above the editor box
     const acLines = this.getAutocompleteLineCount();
-    // row: acLines + 1 for top border + cursorRow (1-based)
-    // col: border(1) + space(1) + prompt "❯ "(2) + cursorCol (1-based)
-    // First row has prompt symbol, subsequent rows have 2-space indent
+    // col offset: border(1) + space(1) + prompt "❯ "(2) + file tags + cursorCol
+    const fileTagsWidth = this.cursorRow === 0 && this.attachedFiles.length > 0
+      ? this.attachedFiles.reduce((w, f) => w + f.split("/").pop()!.length + 3, 0) + 1 // [@name] + spaces
+      : 0;
     return {
       row: acLines + 1 + this.cursorRow + 1,
-      col: this.cursorCol + 5,
+      col: this.cursorCol + 5 + fileTagsWidth,
     };
   }
 
@@ -421,5 +451,42 @@ export class EditorComponent implements Component {
 
     this.cursorRow += textLines.length - 1;
     this.cursorCol = lastPasteLine.length;
+  }
+
+  // ── File attachment ─────────────────────────────────────
+
+  /** Attach a file reference (from @file autocomplete). */
+  private attachFile(filePath: string): void {
+    if (!this.attachedFiles.includes(filePath)) {
+      this.attachedFiles.push(filePath);
+    }
+    // Remove the @partial from the current line
+    const line = this.lines[this.cursorRow] ?? "";
+    const atIdx = line.lastIndexOf("@");
+    if (atIdx >= 0) {
+      this.lines[this.cursorRow] = line.slice(0, atIdx) + line.slice(this.cursorCol);
+      this.cursorCol = atIdx;
+    }
+  }
+
+  /** Check if an autocomplete suggestion is an @agent mention (not a file). */
+  private isAgentMention(text: string): boolean {
+    const agents = ["coder", "reviewer", "planner", "tester", "debugger", "researcher", "assistant"];
+    const name = text.replace(/^@/, "").toLowerCase();
+    return agents.includes(name);
+  }
+
+  /** Get currently attached files. */
+  getAttachedFiles(): string[] {
+    return [...this.attachedFiles];
+  }
+
+  /** Remove the last attached file (Backspace on empty line with files). */
+  removeLastAttachedFile(): boolean {
+    if (this.attachedFiles.length > 0 && this.getText().trim() === "" && this.cursorCol === 0) {
+      this.attachedFiles.pop();
+      return true;
+    }
+    return false;
   }
 }
