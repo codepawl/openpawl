@@ -259,29 +259,48 @@ ${toolDescriptions}`;
 
 /**
  * Parse tool_call blocks from model response text.
- * Format: \`\`\`tool_call\n{"name": "...", "input": {...}}\n\`\`\`
+ * Supports multiple formats:
+ *   1. ```tool_call\n{"name": "...", "input": {...}}\n```
+ *   2. ```json\n{"name": "tool_call", "input": {...}}\n```
+ *   3. Raw JSON objects with "name" field matching known tools
+ *   4. Ollama-style: {"name": "...", "parameters": {...}}
  */
 function parseToolCalls(text: string): ToolCall[] {
   const calls: ToolCall[] = [];
-  const regex = /```tool_call\s*\n([\s\S]*?)```/g;
   let callIndex = 0;
-  let m: RegExpMatchArray | null;
 
-  // Use matchAll to avoid regex.exec() which triggers false-positive hook warnings
-  for (m of text.matchAll(regex)) {
-    try {
-      const parsed = JSON.parse(m[1].trim());
-      if (parsed.name && typeof parsed.name === "string") {
-        calls.push({
-          id: `call_${Date.now()}_${callIndex++}`,
-          name: parsed.name,
-          input: parsed.input ?? {},
-        });
+  // Pattern 1: ```tool_call\n{...}\n```
+  for (const m of text.matchAll(/```(?:tool_call|json)\s*\n([\s\S]*?)```/g)) {
+    const parsed = tryParseToolJson(m[1]!.trim());
+    if (parsed) {
+      calls.push({ id: `call_${Date.now()}_${callIndex++}`, ...parsed });
+    }
+  }
+
+  // Pattern 2: standalone JSON objects with "name" field (Ollama output)
+  // Only try this if no fenced blocks found
+  if (calls.length === 0) {
+    for (const m of text.matchAll(/\{[^{}]*"name"\s*:\s*"[^"]+?"[^{}]*\}/g)) {
+      const parsed = tryParseToolJson(m[0]);
+      if (parsed) {
+        calls.push({ id: `call_${Date.now()}_${callIndex++}`, ...parsed });
       }
-    } catch {
-      // Malformed JSON — skip this tool call
     }
   }
 
   return calls;
+}
+
+function tryParseToolJson(text: string): { name: string; input: Record<string, unknown> } | null {
+  try {
+    const parsed = JSON.parse(text);
+    if (typeof parsed.name === "string" && parsed.name.length > 0) {
+      // Support both "input" and "parameters"/"arguments" keys
+      const input = parsed.input ?? parsed.parameters ?? parsed.arguments ?? {};
+      return { name: parsed.name, input: typeof input === "object" ? input : {} };
+    }
+  } catch {
+    // Not valid JSON
+  }
+  return null;
 }
