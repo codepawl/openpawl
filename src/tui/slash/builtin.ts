@@ -16,9 +16,8 @@ export function createBuiltinCommands(
         const commands = getRegistry().getAll();
         const contentLines = [...panelSection("Commands")];
         for (const cmd of commands) {
-          const aliases = cmd.aliases?.length ? ` (${cmd.aliases.join(", ")})` : "";
-          const args = cmd.args ? ` ${cmd.args}` : "";
-          contentLines.push(`  /${cmd.name}${args}${aliases} — ${cmd.description}`);
+          const name = `/${cmd.name}`.padEnd(16);
+          contentLines.push(`  ${name}${cmd.description}`);
         }
         contentLines.push("");
         contentLines.push(...panelSection("Shortcuts"));

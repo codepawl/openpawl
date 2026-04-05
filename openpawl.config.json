@@ -1,4 +1,4 @@
 {
-  "provider": "auto",
+  "provider": "ollama",
   "model": "auto"
 }

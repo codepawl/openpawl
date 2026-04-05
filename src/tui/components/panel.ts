@@ -4,6 +4,7 @@
  * render inside a Panel for visual consistency.
  */
 import { visibleWidth } from "../utils/text-width.js";
+import { truncate } from "../utils/truncate.js";
 import { ctp } from "../themes/default.js";
 
 export interface PanelOptions {
@@ -33,11 +34,19 @@ export function renderPanel(options: PanelOptions, contentLines: string[]): stri
   // Empty line after title
   output.push("  " + border("│") + " ".repeat(w - 2) + border("│"));
 
-  // Content lines
+  // Content lines — truncate to fit within borders
+  const innerWidth = w - 4; // border + padding on each side
   for (const line of contentLines) {
     const lineWidth = visibleWidth(line);
-    const pad = Math.max(0, w - 3 - lineWidth);
-    output.push("  " + border("│") + " " + line + " ".repeat(pad) + border("│"));
+    let fitted: string;
+    if (lineWidth <= innerWidth) {
+      fitted = line + " ".repeat(innerWidth - lineWidth);
+    } else {
+      fitted = truncate(line, innerWidth);
+      const fittedWidth = visibleWidth(fitted);
+      fitted += " ".repeat(Math.max(0, innerWidth - fittedWidth));
+    }
+    output.push("  " + border("│") + " " + fitted + " " + border("│"));
   }
 
   // Empty line before footer

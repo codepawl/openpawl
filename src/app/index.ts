@@ -862,14 +862,41 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
     // Recovery module not available — continue without crash handler
   }
 
+  let shuttingDown = false;
   const cleanup = async () => {
-    ctx.cleanupRouter?.();
-    ctx.cleanupSession?.();
-    tuiSession.close();
-    if (ctx.router) await ctx.router.shutdown();
-    if (ctx.sessionMgr) await ctx.sessionMgr.shutdown();
+    if (shuttingDown) {
+      // Second exit attempt → force kill immediately
+      process.exit(0);
+    }
+    shuttingDown = true;
+
+    // IMMEDIATELY restore terminal — don't wait for async cleanup
     layout.tui.stop();
     setLoggerMuted(false);
+
+    // Force exit after 500ms no matter what
+    const forceExit = setTimeout(() => process.exit(0), 500);
+    forceExit.unref();
+
+    // Best-effort cleanup in parallel (500ms budget)
+    try {
+      await Promise.allSettled([
+        Promise.resolve(ctx.cleanupRouter?.()),
+        Promise.resolve(ctx.cleanupSession?.()),
+        Promise.resolve(tuiSession.close()),
+        ctx.router?.shutdown().catch(() => {}),
+        ctx.sessionMgr?.shutdown().catch(() => {}),
+      ]);
+    } catch { /* ignore */ }
+
+    clearTimeout(forceExit);
+    // Ensure stdin doesn't keep process alive
+    try {
+      process.stdin.setRawMode?.(false);
+      process.stdin.pause();
+      process.stdin.unref();
+    } catch { /* */ }
+    process.exit(0);
   };
   layout.tui.onExit = () => void cleanup();
 
