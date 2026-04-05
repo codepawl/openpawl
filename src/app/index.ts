@@ -236,6 +236,21 @@ async function handleWithRouter(
   layout: AppLayout,
   ctx: { addMessage: (role: string, content: string) => void },
 ): Promise<void> {
+  // Check for ambiguous prompts that need clarification before routing
+  try {
+    const { ClarificationDetector } = await import("../conversation/clarification.js");
+    const detector = new ClarificationDetector();
+    const clarification = detector.detect(text, {});
+    if (clarification?.severity === "ask") {
+      ctx.addMessage("system", ctp.yellow(`\u2753 ${clarification.questions[0]}`));
+      layout.statusBar.updateSegment(3, "idle", ctp.overlay0);
+      layout.tui.requestRender();
+      return;
+    }
+  } catch {
+    // Clarification module not available — proceed without it
+  }
+
   layout.statusBar.updateSegment(3, "routing...", ctp.teal);
   layout.tui.requestRender();
 
@@ -899,6 +914,17 @@ async function initSessionRouter(
     // Tools not available — run without tools
   }
 
+  // ── UndoManager — snapshot files before destructive tool calls ──
+  let undoManager: import("../conversation/undo-manager.js").UndoManager | null = null;
+  try {
+    const { UndoManager } = await import("../conversation/undo-manager.js");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    undoManager = new UndoManager(join(tmpdir(), "openpawl-undo"));
+  } catch {
+    // UndoManager not available
+  }
+
   const agentRunner = createLLMAgentRunner({
     onToken: (agentId, token) => tokenEmitter.emit(agentId, token),
     onToolCall: (agentId, toolName, status) => toolEmitter.emit(agentId, toolName, status),
@@ -907,6 +933,14 @@ async function initSessionRouter(
       : undefined,
     executeTool: toolExecutor
       ? async (toolName, args) => {
+          // Snapshot files before destructive tools (for /undo)
+          if ((toolName === "file_write" || toolName === "file_edit") && undoManager && typeof args === "object" && args !== null) {
+            const filePath = (args as Record<string, unknown>).path ?? (args as Record<string, unknown>).file_path;
+            if (typeof filePath === "string") {
+              await undoManager.snapshot(filePath, "agent").catch(() => {});
+            }
+          }
+
           const result = await toolExecutor!.execute(toolName, args, {
             sessionId: ctx.chatSession?.id ?? "",
             agentId: "agent",
@@ -930,6 +964,69 @@ async function initSessionRouter(
   toolEmitter.emit = (agentId: string, toolName: string, status: string) => {
     ctx.router?.emit("dispatch:agent:tool", ctx.chatSession?.id ?? "", agentId, toolName, status);
   };
+
+  // ── Wire CostTracker — real-time token/cost tracking ──────────
+  try {
+    const { CostTracker } = await import("../streaming/cost-tracker.js");
+    const { getActiveProviderState: getActiveState } = await import("../providers/active-state.js");
+    const costTracker = new CostTracker();
+
+    // Update cost when agent completes
+    ctx.router.on("dispatch:agent:done", (sessionId: string, agentId: string, result: { inputTokens?: number; outputTokens?: number }) => {
+      const state = getActiveState();
+      costTracker.recordUsage(sessionId, agentId, state.provider || "unknown", state.model || "unknown", result.inputTokens ?? 0, result.outputTokens ?? 0);
+    });
+
+    // Status bar reads from cost tracker
+    costTracker.on("cost:update", (event: { totalCostUSD: number }) => {
+      const costColor = event.totalCostUSD > 0.50 ? ctp.yellow : ctp.overlay0;
+      layout.statusBar.updateSegment(4, `$${event.totalCostUSD.toFixed(2)}`, costColor);
+      layout.tui.requestRender();
+    });
+
+    // Wire /cost command to cost tracker
+    registry.register({
+      name: "cost",
+      description: "Show session cost breakdown",
+      async execute(_args, msgCtx) {
+        const sessionId = ctx.chatSession?.id ?? "";
+        const summary = costTracker.getSessionCost(sessionId);
+        const lines = [
+          `\u26a1 Cost: $${summary.totalCostUSD.toFixed(4)}`,
+          `  Input tokens:  ${summary.totalInputTokens.toLocaleString()}`,
+          `  Output tokens: ${summary.totalOutputTokens.toLocaleString()}`,
+        ];
+        if (Object.keys(summary.byAgent).length > 0) {
+          lines.push("", "  By agent:");
+          for (const [agent, data] of Object.entries(summary.byAgent)) {
+            lines.push(`    ${agent}: ${data.tokens.toLocaleString()} tokens ($${data.costUSD.toFixed(4)})`);
+          }
+        }
+        msgCtx.addMessage("system", lines.join("\n"));
+      },
+    });
+  } catch {
+    // CostTracker not available
+  }
+
+  // ── Wire ErrorPresenter — friendly error messages ──────────────
+  try {
+    const { ErrorPresenter } = await import("../recovery/error-presenter.js");
+    const errorPresenter = new ErrorPresenter();
+
+    ctx.router.on("dispatch:error", (_sessionId: string, error: unknown) => {
+      const presented = errorPresenter.present(error);
+      const lines = errorPresenter.formatForChat(presented);
+      layout.messages.addMessage({
+        role: "error",
+        content: lines.join("\n"),
+        timestamp: new Date(),
+      });
+      layout.tui.requestRender();
+    });
+  } catch {
+    // ErrorPresenter not available
+  }
 
   // Create or resume session
   if (opts?.resume) {
