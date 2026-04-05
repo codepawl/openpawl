@@ -1,5 +1,9 @@
 /**
  * Work Runner - Team orchestration sessions with lesson learning.
+ *
+ * @deprecated Sprint-based execution is superseded by Session-based
+ * interactive mode. See src/session/ for the new runtime.
+ * This module will be removed in v2.0.0.
  */
 
 import { createTeamOrchestration } from "./core/simulation.js";
