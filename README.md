@@ -42,7 +42,7 @@ Or via npm:
 npm install -g @openpawl/cli
 ```
 
-**Requirements:** Node.js >= 20, pnpm, and an LLM API key (Anthropic, OpenAI, OpenRouter, DeepSeek, Groq, or local Ollama).
+**Requirements:** Node.js >= 20, bun, and an LLM API key (Anthropic, OpenAI, OpenRouter, DeepSeek, Groq, or local Ollama).
 
 ---
 

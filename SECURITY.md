@@ -45,7 +45,7 @@ All LLM traffic routes through configured providers (Anthropic, OpenAI, etc.). A
 
 ### WebSocket / Fastify Server
 
-The web dashboard (`pnpm run web`) binds a Fastify server with WebSocket on the configured port (default 8000). This server is intended for local or trusted-network use only. It has no authentication layer. If exposed to an untrusted network, any client can observe and interact with running sessions.
+The web dashboard (`bun run web`) binds a Fastify server with WebSocket on the configured port (default 8000). This server is intended for local or trusted-network use only. It has no authentication layer. If exposed to an untrusted network, any client can observe and interact with running sessions.
 
 ### Agent Output and Prompt Injection
 
@@ -61,7 +61,7 @@ LanceDB runs in-process with no network listener. The vector store files live on
 
 ## Best Practices for Deployers
 
-- **Runtime:** use Node.js >= 20 and keep dependencies current via `pnpm update`. Review advisories with `pnpm audit`.
+- **Runtime:** use Node.js >= 20 and keep dependencies current via `bun update`. Review advisories with `bun pm audit`.
 - **Secrets:** never commit real API keys or tokens. Use `.env` or environment variables.
 - **Network:** bind the Fastify/WebSocket server to `127.0.0.1` or a trusted subnet. Do not expose it to the public internet without adding authentication and TLS.
 - **Least privilege:** run OpenPawl under a dedicated, unprivileged user account with minimal filesystem access.

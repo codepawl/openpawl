@@ -34,7 +34,7 @@ export async function renderAuditPDF(
     const mod = await import(/* webpackIgnore: true */ pdfkitModule) as { default: new (opts: Record<string, unknown>) => PDFDoc };
     PDFDocument = mod.default;
   } catch {
-    throw new Error("pdfkit is required for PDF export. Install it with: pnpm add pdfkit");
+    throw new Error("pdfkit is required for PDF export. Install it with: bun add pdfkit");
   }
 
   return new Promise((resolve, reject) => {

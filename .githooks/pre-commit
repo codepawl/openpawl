@@ -6,12 +6,12 @@
 set -e
 
 echo "pre-commit: typecheck..."
-pnpm exec tsc --noEmit
+bunx tsc --noEmit
 
 echo "pre-commit: lint..."
-pnpm exec eslint src/ --ext .ts,.tsx
+bunx eslint src/ --ext .ts,.tsx
 
 echo "pre-commit: tests..."
-pnpm exec vitest run
+bunx vitest run
 
 echo "pre-commit: all checks passed"

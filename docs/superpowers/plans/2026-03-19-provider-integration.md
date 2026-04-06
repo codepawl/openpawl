@@ -113,7 +113,7 @@ describe("provider-catalog", () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pnpm run test -- tests/providers/provider-catalog.test.ts`
+Run: `bun run test -- tests/providers/provider-catalog.test.ts`
 Expected: FAIL — module not found
 
 - [ ] **Step 3: Expand ProviderName in types.ts**
@@ -762,7 +762,7 @@ export function getProvidersByCategory(category: ProviderCategory): Array<[strin
 
 - [ ] **Step 6: Run test to verify it passes**
 
-Run: `pnpm run test -- tests/providers/provider-catalog.test.ts`
+Run: `bun run test -- tests/providers/provider-catalog.test.ts`
 Expected: PASS
 
 - [ ] **Step 7: Commit**
@@ -857,7 +857,7 @@ describe("OpenAI-compatible new presets", () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pnpm run test -- tests/providers/openai-presets.test.ts`
+Run: `bun run test -- tests/providers/openai-presets.test.ts`
 Expected: FAIL — presets not recognized
 
 - [ ] **Step 3: Expand PRESETS and OpenAIPreset type**
@@ -936,7 +936,7 @@ async healthCheck(): Promise<boolean> {
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `pnpm run test -- tests/providers/openai-presets.test.ts`
+Run: `bun run test -- tests/providers/openai-presets.test.ts`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
@@ -1068,7 +1068,7 @@ export function createProviderChain(
 
 - [ ] **Step 2: Run existing tests to verify nothing breaks**
 
-Run: `pnpm run test`
+Run: `bun run test`
 Expected: All existing tests PASS
 
 - [ ] **Step 3: Commit**
@@ -1203,7 +1203,7 @@ ANTHROPIC_OAUTH_BLOCKED: {
 
 - [ ] **Step 2: Run existing tests**
 
-Run: `pnpm run test`
+Run: `bun run test`
 Expected: All PASS
 
 - [ ] **Step 3: Commit**
@@ -1297,7 +1297,7 @@ describe("CopilotProvider", () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pnpm run test -- tests/providers/copilot-provider.test.ts`
+Run: `bun run test -- tests/providers/copilot-provider.test.ts`
 Expected: FAIL — module not found
 
 - [ ] **Step 3: Implement CopilotProvider**
@@ -1590,7 +1590,7 @@ export async function pollCopilotDeviceToken(deviceCode: string): Promise<string
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `pnpm run test -- tests/providers/copilot-provider.test.ts`
+Run: `bun run test -- tests/providers/copilot-provider.test.ts`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
@@ -1670,7 +1670,7 @@ describe("ChatGPTOAuthProvider", () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pnpm run test -- tests/providers/chatgpt-oauth-provider.test.ts`
+Run: `bun run test -- tests/providers/chatgpt-oauth-provider.test.ts`
 Expected: FAIL — module not found
 
 - [ ] **Step 3: Create oauth-helpers.ts**
@@ -1873,7 +1873,7 @@ export class ChatGPTOAuthProvider implements StreamProvider {
 
 - [ ] **Step 5: Run test to verify it passes**
 
-Run: `pnpm run test -- tests/providers/chatgpt-oauth-provider.test.ts`
+Run: `bun run test -- tests/providers/chatgpt-oauth-provider.test.ts`
 Expected: PASS
 
 - [ ] **Step 6: Commit**
@@ -1958,12 +1958,12 @@ describe("BedrockProvider", () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pnpm run test -- tests/providers/bedrock-provider.test.ts`
+Run: `bun run test -- tests/providers/bedrock-provider.test.ts`
 Expected: FAIL — module not found
 
 - [ ] **Step 3: Install @aws-sdk/client-bedrock-runtime**
 
-Run: `pnpm add @aws-sdk/client-bedrock-runtime`
+Run: `bun add @aws-sdk/client-bedrock-runtime`
 
 - [ ] **Step 4: Implement BedrockProvider**
 
@@ -2117,13 +2117,13 @@ export class BedrockProvider implements StreamProvider {
 
 - [ ] **Step 5: Run test to verify it passes**
 
-Run: `pnpm run test -- tests/providers/bedrock-provider.test.ts`
+Run: `bun run test -- tests/providers/bedrock-provider.test.ts`
 Expected: PASS
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/providers/bedrock-provider.ts tests/providers/bedrock-provider.test.ts package.json pnpm-lock.yaml
+git add src/providers/bedrock-provider.ts tests/providers/bedrock-provider.test.ts package.json bun.lock
 git commit -m "feat: add AWS Bedrock provider with IAM credential auth"
 ```
 
@@ -2362,7 +2362,7 @@ function providerFromConfig(entry: ProviderConfigEntry): StreamProvider | null {
 
 - [ ] **Step 2: Run full test suite**
 
-Run: `pnpm run test`
+Run: `bun run test`
 Expected: All PASS
 
 - [ ] **Step 3: Commit**
@@ -2829,7 +2829,7 @@ const ENV_KEYS: Record<string, string> = {
 
 - [ ] **Step 3: Run typecheck**
 
-Run: `pnpm run typecheck`
+Run: `bun run typecheck`
 Expected: No errors
 
 - [ ] **Step 4: Commit**
@@ -2921,7 +2921,7 @@ Then update `stepModel()` and `persistAllConfig()` to use `getDefaultModelForPro
 
 - [ ] **Step 4: Run typecheck**
 
-Run: `pnpm run typecheck`
+Run: `bun run typecheck`
 Expected: No errors
 
 - [ ] **Step 5: Commit**
@@ -2946,17 +2946,17 @@ git commit -m "feat: expand setup wizard with subscription detection and 30+ pro
 
 - [ ] **Step 1: Install `open` package for browser launching**
 
-Run: `pnpm add open`
+Run: `bun add open`
 
 - [ ] **Step 2: Run full test suite and typecheck**
 
-Run: `pnpm run typecheck && pnpm run test`
+Run: `bun run typecheck && bun run test`
 Expected: All PASS
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add package.json pnpm-lock.yaml
+git add package.json bun.lock
 git commit -m "chore: add open dependency for OAuth browser launching"
 ```
 
@@ -3084,7 +3084,7 @@ describe("provider chain integration", () => {
 
 - [ ] **Step 2: Run the integration test**
 
-Run: `pnpm run test -- tests/providers/provider-chain-integration.test.ts`
+Run: `bun run test -- tests/providers/provider-chain-integration.test.ts`
 Expected: PASS
 
 - [ ] **Step 3: Commit**
@@ -3100,22 +3100,22 @@ git commit -m "test: add provider chain integration tests for 30+ providers"
 
 - [ ] **Step 1: Run full test suite**
 
-Run: `pnpm run test`
+Run: `bun run test`
 Expected: All PASS
 
 - [ ] **Step 2: Run typecheck**
 
-Run: `pnpm run typecheck`
+Run: `bun run typecheck`
 Expected: No errors
 
 - [ ] **Step 3: Run lint**
 
-Run: `pnpm run lint`
+Run: `bun run lint`
 Expected: No errors (or only pre-existing warnings)
 
 - [ ] **Step 4: Run build**
 
-Run: `pnpm run build`
+Run: `bun run build`
 Expected: Build succeeds
 
 - [ ] **Step 5: Final commit if any fixes needed**

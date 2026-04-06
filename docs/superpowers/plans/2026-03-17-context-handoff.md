@@ -186,7 +186,7 @@ describe("deriveCurrentState", () => {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `pnpm run test -- tests/handoff-state-deriver.test.ts`
+Run: `bun run test -- tests/handoff-state-deriver.test.ts`
 Expected: FAIL — module not found
 
 - [ ] **Step 3: Write implementation**
@@ -248,7 +248,7 @@ export function deriveCurrentState(tasks: CompletedTask[]): string[] {
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `pnpm run test -- tests/handoff-state-deriver.test.ts`
+Run: `bun run test -- tests/handoff-state-deriver.test.ts`
 Expected: ALL PASS
 
 - [ ] **Step 5: Commit**
@@ -446,7 +446,7 @@ describe("buildHandoffData", () => {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `pnpm run test -- tests/handoff-collector.test.ts`
+Run: `bun run test -- tests/handoff-collector.test.ts`
 Expected: FAIL — module not found
 
 - [ ] **Step 3: Write implementation**
@@ -605,7 +605,7 @@ export function buildHandoffData(input: CollectorInput): HandoffData {
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `pnpm run test -- tests/handoff-collector.test.ts`
+Run: `bun run test -- tests/handoff-collector.test.ts`
 Expected: ALL PASS
 
 - [ ] **Step 5: Commit**
@@ -746,7 +746,7 @@ describe("renderContextMarkdown", () => {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `pnpm run test -- tests/handoff-renderer.test.ts`
+Run: `bun run test -- tests/handoff-renderer.test.ts`
 Expected: FAIL — module not found
 
 - [ ] **Step 3: Write implementation**
@@ -876,7 +876,7 @@ export function renderContextMarkdown(data: HandoffData): string {
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `pnpm run test -- tests/handoff-renderer.test.ts`
+Run: `bun run test -- tests/handoff-renderer.test.ts`
 Expected: ALL PASS
 
 - [ ] **Step 5: Commit**
@@ -1009,7 +1009,7 @@ Status: ✅ Complete
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `pnpm run test -- tests/handoff-importer.test.ts`
+Run: `bun run test -- tests/handoff-importer.test.ts`
 Expected: FAIL — module not found
 
 - [ ] **Step 3: Write implementation**
@@ -1187,7 +1187,7 @@ export async function importContextFile(
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `pnpm run test -- tests/handoff-importer.test.ts`
+Run: `bun run test -- tests/handoff-importer.test.ts`
 Expected: ALL PASS
 
 - [ ] **Step 5: Commit**
@@ -2024,22 +2024,22 @@ git commit -m "feat(handoff): add handoff to CLI help text"
 
 - [ ] **Step 1: Run full typecheck**
 
-Run: `pnpm run typecheck`
+Run: `bun run typecheck`
 Expected: No errors
 
 - [ ] **Step 2: Run all handoff tests**
 
-Run: `pnpm run test -- tests/handoff-`
+Run: `bun run test -- tests/handoff-`
 Expected: ALL PASS
 
 - [ ] **Step 3: Run full test suite**
 
-Run: `pnpm run test`
+Run: `bun run test`
 Expected: ALL PASS (no regressions)
 
 - [ ] **Step 4: Run lint**
 
-Run: `pnpm run lint`
+Run: `bun run lint`
 Expected: No errors
 
 - [ ] **Step 5: Final commit if any fixes needed**

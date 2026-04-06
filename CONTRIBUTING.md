@@ -7,17 +7,17 @@ Thanks for your interest in contributing.
 ```bash
 git clone https://github.com/nxank4/openpawl.git
 cd openpawl
-pnpm install
-pnpm run build
+bun install
+bun run build
 ```
 
 ## Development
 
 ```bash
-pnpm run dev          # watch mode
-pnpm run test         # run tests
-pnpm run typecheck    # type check
-pnpm run lint         # lint
+bun run dev          # watch mode
+bun run test         # run tests
+bun run typecheck    # type check
+bun run lint         # lint
 make check            # typecheck + test
 make test-full        # typecheck + lint + test + build
 ```
@@ -27,7 +27,7 @@ make test-full        # typecheck + lint + test + build
 - TypeScript (ESM, strict). No `any`, no `@ts-nocheck`.
 - Keep files under ~700 LOC.
 - Brief comments for non-obvious logic only.
-- Vitest for tests. Run `pnpm run test` before pushing.
+- Vitest for tests. Run `bun run test` before pushing.
 
 ## Pull Requests
 

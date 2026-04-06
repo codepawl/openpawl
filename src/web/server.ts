@@ -206,7 +206,7 @@ export async function runWeb(args: string[]): Promise<void> {
     });
   } else {
     logger.warn(
-      "Web client build not found. Run `pnpm run client:build` to serve the dashboard UI.",
+      "Web client build not found. Run `bun run client:build` to serve the dashboard UI.",
     );
   }
 

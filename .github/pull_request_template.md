@@ -8,7 +8,7 @@ Brief description of changes.
 - [ ] Documentation update
 
 ## Checklist
-- [ ] `pnpm run lint` passes
-- [ ] `pnpm run typecheck` passes
-- [ ] `pnpm run test` passes
-- [ ] `pnpm run build` succeeds
+- [ ] `bun run lint` passes
+- [ ] `bun run typecheck` passes
+- [ ] `bun run test` passes
+- [ ] `bun run build` succeeds

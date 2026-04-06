@@ -147,7 +147,7 @@ export async function runCheck(_args: string[]): Promise<void> {
     }
   } catch (err) {
     lines.push(`    ${pc.red("✗")}  V8 isolate   ${pc.red("unavailable")}`);
-    issues.push("Sandbox V8 isolate unavailable. Run: pnpm install secure-exec");
+    issues.push("Sandbox V8 isolate unavailable. Run: bun install secure-exec");
     if (err instanceof Error) {
       lines.push(`    ${pc.dim("              " + err.message)}`);
     }

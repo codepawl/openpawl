@@ -6,22 +6,22 @@ echo "════════════════════════�
 
 # 1. Build
 echo "Building..."
-pnpm run build
+bun run build
 echo "✓ Build succeeded"
 
 # 2. Type check
 echo "Type checking..."
-pnpm run typecheck
+bun run typecheck
 echo "✓ Types clean"
 
 # 3. Lint
 echo "Linting..."
-pnpm run lint
+bun run lint
 echo "✓ Lint clean"
 
 # 4. Tests
 echo "Running tests..."
-pnpm run test
+bun run test
 echo "✓ All tests pass"
 
 # 5. No hardcoded secrets

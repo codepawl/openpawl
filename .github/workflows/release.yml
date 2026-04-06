@@ -18,30 +18,29 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@v4
+      - name: Install bun
+        uses: oven-sh/setup-bun@v2
 
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
           node-version: "20"
-          cache: "pnpm"
           registry-url: "https://registry.npmjs.org"
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: bun install --frozen-lockfile
 
       - name: Lint
-        run: pnpm run lint
+        run: bun run lint
 
       - name: Type check
-        run: pnpm run typecheck
+        run: bun run typecheck
 
       - name: Test
-        run: pnpm run test
+        run: bun run test
 
       - name: Build
-        run: pnpm run build
+        run: bun run build
 
       - name: Generate changelog
         id: changelog
@@ -67,6 +66,6 @@ jobs:
             --verify-tag
 
       - name: Publish to npm
-        run: pnpm publish --provenance --no-git-checks
+        run: bunx npm publish --provenance --no-git-checks
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -8,17 +8,17 @@ OpenPawl orchestrates AI agent teams via LangGraph. Users define goals and teams
 
 ## Commands
 
-- Runtime: Node **>= 20**, **pnpm**.
-- `pnpm install` — install deps (run if `node_modules` missing or `vitest not found`)
-- `pnpm run build` — build (via tsup, includes web client)
-- `pnpm run typecheck` — type-check
-- `pnpm run test` — tests (Vitest)
-- `pnpm run test -- path/to/file.test.ts` — run a single test file
-- `pnpm run test:watch -- path/to/file.test.ts` — watch a single test file
-- `pnpm run lint` — lint (`eslint src/`)
-- `pnpm run dev` — watch mode
-- `pnpm run web` — web UI (http://localhost:8000)
-- `pnpm run work` — work sessions with web dashboard
+- Runtime: Node **>= 20**, **bun**.
+- `bun install` — install deps (run if `node_modules` missing or `vitest not found`)
+- `bun run build` — build (via tsup, includes web client)
+- `bun run typecheck` — type-check
+- `bun run test` — tests (Vitest)
+- `bun run test -- path/to/file.test.ts` — run a single test file
+- `bun run test:watch -- path/to/file.test.ts` — watch a single test file
+- `bun run lint` — lint (`eslint src/`)
+- `bun run dev` — watch mode
+- `bun run web` — web UI (http://localhost:8000)
+- `bun run work` — work sessions with web dashboard
 - Makefile: `make check` (typecheck + test), `make test-full` (typecheck + lint + test + build — used in CI/pre-commit), `make clean`
 
 ## Architecture
@@ -81,7 +81,7 @@ Fastify + SSE for real-time dashboard updates. Single active orchestration at a 
 ## Testing
 
 - Vitest. Test files: `tests/*.test.ts` or colocated `src/**/*.test.ts`.
-- Run `pnpm run test` before pushing when touching logic.
+- Run `bun run test` before pushing when touching logic.
 
 ## Commits & PRs
 

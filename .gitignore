@@ -1,6 +1,5 @@
 # Dependencies
 node_modules/
-.pnpm-store/
 
 # Build output
 dist/
@@ -27,7 +26,7 @@ coverage/
 # Logs
 *.log
 npm-debug.log*
-pnpm-debug.log*
+bun-debug.log*
 
 # Generated/runtime
 .teamclaw/

@@ -224,23 +224,26 @@ check_node() {
     success "Node.js ${NODE_VERSION} detected"
 }
 
-check_pnpm() {
-    if command_exists pnpm; then
-        PNPM_VERSION=$(pnpm --version 2>/dev/null)
-        success "pnpm ${PNPM_VERSION} detected"
+check_bun() {
+    if command_exists bun; then
+        BUN_VERSION=$(bun --version 2>/dev/null)
+        success "bun ${BUN_VERSION} detected"
         return
     fi
 
-    warn "pnpm not found — installing via npm..."
+    warn "bun not found — installing via install script..."
     if [ "$DRY_RUN" = true ]; then
-        dry "npm install -g pnpm"
+        dry "curl -fsSL https://bun.sh/install | bash"
     else
-        npm install -g pnpm >/dev/null 2>&1 || {
-            error "Failed to install pnpm. Install manually: npm install -g pnpm"
+        curl -fsSL https://bun.sh/install | bash >/dev/null 2>&1 || {
+            error "Failed to install bun. Install manually: https://bun.sh"
             exit 1
         }
-        PNPM_VERSION=$(pnpm --version 2>/dev/null)
-        success "pnpm ${PNPM_VERSION} installed"
+        # Source bun into current session
+        export BUN_INSTALL="${HOME}/.bun"
+        export PATH="${BUN_INSTALL}/bin:${PATH}"
+        BUN_VERSION=$(bun --version 2>/dev/null)
+        success "bun ${BUN_VERSION} installed"
     fi
 }
 
@@ -447,7 +450,7 @@ try_source_install() {
 
     if [ "$DRY_RUN" = true ]; then
         dry "git clone ${GITHUB_URL} ${SOURCE_DIR}"
-        dry "cd ${SOURCE_DIR} && pnpm install && pnpm run build"
+        dry "cd ${SOURCE_DIR} && bun install && bun run build"
         dry "ln -sf ${SOURCE_DIR}/dist/cli.js ${BIN_DIR}/openpawl"
         return 0
     fi
@@ -490,14 +493,14 @@ try_source_install() {
     cd "$SOURCE_DIR"
 
     info "Installing dependencies..."
-    pnpm install --frozen-lockfile 2>/dev/null || pnpm install || {
+    bun install --frozen-lockfile 2>/dev/null || bun install || {
         error "Failed to install dependencies"
         _cleanup_source
         return 1
     }
 
     info "Building..."
-    pnpm run build || {
+    bun run build || {
         error "Build failed"
         _cleanup_source
         return 1
@@ -616,7 +619,7 @@ main() {
     detect_arch
     detect_shell
     check_node
-    check_pnpm
+    check_bun
 
     echo ""
 

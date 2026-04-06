@@ -128,15 +128,15 @@ async function updateSource(tag: string): Promise<void> {
     logger.plain(`Updating source install at ${sourceDir}...`);
     execShell("git fetch --tags", sourceDir);
     execShell(`git checkout ${tag}`, sourceDir);
-    execShell("pnpm install", sourceDir);
-    execShell("pnpm run build", sourceDir);
+    execShell("bun install", sourceDir);
+    execShell("bun run build", sourceDir);
 }
 
 async function updateLocalDev(): Promise<void> {
     logger.plain("Updating local dev checkout...");
     execShell("git pull --rebase");
-    execShell("pnpm install");
-    execShell("pnpm run build");
+    execShell("bun install");
+    execShell("bun run build");
 }
 
 async function updateBinary(downloadUrl: string | undefined, tag: string): Promise<void> {

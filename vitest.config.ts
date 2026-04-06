@@ -9,9 +9,8 @@ export default defineConfig({
     pool: "forks",
     poolOptions: {
       forks: {
-        maxForks: 2,
+        maxForks: 4,
         minForks: 1,
-        execArgv: ["--max-old-space-size=3072"],
       },
     },
     coverage: {

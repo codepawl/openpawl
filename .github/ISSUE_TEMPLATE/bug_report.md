@@ -22,7 +22,7 @@ What actually happened.
 
 ## Environment
 - Node version:
-- pnpm version:
+- bun version:
 - OS:
 - OpenPawl version (if known):
 
