@@ -5,8 +5,11 @@
  * simulate user input, and assert on rendered output. LLM providers are
  * mocked via OPENPAWL_MOCK_LLM=true to avoid real API calls.
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from "vitest";
 import { TUIHarness } from "./helpers/tui-harness.js";
+
+// Prevent process.exit() from killing the test worker during TUI cleanup
+const exitSpy = vi.spyOn(process, "exit").mockImplementation((() => {}) as never);
 
 // Mock the provider factory to avoid real provider initialization
 const { mockProviderManager } = vi.hoisted(() => ({
@@ -55,7 +58,7 @@ vi.mock("@/core/team-templates.js", () => ({
   buildTeamFromTemplate: vi.fn().mockReturnValue([{ id: "maker-1", name: "Maker" }]),
 }));
 
-describe("TUI E2E", () => {
+describe("TUI E2E", { timeout: 10_000 }, () => {
   let harness: TUIHarness;
 
   afterEach(async () => {
@@ -64,6 +67,10 @@ describe("TUI E2E", () => {
     } catch {
       // Cleanup errors are non-critical in tests
     }
+  });
+
+  afterAll(() => {
+    exitSpy.mockRestore();
   });
 
   describe("launch and basic interaction", () => {

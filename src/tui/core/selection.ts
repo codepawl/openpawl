@@ -24,6 +24,11 @@ export class SelectionManager {
     this.scrollOffset = offset;
   }
 
+  /** Get current scroll offset (for debug). */
+  getScrollOffset(): number {
+    return this.scrollOffset;
+  }
+
   /** Convert screen row to absolute content row. */
   private screenToContent(screenRow: number): number {
     return screenRow + this.scrollOffset;

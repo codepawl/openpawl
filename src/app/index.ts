@@ -849,6 +849,20 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
     layout.tui.requestRender();
   };
 
+  // Brief flash notification (e.g., "Copied!") — shows in status bar, auto-clears
+  let flashTimer: ReturnType<typeof setTimeout> | null = null;
+  const defaultRightText = ctp.overlay0("/help");
+  layout.tui.onFlashMessage = (msg: string) => {
+    if (flashTimer) clearTimeout(flashTimer);
+    layout.statusBar.setRightText(ctp.green(`\u2713 ${msg}`));
+    layout.tui.requestRender();
+    flashTimer = setTimeout(() => {
+      layout.statusBar.setRightText(defaultRightText);
+      layout.tui.requestRender();
+      flashTimer = null;
+    }, 1500);
+  };
+
   // Install crash handler for clean shutdown on uncaught errors
   try {
     const { CrashHandler } = await import("../recovery/crash-handler.js");

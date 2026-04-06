@@ -23,7 +23,7 @@ beforeEach(() => {
 
 describe("openpawl demo", () => {
   it("showcases session briefing with prior work summary", async () => {
-    await runDemo([]);
+    await runDemo(["--fast"]);
 
     const output = mockLogger.plain.mock.calls.map((c: unknown[]) => String(c[0])).join("\n");
     expect(output.toLowerCase()).toContain("previously");
@@ -31,21 +31,21 @@ describe("openpawl demo", () => {
   });
 
   it("showcases goal clarity analysis with score", async () => {
-    await runDemo([]);
+    await runDemo(["--fast"]);
 
     const output = mockLogger.plain.mock.calls.map((c: unknown[]) => String(c[0])).join("\n");
     expect(output.toLowerCase()).toMatch(/clarity|clear/);
   });
 
   it("showcases sprint planning with task assignments", async () => {
-    await runDemo([]);
+    await runDemo(["--fast"]);
 
     const output = mockLogger.plain.mock.calls.map((c: unknown[]) => String(c[0])).join("\n");
     expect(output.toLowerCase()).toMatch(/sprint|task|assign/i);
   });
 
   it("produces substantial output (all feature sections)", async () => {
-    await runDemo([]);
+    await runDemo(["--fast"]);
 
     // Demo has 10+ distinct sections — should produce heavy output
     expect(mockLogger.plain.mock.calls.length).toBeGreaterThan(50);
@@ -53,7 +53,7 @@ describe("openpawl demo", () => {
 
   it("makes zero API calls (all output is synthetic)", async () => {
     // The demo command should never call error or warn — it's hardcoded success output
-    await runDemo([]);
+    await runDemo(["--fast"]);
 
     expect(mockLogger.error).not.toHaveBeenCalled();
     expect(mockLogger.warn).not.toHaveBeenCalled();

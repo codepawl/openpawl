@@ -9,8 +9,10 @@ const FRAME_INTERVAL = 120;
 
 export class ThinkingIndicator {
   private interval: ReturnType<typeof setInterval> | null = null;
+  private slowTimer: ReturnType<typeof setTimeout> | null = null;
   private frameIndex = 0;
   private visible = false;
+  private slow = false;
   private agentName: string | null = null;
   private agentColorFn: ((s: string) => string) | null = null;
 
@@ -20,11 +22,15 @@ export class ThinkingIndicator {
   start(agentName?: string, agentColorFn?: (s: string) => string): void {
     this.stop();
     this.visible = true;
+    this.slow = false;
     this.agentName = agentName ?? null;
     this.agentColorFn = agentColorFn ?? null;
     this.frameIndex = 0;
     this.emitFrame();
     this.interval = setInterval(() => this.emitFrame(), FRAME_INTERVAL);
+    this.slowTimer = setTimeout(() => {
+      this.slow = true;
+    }, 3000);
   }
 
   stop(): void {
@@ -32,7 +38,12 @@ export class ThinkingIndicator {
       clearInterval(this.interval);
       this.interval = null;
     }
+    if (this.slowTimer) {
+      clearTimeout(this.slowTimer);
+      this.slowTimer = null;
+    }
     this.visible = false;
+    this.slow = false;
   }
 
   isVisible(): boolean {
@@ -45,10 +56,12 @@ export class ThinkingIndicator {
     const frame = FRAMES[this.frameIndex % FRAMES.length]!;
     const spinner = ctp.teal(frame);
 
+    const label = this.slow ? "Loading model (first run is slower)..." : "Thinking...";
     if (this.agentName && this.agentColorFn) {
-      return `${spinner} ${this.agentColorFn(`[${this.agentName}]`)} ${ctp.teal("is thinking...")}`;
+      const agentLabel = this.slow ? "is loading model..." : "is thinking...";
+      return `${spinner} ${this.agentColorFn(`[${this.agentName}]`)} ${ctp.teal(agentLabel)}`;
     }
-    return `${spinner} ${ctp.teal("Thinking...")}`;
+    return `${spinner} ${ctp.teal(label)}`;
   }
 
   private emitFrame(): void {

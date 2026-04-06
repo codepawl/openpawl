@@ -18,6 +18,7 @@ import type { ActionId } from "../keyboard/actions.js";
 import type { PresetName } from "../keyboard/keymap-presets.js";
 import { HitTester } from "../mouse/hit-test.js";
 import { HoverManager } from "../mouse/hover-manager.js";
+import { CopyManager } from "../text/copy-manager.js";
 
 export class TUI {
   readonly keybindings: KeybindingManager;
@@ -41,6 +42,7 @@ export class TUI {
 
   // Mouse selection + region tracking
   private selectionManager = new SelectionManager();
+  private copyManager = new CopyManager();
   private hitTester = new HitTester();
   private hoverManager = new HoverManager();
   private lastScreenLines: string[] = [];
@@ -56,6 +58,10 @@ export class TUI {
   private lastClickRow = 0;
   private lastClickCol = 0;
   private clickCount = 0;
+
+  // Drag state: track mousedown position so selection starts on drag, not on click
+  private mouseDownPos: { row: number; col: number } | null = null;
+  private isDragging = false;
 
   // Key handler stack — interactive views push handlers that take priority
   private keyHandlerStack: { handleKey: (event: KeyEvent) => boolean }[] = [];
@@ -77,6 +83,8 @@ export class TUI {
   onAbort?: () => boolean;
   /** Called to display a system message (e.g., "Press Ctrl+C again to exit"). */
   onSystemMessage?: (msg: string) => void;
+  /** Called to show a brief flash notification (e.g., "Copied!"). */
+  onFlashMessage?: (msg: string) => void;
 
   constructor(terminal?: Terminal, preset?: PresetName) {
     this.keybindings = new KeybindingManager(preset ?? detectPlatform());
@@ -95,6 +103,7 @@ export class TUI {
     this.running = true;
 
     this.terminal.start();
+    this.copyManager.setTerminal(this.terminal);
 
     this.terminal.onInput((data: Buffer) => {
       try {
@@ -367,9 +376,8 @@ export class TUI {
     const visibleEnd = totalContent - this.scrollOffset;
     const visibleStart = Math.max(0, visibleEnd - scrollableHeight);
 
-    // Store full content lines and update selection scroll offset
+    // Store full content lines for selection text extraction
     this.lastFullContentLines = allContentLines;
-    this.selectionManager.setScrollOffset(visibleStart);
     const visibleContentLines = allContentLines.slice(visibleStart, visibleEnd);
 
     // 5. Pad with empty lines if content doesn't fill the area
@@ -379,6 +387,12 @@ export class TUI {
       paddedContent.push("");
     }
     paddedContent.push(...visibleContentLines);
+
+    // Set selection scroll offset AFTER calculating padding.
+    // Screen row 1 is the first padded row. The first content row is at screen row (padCount + 1).
+    // screenToContent(row) = row + scrollOffset, so for row = padCount + 1 we need
+    // contentRow = visibleStart + 1 (1-based), meaning scrollOffset = visibleStart - padCount.
+    this.selectionManager.setScrollOffset(visibleStart - padCount);
 
     // 5b. Track where interactive content starts on screen (1-based row)
     if (this.interactiveLines && this.scrollOffset === 0) {
@@ -546,7 +560,10 @@ export class TUI {
     // Clipboard copy (only when selection exists — already resolved)
     if (action === "editor.clipboard.copy" && this.selectionManager.hasSelection()) {
       const text = this.selectionManager.getSelectedText(this.lastFullContentLines);
-      if (text.trim()) this.selectionManager.copyToClipboard(this.terminal, text);
+      if (text.trim()) {
+        void this.copyManager.copyToClipboard(text);
+        this.onFlashMessage?.("Copied!");
+      }
       this.selectionManager.clearSelection();
       this.requestRender();
       return true;
@@ -619,8 +636,33 @@ export class TUI {
     // Priority 0: If there's a text selection → copy to clipboard, consume event
     if (this.selectionManager.hasSelection()) {
       const text = this.selectionManager.getSelectedText(this.lastFullContentLines);
+
+      // DEBUG: log selection state to /tmp for diagnosis (TEMPORARY)
+      void (async () => {
+        try {
+          const fs = await import("node:fs");
+          const sel = this.selectionManager.getSelection();
+          const scrollOff = this.selectionManager.getScrollOffset();
+          fs.appendFileSync("/tmp/openpawl-copy-debug.log", JSON.stringify({
+            timestamp: new Date().toISOString(),
+            hasSelection: true,
+            selection: sel,
+            scrollOffset: scrollOff,
+            totalContentLines: this.lastFullContentLines.length,
+            contentRowEnd: this.contentRowEnd,
+            editorRowStart: this.editorRowStart,
+            textLength: text.length,
+            textTrimmedLength: text.trim().length,
+            textPreview: text.slice(0, 200),
+            selStartLine: sel ? this.lastFullContentLines[sel.startRow - 1]?.slice(0, 80) : null,
+            selEndLine: sel ? this.lastFullContentLines[sel.endRow - 1]?.slice(0, 80) : null,
+          }) + "\n");
+        } catch { /* ignore debug errors */ }
+      })();
+
       if (text.trim()) {
-        this.selectionManager.copyToClipboard(this.terminal, text);
+        void this.copyManager.copyToClipboard(text);
+        this.onFlashMessage?.("Copied!");
       }
       this.selectionManager.clearSelection();
       this.requestRender();
@@ -760,13 +802,20 @@ export class TUI {
           return;
         }
 
-        // Messages region: text selection + multi-click
+        // Messages region: click behavior
         if (this.clickCount === 1) {
-          this.selectionManager.startSelection(event.row, event.col);
+          // Single click: record position for potential drag, don't start selection yet
+          this.mouseDownPos = { row: event.row, col: event.col };
+          this.isDragging = false;
+          this.requestRender(); // re-render to clear old selection highlight
         } else if (this.clickCount === 2) {
+          // Double click: select word at cursor
+          this.mouseDownPos = null;
           this.selectionManager.selectWordAt(event.row, event.col, this.lastScreenLines);
           this.requestRender();
         } else if (this.clickCount >= 3) {
+          // Triple click: select entire line
+          this.mouseDownPos = null;
           this.selectionManager.selectLine(event.row, this.lastScreenLines);
           this.requestRender();
         }
@@ -777,12 +826,19 @@ export class TUI {
     }
 
     if (event.type === "mouse_drag" && "col" in event) {
-      // Only extend selection if we started in a content region
-      if (this.selectionManager.isSelecting()) {
-        // Clamp drag to content regions only
+      // Lazy drag: start selection on first move from the mousedown position
+      if (this.mouseDownPos && !this.isDragging) {
+        const moved = event.row !== this.mouseDownPos.row || event.col !== this.mouseDownPos.col;
+        if (moved) {
+          this.isDragging = true;
+          this.selectionManager.startSelection(this.mouseDownPos.row, this.mouseDownPos.col);
+        }
+      }
+      if (this.isDragging && this.selectionManager.isSelecting()) {
+        // Clamp drag to messages area — don't bleed into editor, divider, or status bar
         let row = event.row;
-        if (row > this.contentRowEnd && row < this.editorRowStart) {
-          row = this.contentRowEnd; // don't drag into interactive/divider
+        if (row > this.contentRowEnd) {
+          row = this.contentRowEnd;
         }
         this.selectionManager.updateSelection(row, event.col);
         this.requestRender();
@@ -791,11 +847,12 @@ export class TUI {
     }
 
     if (event.type === "mouse_release") {
-      if (this.selectionManager.isSelecting()) {
+      if (this.isDragging && this.selectionManager.isSelecting()) {
         this.selectionManager.endSelection();
-        // Don't auto-copy — user copies with Ctrl+C
         this.requestRender();
       }
+      this.mouseDownPos = null;
+      this.isDragging = false;
       return;
     }
   }
@@ -843,8 +900,9 @@ export class TUI {
         return `\x1b[48;2;40;40;55m${line}\x1b[49m`;
       }
 
-      // Selection highlight in content regions only
+      // Selection highlight in messages area only (not editor, not interactive)
       if (region !== "content" || !hasSelection) return line;
+      if (row >= this.editorRowStart && row <= this.editorRowEnd) return line;
 
       let result = "";
       let visCol = 0;

@@ -94,13 +94,20 @@ export class TUIHarness {
     }
   }
 
-  /** Send /quit and wait for cleanup. */
+  /** Send /quit and wait for cleanup (with timeout so tests don't hang). */
   async stop(): Promise<void> {
     this.command("quit");
     await this.tick(100);
     // If TUI is still running, force stop with Ctrl+D
     this.terminal.simulateInput(Buffer.from([0x04])); // Ctrl+D
-    await this.tick(50);
+
+    // Wait for TUI promise to settle, but don't hang if it never does
+    if (this.tuiPromise) {
+      await Promise.race([
+        this.tuiPromise.catch(() => {}),
+        this.tick(2000),
+      ]);
+    }
   }
 
   /** Advance the event loop. */
