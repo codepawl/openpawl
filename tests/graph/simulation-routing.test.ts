@@ -1,9 +1,8 @@
 /**
- * Comprehensive tests for src/core/simulation.ts
+ * Routing, increment_cycle, mid-sprint summary, telemetry, and edge-case
+ * tests for src/core/simulation.ts
  *
- * Covers: TeamOrchestration construction, getInitialState, configureSession,
- * run(), stream(), conditional edge routing, mid-sprint summary,
- * telemetry wrappers, timeout/max-runs guards, and error paths.
+ * All vi.hoisted() / vi.mock() calls are inline — they cannot be shared.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -173,39 +172,13 @@ vi.mock("@/core/team-templates.js", () => ({
 /* ------------------------------------------------------------------ */
 
 import { createTeamOrchestration, TeamOrchestration } from "@/core/simulation.js";
-
-/* ------------------------------------------------------------------ */
-/*  Helpers                                                            */
-/* ------------------------------------------------------------------ */
-
-function makeTeam(count = 1) {
-  return Array.from({ length: count }, (_, i) => ({
-    id: `bot_${i}`,
-    name: `Bot${i}`,
-    role_id: "software_engineer",
-    traits: {},
-    worker_url: null,
-  }));
-}
-
-function makeTask(overrides: Record<string, unknown> = {}) {
-  return {
-    task_id: "TASK-001",
-    assigned_to: "bot_0",
-    status: "pending",
-    description: "Test task",
-    priority: "MEDIUM",
-    worker_tier: "light",
-    result: null,
-    ...overrides,
-  };
-}
+import { makeTeam, makeTask } from "./simulation-test-utils.js";
 
 /* ------------------------------------------------------------------ */
 /*  Tests                                                              */
 /* ------------------------------------------------------------------ */
 
-describe("simulation.ts — TeamOrchestration", () => {
+describe("simulation.ts — Routing & Edge Cases", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     // Re-wire LangGraph StateGraph mocks
@@ -281,375 +254,7 @@ describe("simulation.ts — TeamOrchestration", () => {
   });
 
   /* ================================================================ */
-  /*  createTeamOrchestration / constructor                            */
-  /* ================================================================ */
-
-  describe("createTeamOrchestration (factory)", () => {
-    it("returns a TeamOrchestration instance with defaults", () => {
-      const orch = createTeamOrchestration();
-      expect(orch).toBeInstanceOf(TeamOrchestration);
-    });
-
-    it("uses provided team over template", () => {
-      const team = makeTeam(3);
-      const orch = createTeamOrchestration({ team });
-      expect(orch.team).toHaveLength(3);
-      expect(orch.team[0].id).toBe("bot_0");
-    });
-
-    it("registers all expected LangGraph nodes", () => {
-      createTeamOrchestration();
-      const registeredNodes = mockAddNode.mock.calls.map(
-        (call: unknown[]) => call[0]
-      );
-      expect(registeredNodes).toContain("memory_retrieval");
-      expect(registeredNodes).toContain("sprint_planning");
-      expect(registeredNodes).toContain("system_design");
-      expect(registeredNodes).toContain("rfc_phase");
-      expect(registeredNodes).toContain("coordinator");
-      expect(registeredNodes).toContain("preview_gate");
-      expect(registeredNodes).toContain("approval");
-      expect(registeredNodes).toContain("worker_task");
-      expect(registeredNodes).toContain("worker_collect");
-      expect(registeredNodes).toContain("partial_approval");
-      expect(registeredNodes).toContain("increment_cycle");
-    });
-
-    it("registers the correct linear edges", () => {
-      createTeamOrchestration();
-      const edges = mockAddEdge.mock.calls.map(
-        (call: unknown[]) => [call[0], call[1]]
-      );
-      expect(edges).toContainEqual(["__start__", "memory_retrieval"]);
-      expect(edges).toContainEqual(["memory_retrieval", "sprint_planning"]);
-      expect(edges).toContainEqual(["sprint_planning", "system_design"]);
-      expect(edges).toContainEqual(["system_design", "rfc_phase"]);
-      expect(edges).toContainEqual(["rfc_phase", "coordinator"]);
-      // coordinator → preview_gate is now a conditional edge (replanning loop)
-      expect(edges).toContainEqual(["worker_task", "confidence_router"]);
-      expect(edges).toContainEqual(["confidence_router", "worker_collect"]);
-      // partial_approval → increment_cycle is now a conditional edge (rework loop)
-    });
-
-    it("registers conditional edges for preview, approval, and increment_cycle", () => {
-      createTeamOrchestration();
-      const conditionalSources = mockAddConditionalEdges.mock.calls.map(
-        (call: unknown[]) => call[0]
-      );
-      expect(conditionalSources).toContain("coordinator");
-      expect(conditionalSources).toContain("preview_gate");
-      expect(conditionalSources).toContain("approval");
-      expect(conditionalSources).toContain("worker_collect");
-      expect(conditionalSources).toContain("partial_approval");
-      expect(conditionalSources).toContain("increment_cycle");
-    });
-
-    it("compiles the graph with a MemorySaver checkpointer", () => {
-      createTeamOrchestration();
-      expect(mockCompile).toHaveBeenCalledTimes(1);
-      const arg = mockCompile.mock.calls[0][0] as Record<string, unknown>;
-      expect(arg.checkpointer).toBeDefined();
-    });
-  });
-
-  /* ================================================================ */
-  /*  getInitialState                                                  */
-  /* ================================================================ */
-
-  describe("getInitialState", () => {
-    it("returns state with correct userGoal", () => {
-      const orch = createTeamOrchestration({ team: makeTeam() });
-      const state = orch.getInitialState({ userGoal: "Ship v2" });
-      expect(state.user_goal).toBe("Ship v2");
-    });
-
-    it("includes team members in state.team", () => {
-      const team = makeTeam(2);
-      const orch = createTeamOrchestration({ team });
-      const state = orch.getInitialState({});
-      expect(state.team).toHaveLength(2);
-    });
-
-    it("includes run start message", () => {
-      const orch = createTeamOrchestration({ team: makeTeam() });
-      const state = orch.getInitialState({ runId: 2 });
-      expect(state.messages).toContain("OpenPawl - Run 2 started");
-    });
-
-    it("merges initialTasks into task_queue with correct IDs", () => {
-      const orch = createTeamOrchestration({ team: makeTeam() });
-      const state = orch.getInitialState({
-        initialTasks: [
-          { description: "First" },
-          { description: "Second", priority: "HIGH" },
-          { description: "Third", assigned_to: "bot_x" },
-        ],
-      });
-      const q = state.task_queue as Record<string, unknown>[];
-      expect(q).toHaveLength(3);
-      expect(q[0].task_id).toBe("TASK-M000");
-      expect(q[1].task_id).toBe("TASK-M001");
-      expect(q[2].task_id).toBe("TASK-M002");
-      expect(q[1].priority).toBe("HIGH");
-      expect(q[2].assigned_to).toBe("bot_x");
-    });
-
-    it("assigns default bot id when assigned_to is missing and team exists", () => {
-      const orch = createTeamOrchestration({ team: makeTeam() });
-      const state = orch.getInitialState({
-        initialTasks: [{ description: "auto-assign" }],
-      });
-      const q = state.task_queue as Record<string, unknown>[];
-      expect(q[0].assigned_to).toBe("bot_0");
-    });
-
-    it("returns empty task_queue when no initialTasks given", () => {
-      const orch = createTeamOrchestration({ team: makeTeam() });
-      const state = orch.getInitialState({});
-      const q = state.task_queue as Record<string, unknown>[];
-      expect(q).toHaveLength(0);
-    });
-
-    it("passes ancestralLessons into initial state", () => {
-      const orch = createTeamOrchestration({ team: makeTeam() });
-      const state = orch.getInitialState({
-        ancestralLessons: ["lesson1", "lesson2"],
-      });
-      expect(state.ancestral_lessons).toEqual(["lesson1", "lesson2"]);
-    });
-
-    it("handles null userGoal gracefully", () => {
-      const orch = createTeamOrchestration({ team: makeTeam() });
-      const state = orch.getInitialState({ userGoal: null });
-      expect(state.user_goal).toBeNull();
-    });
-
-    it("sets project_context when provided", () => {
-      const orch = createTeamOrchestration({ team: makeTeam() });
-      const state = orch.getInitialState({ projectContext: "Node.js monorepo" });
-      expect(state.project_context).toBe("Node.js monorepo");
-    });
-
-    it("defaults project_context to empty string when not provided", () => {
-      const orch = createTeamOrchestration({ team: makeTeam() });
-      const state = orch.getInitialState({});
-      // projectContext defaults to "" in getInitialState, but only assigned when truthy
-      expect(state.project_context ?? "").toBe("");
-    });
-
-    it("handles completely empty options", () => {
-      const orch = createTeamOrchestration({ team: makeTeam() });
-      const state = orch.getInitialState();
-      expect(state).toBeDefined();
-      expect(state.cycle_count).toBe(0);
-      expect(state.session_active).toBe(true);
-    });
-  });
-
-  /* ================================================================ */
-  /*  configureSession                                                 */
-  /* ================================================================ */
-
-  describe("configureSession", () => {
-    it("sets timeout from minutes", () => {
-      const orch = createTeamOrchestration({ team: makeTeam() });
-      const before = Date.now();
-      orch.configureSession({ timeoutMinutes: 5 });
-      // Access private fields via any cast for white-box testing
-      const o = orch as unknown as Record<string, number>;
-      expect(o.sessionTimeoutMs).toBe(5 * 60 * 1000);
-      expect(o.sessionStartTime).toBeGreaterThanOrEqual(before);
-    });
-
-    it("sets maxRuns", () => {
-      const orch = createTeamOrchestration({ team: makeTeam() });
-      orch.configureSession({ maxRuns: 3 });
-      const o = orch as unknown as Record<string, number>;
-      expect(o.sessionMaxRuns).toBe(3);
-    });
-
-    it("defaults to zero when options omitted", () => {
-      const orch = createTeamOrchestration({ team: makeTeam() });
-      orch.configureSession({});
-      const o = orch as unknown as Record<string, number>;
-      expect(o.sessionTimeoutMs).toBe(0);
-      expect(o.sessionMaxRuns).toBe(0);
-    });
-  });
-
-  /* ================================================================ */
-  /*  run()                                                            */
-  /* ================================================================ */
-
-  describe("run()", () => {
-    it("invokes the compiled graph and returns final state", async () => {
-      const finalState = { cycle_count: 3, session_active: false } as unknown as GraphState;
-      mockInvoke.mockResolvedValueOnce(finalState);
-
-      const orch = createTeamOrchestration({ team: makeTeam() });
-      const result = await orch.run({ userGoal: "test" });
-      expect(result).toBe(finalState);
-      expect(mockInvoke).toHaveBeenCalledTimes(1);
-    });
-
-    it("passes a unique thread_id in config", async () => {
-      mockInvoke.mockResolvedValueOnce({} as GraphState);
-      const orch = createTeamOrchestration({ team: makeTeam() });
-      await orch.run();
-      const configArg = mockInvoke.mock.calls[0][1] as { configurable: { thread_id: string } };
-      expect(configArg.configurable.thread_id).toBeTruthy();
-    });
-
-    it("sends 'completed' telemetry on success without timeout", async () => {
-      mockInvoke.mockResolvedValueOnce({} as GraphState);
-      const orch = createTeamOrchestration({ team: makeTeam() });
-      await orch.run();
-      expect(mockSendNodeActive).toHaveBeenCalledWith("completed");
-      expect(mockSendSessionTimeout).not.toHaveBeenCalled();
-    });
-
-    it("re-throws graph errors", async () => {
-      mockInvoke.mockRejectedValueOnce(new Error("LLM gateway 502"));
-      const orch = createTeamOrchestration({ team: makeTeam() });
-      await expect(orch.run({ userGoal: "fail" })).rejects.toThrow("LLM gateway 502");
-    });
-
-    it("sends timeout telemetry when error occurs after timeout", async () => {
-      vi.useFakeTimers();
-      try {
-        mockInvoke.mockImplementationOnce(async () => {
-          // Simulate elapsed time beyond timeout
-          vi.advanceTimersByTime(6 * 60 * 1000);
-          throw new Error("aborted");
-        });
-        const orch = createTeamOrchestration({ team: makeTeam() });
-        await expect(orch.run({ userGoal: "slow", timeoutMinutes: 5 })).rejects.toThrow("aborted");
-        expect(mockSendSessionTimeout).toHaveBeenCalledWith("timeout", expect.any(Number));
-      } finally {
-        vi.useRealTimers();
-      }
-    });
-
-    it("sets session limits from run options", async () => {
-      mockInvoke.mockResolvedValueOnce({} as GraphState);
-      const orch = createTeamOrchestration({ team: makeTeam() });
-      await orch.run({ maxRuns: 7, timeoutMinutes: 30 });
-      const o = orch as unknown as Record<string, number>;
-      expect(o.sessionMaxRuns).toBe(7);
-      expect(o.sessionTimeoutMs).toBe(30 * 60 * 1000);
-    });
-
-    it("handles run with no options (all defaults)", async () => {
-      mockInvoke.mockResolvedValueOnce({} as GraphState);
-      const orch = createTeamOrchestration({ team: makeTeam() });
-      const result = await orch.run();
-      expect(result).toBeDefined();
-    });
-  });
-
-  /* ================================================================ */
-  /*  stream()                                                         */
-  /* ================================================================ */
-
-  describe("stream()", () => {
-    it("yields chunks from the compiled graph stream", async () => {
-      const chunks = [
-        { coordinator: { __node__: "coordinator" } },
-        { worker_execute: { __node__: "worker" } },
-      ];
-      mockStream.mockResolvedValueOnce(
-        (async function* () {
-          for (const c of chunks) yield c;
-        })()
-      );
-
-      const orch = createTeamOrchestration({ team: makeTeam() });
-      const collected: Record<string, GraphState>[] = [];
-      for await (const chunk of orch.stream({ userGoal: "stream test" })) {
-        collected.push(chunk);
-      }
-      expect(collected).toHaveLength(2);
-    });
-
-    it("sends 'completed' telemetry after normal stream end", async () => {
-      mockStream.mockResolvedValueOnce(
-        (async function* () {
-          yield { done: {} };
-        })()
-      );
-      const orch = createTeamOrchestration({ team: makeTeam() });
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      for await (const _ of orch.stream()) { /* drain */ }
-      expect(mockSendNodeActive).toHaveBeenCalledWith("completed");
-    });
-
-    it("breaks on timeout and sends timeout telemetry", async () => {
-      vi.useFakeTimers();
-      try {
-        let yieldCount = 0;
-        mockStream.mockResolvedValueOnce(
-          (async function* () {
-            while (true) {
-              yieldCount++;
-              vi.advanceTimersByTime(2 * 60 * 1000); // 2 min per chunk
-              yield { chunk: yieldCount };
-            }
-          })()
-        );
-
-        const orch = createTeamOrchestration({ team: makeTeam() });
-        const collected: unknown[] = [];
-        for await (const chunk of orch.stream({ userGoal: "long", timeoutMinutes: 5 })) {
-          collected.push(chunk);
-        }
-        // Should break after ~3 chunks (6 min > 5 min timeout)
-        expect(collected.length).toBeLessThanOrEqual(3);
-        expect(mockSendSessionTimeout).toHaveBeenCalledWith("timeout", expect.any(Number));
-      } finally {
-        vi.useRealTimers();
-      }
-    });
-
-    it("re-throws errors from the underlying stream", async () => {
-      mockStream.mockResolvedValueOnce(
-        (async function* () {
-          yield { chunk: 1 };
-          throw new Error("network disconnect");
-        })()
-      );
-      const orch = createTeamOrchestration({ team: makeTeam() });
-      const drain = async () => {
-        for await (const _ of orch.stream()) { /* drain */ }
-      };
-      await expect(drain()).rejects.toThrow("network disconnect");
-    });
-
-    it("yields nothing for empty stream", async () => {
-      mockStream.mockResolvedValueOnce(
-        (async function* () {})()
-      );
-      const orch = createTeamOrchestration({ team: makeTeam() });
-      const collected: unknown[] = [];
-      for await (const chunk of orch.stream()) {
-        collected.push(chunk);
-      }
-      expect(collected).toHaveLength(0);
-      // No telemetry since lastChunk is null
-      expect(mockSendNodeActive).not.toHaveBeenCalled();
-    });
-
-    it("sets session limits from stream options", async () => {
-      mockStream.mockResolvedValueOnce((async function* () {})());
-      const orch = createTeamOrchestration({ team: makeTeam() });
-      for await (const _ of orch.stream({ maxRuns: 4, timeoutMinutes: 15 })) { /* drain */ }
-      const o = orch as unknown as Record<string, number>;
-      expect(o.sessionMaxRuns).toBe(4);
-      expect(o.sessionTimeoutMs).toBe(15 * 60 * 1000);
-    });
-  });
-
-  /* ================================================================ */
-  /*  Conditional edge routing logic                                   */
+  /*  Conditional edge routing                                         */
   /* ================================================================ */
 
   describe("conditional edge routing", () => {
@@ -680,7 +285,7 @@ describe("simulation.ts — TeamOrchestration", () => {
       incrementRoute = getRoutingFn("increment_cycle");
     });
 
-    describe("coordinator → routing", () => {
+    describe("coordinator -> routing", () => {
       it("routes to __end__ when no pending tasks", () => {
         const result = coordinatorRoute({
           task_queue: [makeTask({ status: "completed" })],
@@ -722,7 +327,7 @@ describe("simulation.ts — TeamOrchestration", () => {
       });
     });
 
-    describe("approval → routing", () => {
+    describe("approval -> routing", () => {
       it("routes to coordinator on feedback action", () => {
         const result = approvalRoute({
           approval_response: { action: "feedback" },
@@ -752,7 +357,7 @@ describe("simulation.ts — TeamOrchestration", () => {
       });
     });
 
-    describe("increment_cycle → routing", () => {
+    describe("increment_cycle -> routing", () => {
       it("routes to __end__ when cycle_count >= maxCycles", () => {
         const result = incrementRoute({
           cycle_count: 10,
