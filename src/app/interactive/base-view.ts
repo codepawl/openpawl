@@ -153,7 +153,7 @@ export abstract class InteractiveView {
   /** Render the filter input line (call from renderLines when filterEnabled). */
   protected renderFilterLine(): string {
     const t = this.theme;
-    if (!this.filterText) return "";
+    if (!this.filterText) return `  ${t.dim("Type to search...")}`;
     return `  ${t.dim("Filter:")} ${this.filterText}${t.primary("▌")}`;
   }
 
