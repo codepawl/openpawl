@@ -228,10 +228,7 @@ export async function addProvider(args: string[]): Promise<void> {
   } else if (meta.authMethod === "credentials" && selectedId === "vertex") {
     await promptVertexAuth(entry);
   } else if (meta.authMethod === "oauth") {
-    note("OAuth flow will open your browser to authenticate.", "OAuth");
-    logger.plain(pc.yellow("  OAuth flow not yet implemented in CLI. Coming soon."));
-    logger.plain(pc.dim("  Workaround: use API key instead."));
-    return;
+    await promptChatGPTAuth(entry);
   }
 
   // Model selection — try live fetch, fall back to catalog
@@ -475,6 +472,37 @@ async function promptCopilotAuth(entry: ProviderConfigEntry): Promise<void> {
     pollS.stop("Authorization timed out");
     logger.plain(pc.yellow("  Device flow timed out. Please try again."));
   }
+}
+
+async function promptChatGPTAuth(entry: ProviderConfigEntry): Promise<void> {
+  const { runChatGPTOAuthFlow } = await import("../providers/chatgpt-auth.js");
+
+  const spin = spinner();
+  spin.start("Opening browser for ChatGPT login...");
+
+  const result = await runChatGPTOAuthFlow();
+
+  if (result.isErr()) {
+    spin.stop(pc.red(`ChatGPT login failed: ${result.error.message}`));
+    return;
+  }
+
+  const tokens = result.value;
+  entry.oauthToken = tokens.accessToken;
+  entry.refreshToken = tokens.refreshToken;
+  entry.tokenExpiry = Date.now() + tokens.expiresIn * 1000;
+  entry.authMethod = "oauth";
+
+  // Also store in credential store
+  try {
+    const { CredentialStore } = await import("../credentials/credential-store.js");
+    const store = new CredentialStore();
+    await store.initialize();
+    await store.setCredential("chatgpt", "oauthToken", tokens.accessToken);
+    await store.setCredential("chatgpt", "refreshToken", tokens.refreshToken);
+  } catch { /* best-effort */ }
+
+  spin.stop(pc.green("ChatGPT login successful!"));
 }
 
 async function promptBedrockAuth(entry: ProviderConfigEntry): Promise<void> {

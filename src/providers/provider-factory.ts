@@ -42,21 +42,42 @@ export async function providerFromConfig(entry: ProviderConfigEntry): Promise<St
 
   // Dedicated providers
   switch (entry.type) {
-    case "chatgpt":
+    case "chatgpt": {
+      let oauthToken = entry.oauthToken;
+      let refreshToken = entry.refreshToken;
+      if (!oauthToken && entry.hasCredential) {
+        const store = new CredentialStore();
+        await store.initialize();
+        const cred = await store.getCredential("chatgpt", "oauthToken");
+        if (cred.isOk() && cred.value) oauthToken = cred.value;
+        const ref = await store.getCredential("chatgpt", "refreshToken");
+        if (ref.isOk() && ref.value) refreshToken = ref.value;
+      }
       return new ChatGPTOAuthProvider({
-        oauthToken: entry.oauthToken,
-        refreshToken: entry.refreshToken,
+        oauthToken,
+        refreshToken,
         tokenExpiry: entry.tokenExpiry,
         model: entry.model,
       });
+    }
 
-    case "copilot":
+    case "copilot": {
+      let githubToken = entry.githubToken;
+      if (!githubToken && entry.hasCredential) {
+        const store = new CredentialStore();
+        await store.initialize();
+        const cred = await store.getCredential("copilot", "oauthToken");
+        if (cred.isOk() && cred.value) githubToken = cred.value;
+      }
+      // Also check GITHUB_TOKEN env var
+      if (!githubToken) githubToken = process.env.GITHUB_TOKEN;
       return new CopilotProvider({
-        githubToken: entry.githubToken,
+        githubToken,
         copilotToken: entry.copilotToken,
         copilotTokenExpiry: entry.copilotTokenExpiry,
         model: entry.model,
       });
+    }
 
     case "bedrock":
       return new BedrockProvider({
