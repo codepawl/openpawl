@@ -14,6 +14,7 @@ import { createCostCommand } from "./cost.js";
 import { createSessionsCommand } from "./sessions.js";
 import { createHotkeysCommand } from "./hotkeys.js";
 import { createErrorCommand } from "./error.js";
+import { createSetupCommand } from "./setup.js";
 
 export function registerAllCommands(
   registry: CommandRegistry,
@@ -27,4 +28,5 @@ export function registerAllCommands(
   registry.register(createSessionsCommand());
   registry.register(createHotkeysCommand());
   registry.register(createErrorCommand());
+  registry.register(createSetupCommand());
 }
