@@ -25,10 +25,13 @@ export interface ProviderConfigEntry {
   serviceAccountPath?: string;
   projectId?: string;
   apiVersion?: string;
+  hasCredential?: boolean;
 }
 
 export interface OpenPawlGlobalConfig {
   version: 1;
+  activeProvider?: string;
+  activeModel?: string;
   meta?: {
     version: string;
     createdAt?: string;
@@ -372,8 +375,19 @@ export function normalizeGlobalConfig(input: Partial<OpenPawlGlobalConfig>): Ope
           ...(typeof v.serviceAccountPath === "string" && v.serviceAccountPath.trim() ? { serviceAccountPath: v.serviceAccountPath.trim() } : {}),
           ...(typeof v.projectId === "string" && v.projectId.trim() ? { projectId: v.projectId.trim() } : {}),
           ...(typeof v.apiVersion === "string" && v.apiVersion.trim() ? { apiVersion: v.apiVersion.trim() } : {}),
+          ...(v.hasCredential !== undefined ? { hasCredential: Boolean(v.hasCredential) } : {}),
         }))
     : undefined;
+
+  // Parse activeProvider and activeModel
+  const activeProvider = typeof input.activeProvider === "string" && input.activeProvider.trim()
+    ? input.activeProvider.trim()
+    : providers && providers.length > 0
+      ? providers[0].type
+      : undefined;
+  const activeModel = typeof input.activeModel === "string" && input.activeModel.trim()
+    ? input.activeModel.trim()
+    : model || undefined;
 
   // Parse tokenOptimization — pass through if present, no deep validation needed
   const rawTokenOpt = (input as Record<string, unknown>).tokenOptimization;
@@ -452,6 +466,8 @@ export function normalizeGlobalConfig(input: Partial<OpenPawlGlobalConfig>): Ope
 
   return {
     version: 1,
+    ...(activeProvider ? { activeProvider } : {}),
+    ...(activeModel ? { activeModel } : {}),
     ...(meta ? { meta } : {}),
     ...gatewayFields,
     dashboardPort,
