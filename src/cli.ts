@@ -129,6 +129,30 @@ function printHelp(): void {
 }
 
 async function main(): Promise<void> {
+    // ── Proxy auto-detection ──────────────────────────────────────────────
+    // Node's fetch (undici) ignores HTTP_PROXY/HTTPS_PROXY. On Node >= 22.8,
+    // re-exec with --experimental-global-proxy so corporate proxies work.
+    const proxyUrl = process.env.HTTPS_PROXY || process.env.HTTP_PROXY
+      || process.env.https_proxy || process.env.http_proxy;
+
+    if (proxyUrl && !process.execArgv.includes("--experimental-global-proxy")) {
+      const [major, minor] = process.versions.node.split(".").map(Number) as [number, number];
+      if (major > 22 || (major === 22 && minor >= 8)) {
+        const { spawnSync } = await import("node:child_process");
+        const result = spawnSync(
+          process.execPath,
+          ["--experimental-global-proxy", ...process.argv.slice(1)],
+          { stdio: "inherit", env: process.env },
+        );
+        process.exit(result.status ?? 1);
+      } else {
+        logger.warn(
+          `Proxy detected (${proxyUrl}) but Node ${process.versions.node} does not support --experimental-global-proxy (requires 22.8+).`
+          + "\n  Network requests may fail. Upgrade Node or set NODE_OPTIONS=--experimental-global-proxy manually.",
+        );
+      }
+    }
+
     const args = process.argv.slice(2);
 
     // ── TUI entry points (before any commander parsing) ──────────────────
