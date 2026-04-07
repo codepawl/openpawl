@@ -300,35 +300,43 @@ export class SetupWizardView extends InteractiveView {
       return lines;
     }
 
+    const { start, end, aboveCount, belowCount } = this.getVisibleRange();
+    const visible = filtered.slice(start, end);
+
+    // Build section headers relative to the visible window
     const detectedFiltered = filtered.filter((i) => i.detected);
-    const otherFiltered = filtered.filter((i) => !i.detected);
-    let idx = 0;
+    const detectedCount = detectedFiltered.length;
+    const itemLines: string[] = [];
 
-    if (detectedFiltered.length > 0) {
-      lines.push("");
-      lines.push(`  ${t.bold("Detected")}`);
-      lines.push(`  ${"─".repeat(40)}`);
-      for (const item of detectedFiltered) {
-        const isSelected = idx === this.selectedIndex;
-        const cursor = isSelected ? t.primary("▸") : t.dim("│");
-        const hint = item.hint ? t.dim(` — ${item.hint}`) : "";
-        lines.push(`  ${cursor} ${t.success("✓")} ${isSelected ? t.bold(item.label) : item.label}${hint}`);
-        idx++;
+    for (let vi = 0; vi < visible.length; vi++) {
+      const globalIdx = start + vi;
+      const item = visible[vi]!;
+      const isSelected = globalIdx === this.selectedIndex;
+
+      // Section header: "Detected" before first detected item in window
+      if (item.detected && (globalIdx === 0 || !filtered[globalIdx - 1]?.detected)) {
+        itemLines.push("");
+        itemLines.push(`  ${t.bold("Detected")}`);
+        itemLines.push(`  ${"─".repeat(40)}`);
+      }
+      // Section header: "All Providers" before first non-detected item in window
+      if (!item.detected && (globalIdx === 0 || globalIdx === detectedCount)) {
+        itemLines.push("");
+        itemLines.push(`  ${t.bold("All Providers")}`);
+        itemLines.push(`  ${"─".repeat(40)}`);
+      }
+
+      const cursor = isSelected ? t.primary("▸") : t.dim("│");
+      const hint = item.hint ? t.dim(` — ${item.hint}`) : "";
+      if (item.detected) {
+        itemLines.push(`  ${cursor} ${t.success("✓")} ${isSelected ? t.bold(item.label) : item.label}${hint}`);
+      } else {
+        itemLines.push(`  ${cursor}   ${isSelected ? t.bold(item.label) : item.label}${hint}`);
       }
     }
 
-    if (otherFiltered.length > 0) {
-      lines.push("");
-      lines.push(`  ${t.bold("All Providers")}`);
-      lines.push(`  ${"─".repeat(40)}`);
-      for (const item of otherFiltered) {
-        const isSelected = idx === this.selectedIndex;
-        const cursor = isSelected ? t.primary("▸") : t.dim("│");
-        const hint = item.hint ? t.dim(` — ${item.hint}`) : "";
-        lines.push(`  ${cursor}   ${isSelected ? t.bold(item.label) : item.label}${hint}`);
-        idx++;
-      }
-    }
+    const withIndicators = this.addScrollIndicators(itemLines, aboveCount, belowCount);
+    lines.push(...withIndicators);
 
     lines.push("");
     return lines;
@@ -367,7 +375,11 @@ export class SetupWizardView extends InteractiveView {
       void this.pollDeviceToken(data.device_code, data.interval ?? 5);
     } catch (e) {
       this.loading = false;
-      this.deviceError = `Failed to start device flow: ${e instanceof Error ? e.message : String(e)}`;
+      const msg = e instanceof Error ? e.message : String(e);
+      const hint = msg.includes("fetch failed") || msg.includes("CONNECT_TIMEOUT")
+        ? " (check your network connection)"
+        : "";
+      this.deviceError = `Failed to start device flow: ${msg}${hint}`;
       this.render();
     }
   }
@@ -759,12 +771,20 @@ export class SetupWizardView extends InteractiveView {
     lines.push(`  ${t.dim("Choose a default model:")}`);
     lines.push("");
 
-    for (let i = 0; i < filtered.length; i++) {
-      const isSelected = i === this.selectedIndex;
-      const model = filtered[i]!;
+    const { start, end, aboveCount, belowCount } = this.getVisibleRange();
+    const visible = filtered.slice(start, end);
+    const itemLines: string[] = [];
+
+    for (let vi = 0; vi < visible.length; vi++) {
+      const globalIdx = start + vi;
+      const isSelected = globalIdx === this.selectedIndex;
+      const model = visible[vi]!;
       const cursor = isSelected ? t.primary("▸") : t.dim("│");
-      lines.push(`  ${cursor} ${isSelected ? t.bold(model) : model}`);
+      itemLines.push(`  ${cursor} ${isSelected ? t.bold(model) : model}`);
     }
+
+    const withIndicators = this.addScrollIndicators(itemLines, aboveCount, belowCount);
+    lines.push(...withIndicators);
 
     lines.push("");
     return lines;
@@ -902,6 +922,7 @@ export class SetupWizardView extends InteractiveView {
       if (this.isFilterableStep() && this.filterText) {
         this.filterText = "";
         this.selectedIndex = 0;
+        this.scrollOffset = 0;
         this.render();
         return true;
       }
@@ -917,6 +938,7 @@ export class SetupWizardView extends InteractiveView {
     if (this.isFilterableStep() && !this.isEditing() && event.type === "char" && !event.ctrl && !event.alt) {
       this.filterText += event.char;
       this.selectedIndex = 0;
+      this.scrollOffset = 0;
       this.render();
       return true;
     }
@@ -926,6 +948,7 @@ export class SetupWizardView extends InteractiveView {
       if (this.filterText) {
         this.filterText = this.filterText.slice(0, -1);
         this.selectedIndex = 0;
+        this.scrollOffset = 0;
         this.render();
         return true;
       }
@@ -935,12 +958,20 @@ export class SetupWizardView extends InteractiveView {
     // Arrow navigation in non-editing steps
     if (!this.isEditing()) {
       if (event.type === "arrow" && event.direction === "up") {
-        this.selectedIndex = Math.max(0, this.selectedIndex - 1);
+        const count = this.getItemCount();
+        if (count > 0) {
+          this.selectedIndex = this.selectedIndex <= 0 ? count - 1 : this.selectedIndex - 1;
+          this.adjustScroll();
+        }
         this.render();
         return true;
       }
       if (event.type === "arrow" && event.direction === "down") {
-        this.selectedIndex = Math.min(this.getItemCount() - 1, this.selectedIndex + 1);
+        const count = this.getItemCount();
+        if (count > 0) {
+          this.selectedIndex = this.selectedIndex >= count - 1 ? 0 : this.selectedIndex + 1;
+          this.adjustScroll();
+        }
         this.render();
         return true;
       }
