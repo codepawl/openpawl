@@ -100,7 +100,7 @@ export class SetupWizardView extends InteractiveView {
     }
 
     switch (this.step) {
-      case WizardStep.DETECT: return true;
+      case WizardStep.DETECT: return this.handleDetectKey(event);
       case WizardStep.PROVIDER: return this.handleProviderKey(event);
       case WizardStep.API_KEY: return this.handleApiKeyKey(event);
       case WizardStep.MODEL: return this.handleModelKey(event);
@@ -122,7 +122,7 @@ export class SetupWizardView extends InteractiveView {
 
   protected override getPanelFooter(): string {
     switch (this.step) {
-      case WizardStep.DETECT: return "Detecting...";
+      case WizardStep.DETECT: return this.loading ? "Detecting..." : "Enter continue · Esc close";
       case WizardStep.PROVIDER: return "↑↓ navigate · Enter select · Esc close";
       case WizardStep.API_KEY: return "Enter validate · Esc back";
       case WizardStep.MODEL: return "↑↓ navigate · Enter select · Esc back";
@@ -154,19 +154,49 @@ export class SetupWizardView extends InteractiveView {
     }
 
     this.loading = false;
-    this.step = WizardStep.PROVIDER;
-    this.selectedIndex = 0;
-    this.buildProviderItems();
     this.render();
+  }
+
+  private handleDetectKey(event: KeyEvent): boolean {
+    if (this.loading) return true; // consume all keys while detecting
+    if (event.type === "enter" || (event.type === "tab" && !event.shift)) {
+      this.step = WizardStep.PROVIDER;
+      this.selectedIndex = 0;
+      this.buildProviderItems();
+      this.render();
+      return true;
+    }
+    return true;
   }
 
   private renderDetect(): string[] {
     const t = this.theme;
-    return [
-      "",
-      `  ${t.dim(this.loadingText || "Detecting providers...")}`,
-      "",
-    ];
+    const lines: string[] = [""];
+
+    if (this.loading) {
+      lines.push(`  ${t.dim(this.loadingText || "Detecting providers...")}`);
+      lines.push("");
+      return lines;
+    }
+
+    // Show detection results
+    for (const d of this.detected) {
+      if (d.available) {
+        const detail = d.source === "env" ? `${d.envKey} found` : d.models ? `${d.models.length} models` : "detected";
+        lines.push(`  ${t.success("✓")} ${d.type} (${detail})`);
+      } else {
+        lines.push(`  ${t.dim("·")} ${d.type} — not found`);
+      }
+    }
+
+    if (this.detected.length === 0) {
+      lines.push(`  ${t.dim("No providers detected")}`);
+    }
+
+    lines.push("");
+    lines.push(`  ${t.dim("Press Enter to continue")}`);
+    lines.push("");
+    return lines;
   }
 
   // ── Step: PROVIDER ────────────────────────────────────────

@@ -101,10 +101,17 @@ describe("SetupWizardView", () => {
     // Wait for detection to complete
     await flush();
 
-    // After detection, should render provider list
-    const lastCall = (tui.setInteractiveView as Mock).mock.calls.at(-1)?.[0] as string[];
-    const joined = lastCall.join("\n");
-    // Should show Anthropic as detected
+    // After detection, should show results with Anthropic detected
+    let lastCall = (tui.setInteractiveView as Mock).mock.calls.at(-1)?.[0] as string[];
+    let joined = lastCall.join("\n");
+    expect(joined).toContain("anthropic");
+
+    // Press Enter to advance to PROVIDER step
+    wizard.handleKey({ type: "enter" });
+
+    lastCall = (tui.setInteractiveView as Mock).mock.calls.at(-1)?.[0] as string[];
+    joined = lastCall.join("\n");
+    // Should show Anthropic in provider list
     expect(joined).toContain("Anthropic");
   });
 
@@ -121,6 +128,9 @@ describe("SetupWizardView", () => {
     const wizard = new SetupWizardView(tui, onClose);
     wizard.activate();
     await flush();
+
+    // Advance past DETECT step
+    wizard.handleKey({ type: "enter" });
 
     // Should be on PROVIDER step with ollama visible
     let lastCall = (tui.setInteractiveView as Mock).mock.calls.at(-1)?.[0] as string[];
@@ -165,6 +175,9 @@ describe("SetupWizardView", () => {
       const wizard = new SetupWizardView(tui, onClose);
       wizard.activate();
       await flush();
+
+      // Advance past DETECT step
+      wizard.handleKey({ type: "enter" });
 
       // PROVIDER step — select Anthropic (first detected item)
       wizard.handleKey({ type: "enter" });
