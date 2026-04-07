@@ -38,6 +38,9 @@ export const COMMANDS = [
     "templates",
     "cache",
     "providers",
+    "settings",
+    "sessions",
+    "chat",
 ] as const;
 
 /** Known subcommands keyed by parent command. */

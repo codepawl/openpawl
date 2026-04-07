@@ -645,7 +645,7 @@ export async function runConfigDashboard(): Promise<void> {
         );
 
         if (shouldSetup) {
-            const { runSetup } = await import("./setup.js");
+            const { runSetup } = await import("../onboard/setup-flow.js");
             await runSetup();
         } else {
             outro("Run " + pc.bold("openpawl setup") + " when you're ready.");

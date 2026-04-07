@@ -27,34 +27,7 @@ import { logger } from "../core/logger.js";
 import pc from "picocolors";
 import { fetchModelsForProvider } from "../providers/model-fetcher.js";
 import { getCachedModels, setCachedModels } from "../providers/model-cache.js";
-
-
-const ENV_KEYS: Record<string, string> = {
-  ANTHROPIC_API_KEY: "anthropic",
-  OPENAI_API_KEY: "openai",
-  OPENROUTER_API_KEY: "openrouter",
-  DEEPSEEK_API_KEY: "deepseek",
-  GROQ_API_KEY: "groq",
-  GOOGLE_API_KEY: "gemini",
-  GEMINI_API_KEY: "gemini",
-  XAI_API_KEY: "grok",
-  MISTRAL_API_KEY: "mistral",
-  CEREBRAS_API_KEY: "cerebras",
-  TOGETHER_API_KEY: "together",
-  TOGETHER_AI_API_KEY: "together",
-  FIREWORKS_API_KEY: "fireworks",
-  PERPLEXITY_API_KEY: "perplexity",
-  MOONSHOT_API_KEY: "moonshot",
-  ZAI_API_KEY: "zai",
-  ZHIPU_API_KEY: "zai",
-  MINIMAX_API_KEY: "minimax",
-  COHERE_API_KEY: "cohere",
-  OPENCODE_API_KEY: "opencode-zen",
-  OPENCODE_GO_API_KEY: "opencode-go",
-  AZURE_OPENAI_API_KEY: "azure",
-  GITHUB_TOKEN: "copilot",
-  AWS_ACCESS_KEY_ID: "bedrock",
-};
+import { detectProviders } from "../providers/detect.js";
 
 export async function runProvidersCommand(args: string[]): Promise<void> {
   const sub = args[0];
@@ -99,12 +72,10 @@ export async function listProviders(): Promise<void> {
   }
 
   // Detect env-var providers
-  const envProviders: { type: string; envVar: string }[] = [];
-  for (const [envKey, type] of Object.entries(ENV_KEYS)) {
-    if (process.env[envKey]) {
-      envProviders.push({ type, envVar: envKey });
-    }
-  }
+  const detected = await detectProviders();
+  const envProviders = detected
+    .filter((d) => d.source === "env" && d.available)
+    .map((d) => ({ type: d.type, envVar: d.envKey ?? "" }));
 
   logger.plain("Providers:");
   logger.plain("");

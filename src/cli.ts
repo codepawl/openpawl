@@ -89,6 +89,7 @@ function printHelp(): void {
         "  " + cmd(pad("model")) + desc("Manage AI models per agent"),
         "  " + cmd(pad("providers")) + desc("Configure and test AI providers"),
         "  " + cmd(pad("agent")) + desc("Add custom agents"),
+        "  " + cmd(pad("settings")) + desc("View and change settings"),
         "  " + cmd(pad("config")) + desc("Manage configuration"),
         "",
         section("HISTORY & ANALYSIS"),
@@ -146,15 +147,8 @@ async function main(): Promise<void> {
         const configPath = join(homedir(), ".openpawl", "config.json");
 
         if (!existsSync(configPath)) {
-            const { handleFirstRun } = await import("./onboard/index.js");
-            const result = await handleFirstRun();
-            if (result.isErr()) {
-                if (result.error.type === "cancelled") return;
-                logger.error(result.error.type === "not_interactive"
-                    ? result.error.message
-                    : `Setup failed: ${result.error.type}`);
-                return;
-            }
+            const { runSetup } = await import("./onboard/setup-flow.js");
+            await runSetup();
         }
 
         const { launchTUI } = await import("./app/index.js");
@@ -213,22 +207,16 @@ async function main(): Promise<void> {
     // Pillar 1: openpawl setup
     // -------------------------------------------------------------------------
     if (cmd === "setup" || cmd === "init") {
-        // --reset flag: delete existing config, start fresh
         if (args.includes("--reset")) {
             const { existsSync, unlinkSync } = await import("node:fs");
-            const { join } = await import("node:path");
-            const { homedir } = await import("node:os");
-            const configPath = join(homedir(), ".openpawl", "config.json");
-            if (existsSync(configPath)) {
-                unlinkSync(configPath);
-                logger.success("Config reset.");
-            }
+            const { getGlobalConfigPath } = await import("./core/global-config.js");
+            const cfgPath = getGlobalConfigPath();
+            if (existsSync(cfgPath)) unlinkSync(cfgPath);
         }
-        const { handleFirstRun } = await import("./onboard/index.js");
-        const result = await handleFirstRun();
-        if (result.isErr() && result.error.type !== "cancelled") {
-            logger.error(`Setup failed: ${result.error.type}`);
-        }
+        const { readGlobalConfig } = await import("./core/global-config.js");
+        const { runSetup } = await import("./onboard/setup-flow.js");
+        const existing = readGlobalConfig();
+        await runSetup({ prefill: existing ?? undefined });
 
     // -------------------------------------------------------------------------
     // Pillar 2 + 3 + 4: openpawl work — zero-config, auto-web, smart recovery
@@ -543,6 +531,10 @@ async function main(): Promise<void> {
     } else if (cmd === "demo") {
         const { runDemo } = await import("./commands/demo.js");
         await runDemo(args.slice(1));
+
+    } else if (cmd === "settings") {
+        const { runSettings } = await import("./commands/settings.js");
+        await runSettings(args.slice(1));
 
     } else {
         const match = findClosestCommand(rawCmd);

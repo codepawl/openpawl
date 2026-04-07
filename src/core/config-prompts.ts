@@ -65,7 +65,7 @@ export async function validateOrPromptConfig(
             );
         }
 
-        const { runSetup } = await import("../commands/setup.js");
+        const { runSetup } = await import("../onboard/setup-flow.js");
         await runSetup();
         clearTeamConfigCache();
 

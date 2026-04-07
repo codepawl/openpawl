@@ -11,10 +11,7 @@
  */
 
 import {
-    confirm,
-    intro,
     note,
-    outro,
     select,
     text,
     cancel,
@@ -27,28 +24,17 @@ import { existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import {
     readOpenpawlConfig,
 } from "../core/jsonConfigManager.js";
-import { logger } from "../core/logger.js";
 import {
-    writeGlobalConfig,
     readGlobalConfig,
-    type OpenPawlGlobalConfig,
 } from "../core/global-config.js";
 import { getDefaultGoal } from "../core/configManager.js";
 import { writeConfig } from "../onboard/writeConfig.js";
 import { promptPath } from "../utils/path-autocomplete.js";
 
-import { handleCancel, stepProvider, type WizardState } from "./setup/connection.js";
+import { handleCancel, type WizardState } from "./setup/connection.js";
 import { stepGoal } from "./setup/goal-input.js";
 import { stepTeam } from "./setup/team-builder.js";
 import type { CompositionWizardState } from "./setup/composition-mode.js";
-
-import { PROVIDER_CATALOG } from "../providers/provider-catalog.js";
-
-/** Get default model for a provider from the catalog */
-function getDefaultModelForProvider(providerType: string): string {
-    const meta = PROVIDER_CATALOG[providerType];
-    return meta?.models[0]?.id ?? "";
-}
 
 // ---------------------------------------------------------------------------
 // Step 2: Workspace
@@ -302,39 +288,42 @@ async function stepProject(state: WizardState): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Persist all config
+// Full setup steps (workspace, project, goal, team) — used by `openpawl setup --full`
 // ---------------------------------------------------------------------------
 
-function persistAllConfig(state: WizardState): string {
-    // Create workspace and project directories if they don't exist
-    if (state.workspaceDir && !existsSync(state.workspaceDir)) {
+export async function runFullSetupSteps(): Promise<void> {
+    const state: CompositionWizardState = {
+        providerEntries: [],
+        workspaceDir: path.resolve("./openpawl-workspace"),
+        projectName: "",
+        selectedModel: "",
+        goal: getDefaultGoal(),
+        roster: [],
+        templateId: "",
+    };
+
+    // Step 1: Workspace
+    note("Step 1/4", pc.bold("Workspace"));
+    await stepWorkspace(state);
+
+    // Ensure workspace directory exists so stepProject can list existing projects
+    if (!existsSync(state.workspaceDir)) {
         mkdirSync(state.workspaceDir, { recursive: true });
     }
-    if (state.workspaceDir && state.projectName) {
-        const projectDir = path.join(state.workspaceDir, state.projectName);
-        if (!existsSync(projectDir)) {
-            mkdirSync(projectDir, { recursive: true });
-        }
-    }
 
-    const globalConfig: OpenPawlGlobalConfig = {
-        version: 1,
-        managedGateway: false,
-        gatewayHost: "127.0.0.1",
-        gatewayPort: 0,
-        apiPort: 0,
-        gatewayUrl: "",
-        apiUrl: "",
-        token: "",
-        model: state.selectedModel || "default",
-        chatEndpoint: "/v1/chat/completions",
-        dashboardPort: 9001,
-        debugMode: false,
-        workspaceDir: state.workspaceDir,
-        providers: state.providerEntries,
-    };
-    const globalConfigPath = writeGlobalConfig(globalConfig);
+    // Step 2: Project
+    note("Step 2/4", pc.bold("Project"));
+    await stepProject(state);
 
+    // Step 3: Goal
+    note("Step 3/4", pc.bold("Your Goal"));
+    await stepGoal(state);
+
+    // Step 4: Team
+    note("Step 4/4", pc.bold("Team"));
+    await stepTeam(state);
+
+    // Persist project-level config
     writeConfig({
         workerUrl: "",
         authToken: "",
@@ -347,204 +336,4 @@ function persistAllConfig(state: WizardState): string {
         projectName: state.projectName,
         teamMode: state.teamMode as "manual" | "autonomous" | undefined,
     });
-
-    return globalConfigPath;
-}
-
-// ---------------------------------------------------------------------------
-// Main export
-// ---------------------------------------------------------------------------
-
-export async function runSetup(): Promise<void> {
-    const canTTY = Boolean(process.stdout.isTTY && process.stderr.isTTY);
-
-    const existingConfig = readGlobalConfig();
-
-    if (canTTY) {
-        intro(pc.bold(pc.cyan("OpenPawl Setup")));
-
-        if (existingConfig) {
-            const existingModel = existingConfig.model ?? "";
-            const existingProviders = (existingConfig.providers ?? []).map((p) => p.type).join(", ") || "none";
-            note(
-                [
-                    `${pc.yellow("Existing configuration detected.")}`,
-                    "",
-                    `  Providers : ${existingProviders}`,
-                    `  Model     : ${existingModel || "default"}`,
-                    "",
-                    "Running setup again will overwrite your current",
-                    "provider, model, workspace, and team settings.",
-                    "",
-                    `Use ${pc.bold("openpawl config")} to make targeted changes instead.`,
-                ].join("\n"),
-                "Re-configuring",
-            );
-            const proceed = handleCancel(
-                await confirm({
-                    message: "Continue and replace existing configuration?",
-                    initialValue: false,
-                }),
-            );
-            if (!proceed) {
-                outro("Setup cancelled. Your existing configuration is unchanged.");
-                return;
-            }
-        }
-
-        note(
-            [
-                "Your AI team that never forgets.",
-                "",
-                "Takes about 2 minutes. You'll need an API key",
-                "from your AI provider of choice.",
-                "",
-                "Steps:",
-                `  ${pc.cyan("1.")} Choose AI provider   ${pc.dim("(~60 seconds)")}`,
-                `  ${pc.cyan("2.")} Workspace & project  ${pc.dim("(~30 seconds)")}`,
-                `  ${pc.cyan("3.")} Set the goal         ${pc.dim("(~15 seconds)")}`,
-                `  ${pc.cyan("4.")} Pick a team          ${pc.dim("(~15 seconds)")}`,
-            ].join("\n"),
-            "Welcome to OpenPawl",
-        );
-    } else {
-        logger.info("OpenPawl Setup Wizard");
-    }
-
-    const state: CompositionWizardState = {
-        providerEntries: [],
-        workspaceDir: path.resolve("./openpawl-workspace"),
-        projectName: "",
-        selectedModel: "",
-        goal: getDefaultGoal(),
-        roster: [],
-        templateId: "",
-    };
-
-    // Step 1/5: Providers (includes model selection)
-    note("Step 1/5", pc.bold("Provider & Model"));
-    await stepProvider(state);
-
-    // Set selectedModel from first provider's model choice
-    const firstProvider = state.providerEntries[0];
-    state.selectedModel = firstProvider?.model || getDefaultModelForProvider(firstProvider?.type ?? "anthropic") || "default";
-
-    // Step 2/5: Workspace
-    note("Step 2/5", pc.bold("Workspace"));
-    await stepWorkspace(state);
-
-    // Ensure workspace directory exists so stepProject can list existing projects
-    if (!existsSync(state.workspaceDir)) {
-        mkdirSync(state.workspaceDir, { recursive: true });
-    }
-
-    // Step 3/5: Project
-    note("Step 3/5", pc.bold("Project"));
-    await stepProject(state);
-
-    // Step 4/5: Goal (before team — team composition depends on the goal)
-    note("Step 4/5", pc.bold("Your Goal"));
-    await stepGoal(state);
-
-    // Step 5/5: Team (composition mode is handled inside stepTeam)
-    note("Step 5/5", pc.bold("Team"));
-    await stepTeam(state);
-
-    // Summary
-    const rosterSummary = state.roster.length > 0
-        ? state.roster.map((r) => `${r.count}x ${r.role}`).join(", ")
-        : "(none)";
-
-    const providerSummary = state.providerEntries
-        .map((p, i) => {
-            const name = p.name || p.type;
-            const model = p.model || getDefaultModelForProvider(p.type) || "default";
-            return `Provider ${i + 1}: ${name} (${model})`;
-        })
-        .join("\n            ");
-
-    const maxVal = 50;
-    const trunc = (s: string) => {
-        const flat = s.replace(/\n/g, " ").trim();
-        return flat.length > maxVal ? flat.slice(0, maxVal - 3) + "..." : flat;
-    };
-
-    const summaryLines = [
-        `Providers : ${providerSummary}`,
-        `Workspace : ${trunc(state.workspaceDir)}`,
-        `Project   : ${state.projectName || "(none)"}`,
-        `Model     : ${trunc(state.selectedModel || "default")}`,
-        `Goal      : ${trunc(state.goal)}`,
-        `Team      : ${trunc(rosterSummary)}`,
-        `Template  : ${state.templateId || "custom"}`,
-    ];
-    // Only show Team Mode when it's not the default (autonomous)
-    if (state.teamMode && state.teamMode !== "autonomous") {
-        summaryLines.push(`Team Mode : ${state.teamMode}`);
-    }
-
-    note(summaryLines.join("\n"), "Configuration Summary");
-
-    const saveConfirm = handleCancel(
-        await confirm({
-            message: "Save and continue?",
-            initialValue: true,
-        }),
-    ) as boolean;
-
-    if (!saveConfirm) {
-        cancel("No worries — nothing was saved.");
-        process.exit(0);
-    }
-
-    persistAllConfig(state);
-
-    note(
-        [
-            `Provider:   ${providerSummary}`,
-            `Team:       ${rosterSummary}`,
-            `Model:      ${state.selectedModel || "default"}`,
-            `Dashboard:  ${pc.green("http://localhost:9001")}`,
-            "",
-            `${pc.bold("What to do next:")}`,
-            "",
-            `${pc.green("\u2192")} Start your first sprint:`,
-            `  ${pc.cyan('openpawl work --goal "describe what you want to build"')}`,
-            "",
-            `${pc.green("\u2192")} See OpenPawl in action first:`,
-            `  ${pc.cyan("openpawl demo")}`,
-            "",
-            `${pc.green("\u2192")} Open the dashboard:`,
-            `  ${pc.cyan("openpawl web start")}`,
-            "",
-            `${pc.green("\u2192")} Browse team templates:`,
-            `  ${pc.cyan("openpawl templates browse")}`,
-        ].join("\n"),
-        "You're all set",
-    );
-
-    const nextStep = handleCancel(
-        await select({
-            message: "What would you like to do next?",
-            options: clampSelectOptions([
-                { value: "work", label: "Run my goal now" },
-                { value: "demo", label: "Try a sample goal first" },
-                { value: "exit", label: "Exit" },
-            ]),
-        }),
-    ) as string;
-
-    if (nextStep === "work") {
-        outro("Starting your session...");
-        const { runWork } = await import("../work-runner.js");
-        await runWork({ args: [], noWeb: false });
-    } else if (nextStep === "demo") {
-        outro("Loading sample goal...");
-        const { runDemo } = await import("./demo.js");
-        await runDemo([]);
-    } else {
-        outro(
-            `Done! Run ${pc.green("openpawl work")} whenever you're ready.`,
-        );
-    }
 }

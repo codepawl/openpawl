@@ -7,26 +7,10 @@ import { existsSync, readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { DetectedEnvironment, ProjectType } from "./types.js";
+import { detectProviders } from "../providers/detect.js";
+import { maskCredential } from "../credentials/masking.js";
 
 const PROBE_TIMEOUT_MS = 2000;
-
-// Env var → provider name mapping (matches provider-factory.ts)
-const ENV_KEY_PROVIDERS: Record<string, string> = {
-  ANTHROPIC_API_KEY: "anthropic",
-  OPENAI_API_KEY: "openai",
-  OPENROUTER_API_KEY: "openrouter",
-  DEEPSEEK_API_KEY: "deepseek",
-  GROQ_API_KEY: "groq",
-  GOOGLE_API_KEY: "gemini",
-  GEMINI_API_KEY: "gemini",
-  XAI_API_KEY: "grok",
-  MISTRAL_API_KEY: "mistral",
-  CEREBRAS_API_KEY: "cerebras",
-  TOGETHER_API_KEY: "together",
-  FIREWORKS_API_KEY: "fireworks",
-  PERPLEXITY_API_KEY: "perplexity",
-  COHERE_API_KEY: "cohere",
-};
 
 /**
  * Detect everything about the current environment.
@@ -36,10 +20,15 @@ export async function detectEnvironment(): Promise<DetectedEnvironment> {
   const cwd = process.cwd();
 
   // All probes run concurrently
-  const [ollama, lmStudio] = await Promise.all([
+  const [ollama, lmStudio, detected] = await Promise.all([
     probeOllama(),
     probeLMStudio(),
+    detectProviders(),
   ]);
+
+  const envKeys = detected
+    .filter((d) => d.source === "env" && d.envKey)
+    .map((d) => ({ provider: d.type, envVar: d.envKey!, masked: maskCredential(process.env[d.envKey!] ?? "") }));
 
   return {
     nodeVersion: process.version,
@@ -48,7 +37,7 @@ export async function detectEnvironment(): Promise<DetectedEnvironment> {
     terminal: process.env.TERM ?? "unknown",
     ollama,
     lmStudio,
-    envKeys: detectEnvKeys(),
+    envKeys,
     project: detectProject(cwd),
     hasExistingConfig: checkExistingConfig(),
     existingConfigValid: checkExistingConfigValid(),
@@ -91,26 +80,6 @@ async function fetchWithTimeout(url: string, timeoutMs: number): Promise<Respons
   } finally {
     clearTimeout(timer);
   }
-}
-
-// ─── Environment Keys ────────────────────────────────────────────────────────
-
-function detectEnvKeys(): DetectedEnvironment["envKeys"] {
-  const found: DetectedEnvironment["envKeys"] = [];
-  const seenProviders = new Set<string>();
-
-  for (const [envVar, provider] of Object.entries(ENV_KEY_PROVIDERS)) {
-    const value = process.env[envVar];
-    if (!value || seenProviders.has(provider)) continue;
-    seenProviders.add(provider);
-    found.push({
-      provider,
-      envVar,
-      masked: maskApiKey(value),
-    });
-  }
-
-  return found;
 }
 
 /** Mask API key: show first 6 + last 4, mask middle with dots. */
