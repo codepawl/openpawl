@@ -563,7 +563,23 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
       layout.statusBar.updateSegment(1, "\u25cb disconnected", ctp.red);
     }
   }
-  showConfigWarning(configState, layout);
+  if (!configState.hasProvider) {
+    // Auto-trigger setup wizard instead of text warning
+    const { SetupWizardView } = await import("./interactive/setup-wizard-view.js");
+    const wizard = new SetupWizardView(layout.tui, async () => {
+      // On wizard close: re-detect config, update status bar
+      const newState = await detectConfig();
+      if (newState.hasProvider) {
+        layout.statusBar.updateSegment(0, newState.providerName, ctp.subtext1);
+        if (newState.isConnected) {
+          layout.statusBar.updateSegment(1, "\u25cf connected", ctp.green);
+        }
+      }
+    });
+    wizard.activate();
+  } else if (configState.error) {
+    showConfigWarning(configState, layout);
+  }
 
   // ── Mode system ─────────────────────────────────────────────────
   const modeSystem = new ModeSystem();

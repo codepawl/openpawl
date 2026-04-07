@@ -146,11 +146,7 @@ async function main(): Promise<void> {
         const { homedir } = await import("node:os");
         const configPath = join(homedir(), ".openpawl", "config.json");
 
-        if (!existsSync(configPath)) {
-            const { runSetup } = await import("./onboard/setup-flow.js");
-            await runSetup();
-        }
-
+        // TUI handles first-run setup via SetupWizardView when no config exists
         const { launchTUI } = await import("./app/index.js");
         await launchTUI();
         return;
