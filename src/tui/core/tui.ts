@@ -348,6 +348,7 @@ export class TUI {
     const fixedLines: string[] = [];
     let focusOffsetInFixed = -1;
     for (const comp of this.fixedBottomComponents) {
+      if (comp.hidden) continue;
       if (comp === this.focusedComponent) {
         focusOffsetInFixed = fixedLines.length;
       }
@@ -360,7 +361,9 @@ export class TUI {
 
     // 3. Render scrollable content (returns ALL lines)
     //    If an interactive view is active, append it after messages
-    const messageLines = this.scrollableComponent!.render(width);
+    const messageLines = this.scrollableComponent?.hidden
+      ? []
+      : this.scrollableComponent!.render(width);
     const allContentLines = this.interactiveLines
       ? [...messageLines, ...this.interactiveLines]
       : messageLines;

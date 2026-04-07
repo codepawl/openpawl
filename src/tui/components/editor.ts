@@ -21,6 +21,7 @@ export interface AutocompleteSuggestion {
 export class EditorComponent implements Component {
   readonly id: string;
   readonly focusable = true;
+  hidden = false;
 
   private lines: string[] = [""];
   private cursorRow = 0;

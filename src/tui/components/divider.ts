@@ -7,6 +7,7 @@ import { ctp } from "../themes/default.js";
 
 export class DividerComponent implements Component {
   readonly id: string;
+  hidden = false;
   private char: string;
   private style: StyleFn;
 

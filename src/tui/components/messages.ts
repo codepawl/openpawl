@@ -22,6 +22,7 @@ export interface ChatMessage {
 export class MessagesComponent implements Component {
   readonly id: string;
   readonly focusable = true;
+  hidden = false;
 
   private messages: ChatMessage[] = [];
 

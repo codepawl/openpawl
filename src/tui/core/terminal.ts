@@ -71,10 +71,14 @@ export class ProcessTerminal implements Terminal {
     }
     process.stdin.resume();
 
-    // Forward stdin data to handlers
-    process.stdin.on("data", (data: Buffer) => {
-      for (const handler of this.inputHandlers) handler(data);
-    });
+    // Drain any stale stdin bytes (e.g., Enter from shell invocation)
+    // before attaching input handlers. The 16ms delay lets Node's stream
+    // flush buffered data harmlessly.
+    setTimeout(() => {
+      process.stdin.on("data", (data: Buffer) => {
+        for (const handler of this.inputHandlers) handler(data);
+      });
+    }, 16);
 
     // Forward resize events
     process.stdout.on("resize", () => {

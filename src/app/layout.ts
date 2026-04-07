@@ -22,6 +22,7 @@ export interface AppLayout {
   statusBar: StatusBarComponent;
   messages: MessagesComponent;
   editor: EditorComponent;
+  divider: DividerComponent;
 }
 
 export function createLayout(terminal?: Terminal): AppLayout {
@@ -42,5 +43,5 @@ export function createLayout(terminal?: Terminal): AppLayout {
 
   tui.setFocus(editor);
 
-  return { tui, statusBar, messages, editor };
+  return { tui, statusBar, messages, editor, divider };
 }

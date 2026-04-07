@@ -519,23 +519,25 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
     // Use default version
   }
 
-  layout.messages.addMessage({
-    role: "system",
-    content: [
-      ctp.mauve(`\u2726  O P E N P A W L`) + "  " + ctp.overlay1(`v${versionStr}`),
-      "",
-      ctp.subtext0("Terminal-native AI workspace. Just type what you want to build."),
-      "",
-      `  ${ctp.blue("/help")}       Show commands       ${ctp.blue("@coder")}     Route to Coder`,
-      `  ${ctp.blue("/settings")}   Configure provider  ${ctp.blue("@reviewer")}  Route to Reviewer`,
-      `  ${ctp.blue("/agents")}     List agents         ${ctp.blue("@planner")}   Route to Planner`,
-      `  ${ctp.peach("!command")}    Run shell command   ${ctp.blue("@tester")}    Route to Tester`,
-      `  ${ctp.blue("@file")}       Reference a file    ${ctp.blue("@debugger")}  Route to Debugger`,
-      "",
-      ctp.surface1("\u2500".repeat(60)),
-    ].join("\n"),
-    timestamp: new Date(),
-  });
+  const addWelcomeMessage = () => {
+    layout.messages.addMessage({
+      role: "system",
+      content: [
+        ctp.mauve(`\u2726  O P E N P A W L`) + "  " + ctp.overlay1(`v${versionStr}`),
+        "",
+        ctp.subtext0("Terminal-native AI workspace. Just type what you want to build."),
+        "",
+        `  ${ctp.blue("/help")}       Show commands       ${ctp.blue("@coder")}     Route to Coder`,
+        `  ${ctp.blue("/settings")}   Configure provider  ${ctp.blue("@reviewer")}  Route to Reviewer`,
+        `  ${ctp.blue("/agents")}     List agents         ${ctp.blue("@planner")}   Route to Planner`,
+        `  ${ctp.peach("!command")}    Run shell command   ${ctp.blue("@tester")}    Route to Tester`,
+        `  ${ctp.blue("@file")}       Reference a file    ${ctp.blue("@debugger")}  Route to Debugger`,
+        "",
+        ctp.surface1("\u2500".repeat(60)),
+      ].join("\n"),
+      timestamp: new Date(),
+    });
+  };
 
   // Status bar segments: provider | connection | mode | state | cost
   layout.statusBar.setSegments([
@@ -564,10 +566,19 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
     }
   }
   if (!configState.hasProvider) {
-    // Auto-trigger setup wizard instead of text warning
+    // Hide chat UI during first-run setup — only wizard + status bar visible
+    layout.editor.hidden = true;
+    layout.divider.hidden = true;
+    layout.messages.hidden = true;
+
     const { SetupWizardView } = await import("./interactive/setup-wizard-view.js");
     const wizard = new SetupWizardView(layout.tui, async () => {
-      // On wizard close: re-detect config, update status bar
+      // Restore chat UI after wizard completes
+      layout.editor.hidden = false;
+      layout.divider.hidden = false;
+      layout.messages.hidden = false;
+      addWelcomeMessage();
+
       const newState = await detectConfig();
       if (newState.hasProvider) {
         layout.statusBar.updateSegment(0, newState.providerName, ctp.subtext1);
@@ -575,10 +586,12 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
           layout.statusBar.updateSegment(1, "\u25cf connected", ctp.green);
         }
       }
+      layout.tui.requestRender();
     });
     wizard.activate();
-  } else if (configState.error) {
-    showConfigWarning(configState, layout);
+  } else {
+    addWelcomeMessage();
+    if (configState.error) showConfigWarning(configState, layout);
   }
 
   // ── Mode system ─────────────────────────────────────────────────

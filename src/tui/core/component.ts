@@ -36,6 +36,9 @@ export interface Component {
 
   /** Return cursor position relative to this component's rendered output (1-based row/col). */
   getCursorPosition?(): { row: number; col: number } | null;
+
+  /** When true, component is skipped during rendering. */
+  hidden?: boolean;
 }
 
 /**
