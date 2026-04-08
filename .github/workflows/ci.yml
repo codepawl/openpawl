@@ -65,10 +65,14 @@ jobs:
       - name: Run tests
         if: matrix.node != '20'
         run: bun run test
+        env:
+          NODE_OPTIONS: "--max-old-space-size=4096"
 
       - name: Run tests with coverage
         if: matrix.node == '20'
         run: bun run test:coverage
+        env:
+          NODE_OPTIONS: "--max-old-space-size=4096"
 
   build:
     name: Build
