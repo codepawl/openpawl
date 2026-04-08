@@ -406,6 +406,7 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
     doomLoopDetector: null as { reset: () => void } | null,
     toolOutputHandler: null as { cleanup: () => Promise<void> } | null,
     configState: null as ConfigState | null,
+    modeSystem: null as ModeSystem | null,
   };
 
   // Register built-in commands (/help, /clear, /quit)
@@ -718,6 +719,7 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
 
   // ── Mode system ─────────────────────────────────────────────────
   const modeSystem = new ModeSystem();
+  ctx.modeSystem = modeSystem;
   const updateModeDisplay = () => {
     const info = modeSystem.getModeInfo();
     // Auto-accept mode uses yellow (visual warning), others use mauve
@@ -725,6 +727,19 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
     layout.statusBar.updateSegment(2, `${info.icon} ${info.shortName}`, modeColor);
     layout.tui.requestRender();
   };
+
+  // ── Register /plan and /execute (needs modeSystem) ──────────────
+  {
+    const { createPlanCommand, createExecuteCommand } = await import("./commands/plan.js");
+    const planDeps = {
+      modeSystem,
+      updateModeDisplay,
+      getSession: () => ctx.chatSession,
+      flashMessage: (msg: string) => layout.tui.onFlashMessage?.(msg),
+    };
+    registry.register(createPlanCommand(planDeps));
+    registry.register(createExecuteCommand(planDeps));
+  }
 
   // ── Leader key ─────────────────────────────────────────────────
   const leaderKey = new LeaderKeyHandler();
@@ -1158,6 +1173,7 @@ async function initSessionRouter(
     doomLoopDetector: { reset: () => void } | null;
     toolOutputHandler: { cleanup: () => Promise<void> } | null;
     configState: ConfigState | null;
+    modeSystem: ModeSystem | null;
   },
   opts: LaunchOptions | undefined,
   layout: AppLayout,
@@ -1303,7 +1319,14 @@ async function initSessionRouter(
     onToken: (agentId, token) => tokenEmitter.emit(agentId, token),
     onToolCall: (agentId, toolName, status, details) => toolEmitter.emit(agentId, toolName, status, details as Record<string, unknown> | undefined),
     getToolSchemas: toolRegistry
-      ? (toolNames) => toolRegistry!.exportForLLM(toolNames)
+      ? (toolNames) => {
+          // In plan-only mode, restrict to read-only tools
+          const PLAN_ONLY_TOOLS = new Set(["file_read", "file_list", "web_search", "web_fetch"]);
+          const filtered = ctx.modeSystem?.getMode() === "plan-only"
+            ? [...toolNames].filter((t) => PLAN_ONLY_TOOLS.has(t))
+            : toolNames;
+          return toolRegistry!.exportForLLM(filtered);
+        }
       : undefined,
     executeTool: toolExecutor
       ? async (toolName, args) => {
