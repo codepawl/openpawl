@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "bun:test";
 import { createConfidenceRouterNode } from "@/graph/nodes/confidence-router.js";
 import { isRetryableFailure } from "@/graph/confidence/types.js";
 import type { GraphState } from "@/core/graph-state.js";

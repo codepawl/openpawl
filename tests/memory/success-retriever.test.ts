@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "bun:test";
 import { withSuccessContext } from "@/memory/success/prompt.js";
 import type { SuccessPattern } from "@/memory/success/types.js";
 

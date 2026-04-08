@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "bun:test";
 import { PROVIDER_CATALOG, getProviderMeta, getAllProviderIds } from "../../src/providers/provider-catalog.js";
 
 describe("provider-catalog", () => {

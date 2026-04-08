@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "bun:test";
 import { ResponseCache } from "../../src/cache/response-cache.js";
 
 describe("ResponseCache", () => {

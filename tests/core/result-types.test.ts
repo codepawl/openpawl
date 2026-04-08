@@ -1,9 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
-
-vi.mock("../../src/core/logger.js", () => ({
-  logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), plain: vi.fn(), success: vi.fn() },
-}));
-
+import { describe, it, expect } from "bun:test";
 import { classifyProviderError, safeAsync, ok, err } from "../../src/core/result-types.js";
 import { formatProviderErrorType } from "../../src/core/errors.js";
 

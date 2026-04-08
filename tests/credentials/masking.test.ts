@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "bun:test";
 import { maskCredential, looksLikeCredential, redactCredentials } from "../../src/credentials/masking.js";
 
 describe("maskCredential", () => {

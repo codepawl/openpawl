@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "bun:test";
 import type { SuccessPattern } from "@/memory/success/types.js";
 
 // Mock LanceDB and embedder since we can't run real DB in unit tests

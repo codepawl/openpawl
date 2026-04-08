@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "bun:test";
 import { z } from "zod";
 import { ok, err } from "neverthrow";
 import { ToolRegistry } from "../../src/tools/registry.js";

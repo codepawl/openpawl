@@ -1,8 +1,8 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "bun:test";
 
 // Mock fetch globally
 const mockFetch = vi.fn();
-vi.stubGlobal("fetch", mockFetch);
+(globalThis as any).fetch = mockFetch;
 
 import {
   fetchOpenAICompatibleModels,

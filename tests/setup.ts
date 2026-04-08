@@ -1,17 +1,14 @@
 /**
- * Vitest global setup.
- *
- * Keep unit tests deterministic regardless of developer-local `.env`.
- * Clear mocks between tests and restore after each file to prevent
- * memory leaks in worker processes.
+ * Bun test global setup (preloaded via bunfig.toml).
  */
+import { afterEach, afterAll, mock } from "bun:test";
 
-import { afterEach, afterAll, vi } from "vitest";
+process.setMaxListeners(50);
 
 afterEach(() => {
-  vi.clearAllMocks();
+  mock.restore();
 });
 
 afterAll(() => {
-  vi.restoreAllMocks();
+  mock.restore();
 });

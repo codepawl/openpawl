@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "bun:test";
 import { getRoutingDecision, mapRoutingToStatus } from "@/graph/confidence/router.js";
 import { DEFAULT_CONFIDENCE_THRESHOLDS } from "@/graph/confidence/types.js";
 import { createConfidenceRouterNode } from "@/graph/nodes/confidence-router.js";

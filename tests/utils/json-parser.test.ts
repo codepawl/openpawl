@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "bun:test";
 import { parseLlmJson } from "@/utils/jsonExtractor.js";
 
 describe("parseLlmJson (Robust JSON Extraction)", () => {

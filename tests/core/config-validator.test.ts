@@ -1,9 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
-
-vi.mock("../../src/core/logger.js", () => ({
-  logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), plain: vi.fn(), success: vi.fn() },
-}));
-
+import { describe, it, expect } from "bun:test";
 import { validateConfig, migrateConfig, OpenPawlConfigSchema } from "../../src/core/config-validator.js";
 
 describe("validateConfig", () => {

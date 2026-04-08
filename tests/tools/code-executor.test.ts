@@ -1,4 +1,4 @@
-import { describe, expect, test, beforeAll, afterAll } from "vitest";
+import { describe, expect, test, beforeAll, afterAll } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
 import { canUseIsolate } from "../helpers/can-use-isolate.js";
