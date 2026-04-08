@@ -295,8 +295,8 @@ export class EditorComponent implements Component {
         return true;
       }
       if (event.direction === "up") {
-        // Alt+Up: history navigation
-        if (event.alt && !this.suppressHistory && this.history.length > 0) {
+        // History navigation: Alt+Up always, or plain Up when on first line
+        if (!this.suppressHistory && this.history.length > 0 && (event.alt || this.cursorRow === 0)) {
           if (this.historyIndex === -1) this.historyIndex = this.history.length;
           if (this.historyIndex > 0) {
             this.historyIndex--;
@@ -304,7 +304,7 @@ export class EditorComponent implements Component {
           }
           return true;
         }
-        // Plain Up: cursor movement
+        // Cursor movement (multiline)
         if (!event.alt && this.cursorRow > 0) {
           this.cursorRow--;
           this.cursorCol = Math.min(this.cursorCol, this.lines[this.cursorRow]?.length ?? 0);
@@ -312,8 +312,8 @@ export class EditorComponent implements Component {
         return true;
       }
       if (event.direction === "down") {
-        // Alt+Down: history navigation
-        if (event.alt && !this.suppressHistory && this.historyIndex >= 0) {
+        // History navigation: Alt+Down always, or plain Down when on last line
+        if (!this.suppressHistory && this.historyIndex >= 0 && (event.alt || this.cursorRow >= this.lines.length - 1)) {
           this.historyIndex++;
           if (this.historyIndex >= this.history.length) {
             this.historyIndex = -1;
@@ -323,7 +323,7 @@ export class EditorComponent implements Component {
           }
           return true;
         }
-        // Plain Down: cursor movement
+        // Cursor movement (multiline)
         if (!event.alt && this.cursorRow < this.lines.length - 1) {
           this.cursorRow++;
           this.cursorCol = Math.min(this.cursorCol, this.lines[this.cursorRow]?.length ?? 0);
