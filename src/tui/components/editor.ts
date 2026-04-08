@@ -74,9 +74,8 @@ export class EditorComponent implements Component {
     this.maxVisibleLines = this.layoutProvider?.().maxInputLines ?? 8;
 
     const result: string[] = [];
-    const innerWidth = width - 4; // borders + padding
 
-    // Autocomplete popup (rendered above editor box)
+    // Autocomplete popup (rendered above editor)
     if (this.acActive && this.acSuggestions.length > 0) {
       const start = Math.max(0, this.acSelectedIndex - this.acMaxVisible + 1);
       const end = Math.min(this.acSuggestions.length, start + this.acMaxVisible);
@@ -101,10 +100,10 @@ export class EditorComponent implements Component {
       }
     }
 
-    const border = this.focused ? this.borderColor : defaultTheme.dim;
+    // Borderless layout: "─" separator + prompt lines (no box)
     const promptSymbol = ctp.mauve("❯");
     const promptWidth = 2; // "❯ " = 2 visible chars
-    const contentWidth = innerWidth - promptWidth;
+    const contentWidth = width - promptWidth - 1; // 1 char left margin
     const fileTags = this.attachedFiles.length > 0
       ? this.attachedFiles.map((f) => ctp.blue(`[@${f.split("/").pop()}]`)).join(" ") + " "
       : "";
@@ -117,47 +116,38 @@ export class EditorComponent implements Component {
 
     const isEmpty = this.lines.length === 1 && this.lines[0] === "";
     const totalVisual = this.cachedVisualLines.length;
-    const hasAbove = this.inputScrollOffset > 0;
     const visibleCount = Math.min(totalVisual, this.maxVisibleLines);
+    const hasAbove = this.inputScrollOffset > 0;
     const hasBelow = this.inputScrollOffset + visibleCount < totalVisual;
 
-    // Top border with optional ▲ indicator
-    if (hasAbove) {
-      const indicator = ` ▲ ${this.inputScrollOffset} `;
-      const fill = Math.max(0, width - 2 - indicator.length);
-      result.push(border("┌" + "─".repeat(fill)) + ctp.overlay0(indicator) + border("┐"));
-    } else {
-      result.push(border("┌" + "─".repeat(width - 2) + "┐"));
-    }
+    // Separator line
+    const sepColor = this.focused ? this.borderColor : defaultTheme.dim;
+    const sepIndicator = hasAbove ? ` ▲ ${this.inputScrollOffset}` : "";
+    const sepLen = Math.max(0, width - visibleWidth(sepIndicator));
+    result.push(sepColor("─".repeat(sepLen)) + (sepIndicator ? ctp.overlay0(sepIndicator) : ""));
 
     // Content lines
     if (isEmpty && !this.focused && this.attachedFiles.length === 0) {
       const truncatedPlaceholder = truncate(this.placeholder, contentWidth, "");
-      const placeholderPad = Math.max(0, contentWidth - visibleWidth(truncatedPlaceholder));
-      result.push(border("│") + " " + promptSymbol + " " + ctp.overlay0(truncatedPlaceholder) + " ".repeat(placeholderPad) + " " + border("│"));
+      result.push(" " + promptSymbol + " " + ctp.overlay0(truncatedPlaceholder));
     } else {
       const startVis = this.inputScrollOffset;
       const endVis = Math.min(totalVisual, startVis + this.maxVisibleLines);
       for (let v = startVis; v < endVis; v++) {
         const wl = this.cachedVisualLines[v]!;
-        const isPromptLine = v === 0; // Only absolute first visual line gets the prompt
+        const isPromptLine = v === 0;
         const prefix = isPromptLine ? promptSymbol + " " + fileTags : "  ";
         const availWidth = isPromptLine ? textContentWidth : contentWidth;
         const rawDisplay = truncate(wl.content, availWidth, "");
         const display = this.hasSelection() ? this.highlightSelection(rawDisplay, wl) : rawDisplay;
-        const padding = Math.max(0, availWidth - visibleWidth(rawDisplay));
-        result.push(border("│") + " " + prefix + display + " ".repeat(padding) + " " + border("│"));
+        result.push(" " + prefix + display);
       }
     }
 
-    // Bottom border with optional ▼ indicator
+    // Scroll-down indicator
     if (hasBelow) {
       const belowCount = totalVisual - this.inputScrollOffset - visibleCount;
-      const indicator = ` ▼ ${belowCount} `;
-      const fill = Math.max(0, width - 2 - indicator.length);
-      result.push(border("└" + "─".repeat(fill)) + ctp.overlay0(indicator) + border("┘"));
-    } else {
-      result.push(border("└" + "─".repeat(width - 2) + "┘"));
+      result.push(ctp.overlay0(`  ▼ ${belowCount} more`));
     }
 
     return result;
@@ -503,7 +493,7 @@ export class EditorComponent implements Component {
     const wl = this.cachedVisualLines[visualRow];
     if (!wl) {
       // Fallback: just set column on current line
-      const contentCol = Math.max(0, termCol - 5);
+      const contentCol = Math.max(0, termCol - 4);
       const lineLen = this.lines[this.cursorRow]?.length ?? 0;
       this.cursorCol = Math.min(contentCol, lineLen);
       return;
@@ -512,7 +502,8 @@ export class EditorComponent implements Component {
     const fileTagsWidth = isFirstVisualLine && this.attachedFiles.length > 0
       ? this.attachedFiles.reduce((w, f) => w + f.split("/").pop()!.length + 3, 0) + 1
       : 0;
-    const prefixWidth = 4 + (isFirstVisualLine ? fileTagsWidth : 0);
+    // Layout: margin(1) + prompt/indent(2) + fileTags
+    const prefixWidth = 3 + (isFirstVisualLine ? fileTagsWidth : 0);
     const col = Math.max(0, termCol - prefixWidth - 1);
     // Clamp to visual line content length to prevent cursor past actual text
     const visualContentLen = wl.originalEndOffset - wl.originalStartOffset;
@@ -625,9 +616,10 @@ export class EditorComponent implements Component {
     const fileTagsWidth = visualRow === 0 && this.attachedFiles.length > 0
       ? this.attachedFiles.reduce((w, f) => w + f.split("/").pop()!.length + 3, 0) + 1
       : 0;
+    // Layout: margin(1) + prompt/indent(2) + fileTags + visualCol
     return {
-      row: acLines + 1 + visibleRow + 1,
-      col: visualCol + 5 + fileTagsWidth,
+      row: acLines + 1 + visibleRow + 1, // +1 separator, +1 for 1-based
+      col: visualCol + 4 + fileTagsWidth, // margin(1) + prompt(2) + space after prompt is in prefix
     };
   }
 
