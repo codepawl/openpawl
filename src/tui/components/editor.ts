@@ -7,6 +7,7 @@ import type { KeyEvent } from "../core/input.js";
 import type { LayoutConfig } from "../layout/responsive.js";
 import { visibleWidth } from "../utils/text-width.js";
 import { truncate } from "../utils/truncate.js";
+import { TextWrapper, type WrappedLine } from "../text/text-wrapper.js";
 import { defaultTheme, ctp } from "../themes/default.js";
 
 export interface AutocompleteProvider {
@@ -51,6 +52,9 @@ export class EditorComponent implements Component {
   // Text selection state (for Ctrl+A select all, type-to-replace)
   private selStart: { row: number; col: number } | null = null;
   private selEnd: { row: number; col: number } | null = null;
+
+  // Visual line wrapping cache (rebuilt each render)
+  private cachedVisualLines: WrappedLine[] = [];
 
   // Attached files (from @file mentions)
   private attachedFiles: string[] = [];
@@ -97,9 +101,6 @@ export class EditorComponent implements Component {
       }
     }
 
-    // Ensure scroll offset keeps cursor visible
-    this.adjustInputScroll();
-
     const border = this.focused ? this.borderColor : defaultTheme.dim;
     const promptSymbol = ctp.mauve("❯");
     const promptWidth = 2; // "❯ " = 2 visible chars
@@ -108,12 +109,17 @@ export class EditorComponent implements Component {
       ? this.attachedFiles.map((f) => ctp.blue(`[@${f.split("/").pop()}]`)).join(" ") + " "
       : "";
     const fileTagsWidth = this.attachedFiles.length > 0 ? visibleWidth(fileTags) : 0;
-    const textContentWidth = contentWidth - fileTagsWidth;
+    const textContentWidth = Math.max(1, contentWidth - fileTagsWidth);
+
+    // Build visual line map (wraps long logical lines) and adjust scroll
+    this.cachedVisualLines = this.buildVisualLineMap(textContentWidth, contentWidth);
+    this.adjustInputScroll();
 
     const isEmpty = this.lines.length === 1 && this.lines[0] === "";
+    const totalVisual = this.cachedVisualLines.length;
     const hasAbove = this.inputScrollOffset > 0;
-    const visibleCount = Math.min(this.lines.length, this.maxVisibleLines);
-    const hasBelow = this.inputScrollOffset + visibleCount < this.lines.length;
+    const visibleCount = Math.min(totalVisual, this.maxVisibleLines);
+    const hasBelow = this.inputScrollOffset + visibleCount < totalVisual;
 
     // Top border with optional ▲ indicator
     if (hasAbove) {
@@ -130,14 +136,15 @@ export class EditorComponent implements Component {
       const placeholderPad = Math.max(0, contentWidth - visibleWidth(truncatedPlaceholder));
       result.push(border("│") + " " + promptSymbol + " " + ctp.overlay0(truncatedPlaceholder) + " ".repeat(placeholderPad) + " " + border("│"));
     } else {
-      const startLine = this.inputScrollOffset;
-      const endLine = Math.min(this.lines.length, startLine + this.maxVisibleLines);
-      for (let i = startLine; i < endLine; i++) {
-        const prefix = i === 0 ? promptSymbol + " " + fileTags : "  ";
-        const availWidth = i === 0 ? Math.max(1, textContentWidth) : contentWidth;
-        const rawDisplay = truncate(this.lines[i]!, availWidth, "");
-        // Apply selection highlight if active
-        const display = this.hasSelection() ? this.highlightSelection(rawDisplay, i) : rawDisplay;
+      const startVis = this.inputScrollOffset;
+      const endVis = Math.min(totalVisual, startVis + this.maxVisibleLines);
+      for (let v = startVis; v < endVis; v++) {
+        const wl = this.cachedVisualLines[v]!;
+        const isFirstVisualLine = v === 0 || (wl.originalLineIndex === 0 && wl.originalStartOffset === 0);
+        const prefix = isFirstVisualLine ? promptSymbol + " " + fileTags : "  ";
+        const availWidth = isFirstVisualLine ? textContentWidth : contentWidth;
+        const rawDisplay = truncate(wl.content, availWidth, "");
+        const display = this.hasSelection() ? this.highlightSelection(rawDisplay, wl) : rawDisplay;
         const padding = Math.max(0, availWidth - visibleWidth(rawDisplay));
         result.push(border("│") + " " + prefix + display + " ".repeat(padding) + " " + border("│"));
       }
@@ -145,7 +152,7 @@ export class EditorComponent implements Component {
 
     // Bottom border with optional ▼ indicator
     if (hasBelow) {
-      const belowCount = this.lines.length - this.inputScrollOffset - visibleCount;
+      const belowCount = totalVisual - this.inputScrollOffset - visibleCount;
       const indicator = ` ▼ ${belowCount} `;
       const fill = Math.max(0, width - 2 - indicator.length);
       result.push(border("└" + "─".repeat(fill)) + ctp.overlay0(indicator) + border("┘"));
@@ -295,8 +302,11 @@ export class EditorComponent implements Component {
         return true;
       }
       if (event.direction === "up") {
-        // History navigation: Alt+Up always, or plain Up when on first line
-        if (!this.suppressHistory && this.history.length > 0 && (event.alt || this.cursorRow === 0)) {
+        const curVis = this.cachedVisualLines.length > 0
+          ? this.logicalToVisual(this.cachedVisualLines, this.cursorRow, this.cursorCol).visualRow
+          : 0;
+        // History navigation: Alt+Up always, or plain Up when on first visual line
+        if (!this.suppressHistory && this.history.length > 0 && (event.alt || curVis === 0)) {
           if (this.historyIndex === -1) this.historyIndex = this.history.length;
           if (this.historyIndex > 0) {
             this.historyIndex--;
@@ -304,16 +314,23 @@ export class EditorComponent implements Component {
           }
           return true;
         }
-        // Cursor movement (multiline)
-        if (!event.alt && this.cursorRow > 0) {
-          this.cursorRow--;
-          this.cursorCol = Math.min(this.cursorCol, this.lines[this.cursorRow]?.length ?? 0);
+        // Visual line cursor movement
+        if (!event.alt && curVis > 0 && this.cachedVisualLines.length > 0) {
+          const { visualCol } = this.logicalToVisual(this.cachedVisualLines, this.cursorRow, this.cursorCol);
+          const { logicalRow, startOffset } = this.visualToLogical(this.cachedVisualLines, curVis - 1);
+          const prevLineSegmentLen = this.cachedVisualLines[curVis - 1]!.originalEndOffset - startOffset;
+          this.cursorRow = logicalRow;
+          this.cursorCol = Math.min(startOffset + visualCol, startOffset + prevLineSegmentLen);
         }
         return true;
       }
       if (event.direction === "down") {
-        // History navigation: Alt+Down always, or plain Down when on last line
-        if (!this.suppressHistory && this.historyIndex >= 0 && (event.alt || this.cursorRow >= this.lines.length - 1)) {
+        const curVis = this.cachedVisualLines.length > 0
+          ? this.logicalToVisual(this.cachedVisualLines, this.cursorRow, this.cursorCol).visualRow
+          : 0;
+        const lastVis = Math.max(0, this.cachedVisualLines.length - 1);
+        // History navigation: Alt+Down always, or plain Down when on last visual line
+        if (!this.suppressHistory && this.historyIndex >= 0 && (event.alt || curVis >= lastVis)) {
           this.historyIndex++;
           if (this.historyIndex >= this.history.length) {
             this.historyIndex = -1;
@@ -323,10 +340,13 @@ export class EditorComponent implements Component {
           }
           return true;
         }
-        // Cursor movement (multiline)
-        if (!event.alt && this.cursorRow < this.lines.length - 1) {
-          this.cursorRow++;
-          this.cursorCol = Math.min(this.cursorCol, this.lines[this.cursorRow]?.length ?? 0);
+        // Visual line cursor movement
+        if (!event.alt && curVis < lastVis && this.cachedVisualLines.length > 0) {
+          const { visualCol } = this.logicalToVisual(this.cachedVisualLines, this.cursorRow, this.cursorCol);
+          const { logicalRow, startOffset } = this.visualToLogical(this.cachedVisualLines, curVis + 1);
+          const nextLineSegmentLen = this.cachedVisualLines[curVis + 1]!.originalEndOffset - startOffset;
+          this.cursorRow = logicalRow;
+          this.cursorCol = Math.min(startOffset + visualCol, startOffset + nextLineSegmentLen);
         }
         return true;
       }
@@ -468,11 +488,25 @@ export class EditorComponent implements Component {
     return this.acActive && this.acSuggestions.length > 0;
   }
 
-  setCursorFromClick(termCol: number): void {
-    // Account for border(1) + space(1) + prompt "❯ "(2)
-    const contentCol = Math.max(0, termCol - 5);
-    const lineLen = this.lines[this.cursorRow]?.length ?? 0;
-    this.cursorCol = Math.min(contentCol, lineLen);
+  setCursorFromClick(relativeRow: number, termCol: number): void {
+    const acLines = this.getAutocompleteLineCount();
+    const visualRow = relativeRow - acLines + this.inputScrollOffset;
+    const wl = this.cachedVisualLines[visualRow];
+    if (!wl) {
+      // Fallback: just set column on current line
+      const contentCol = Math.max(0, termCol - 5);
+      const lineLen = this.lines[this.cursorRow]?.length ?? 0;
+      this.cursorCol = Math.min(contentCol, lineLen);
+      return;
+    }
+    const isFirstVisualLine = visualRow === 0;
+    const fileTagsWidth = isFirstVisualLine && this.attachedFiles.length > 0
+      ? this.attachedFiles.reduce((w, f) => w + f.split("/").pop()!.length + 3, 0) + 1
+      : 0;
+    const prefixWidth = 4 + (isFirstVisualLine ? fileTagsWidth : 0);
+    const col = Math.max(0, termCol - prefixWidth - 1);
+    this.cursorRow = wl.originalLineIndex;
+    this.cursorCol = Math.min(wl.originalStartOffset + col, this.lines[this.cursorRow]?.length ?? 0);
   }
 
   /** Select the word at cursor (double-click). */
@@ -551,12 +585,12 @@ export class EditorComponent implements Component {
     return true; // middle row
   }
 
-  /** Apply reverse-video highlighting to selected characters in a display line. */
-  private highlightSelection(display: string, row: number): string {
+  /** Apply reverse-video highlighting to selected characters in a visual line. */
+  private highlightSelection(display: string, wl: WrappedLine): string {
     if (!this.hasSelection()) return display;
     let result = "";
     for (let col = 0; col < display.length; col++) {
-      if (this.isCellSelected(row, col)) {
+      if (this.isCellSelected(wl.originalLineIndex, wl.originalStartOffset + col)) {
         result += `\x1b[7m${display[col]}\x1b[27m`;
       } else {
         result += display[col];
@@ -566,19 +600,22 @@ export class EditorComponent implements Component {
   }
 
   getCursorPosition(): { row: number; col: number } | null {
-    if (!this.focused) return null;
-    const visibleRow = this.cursorRow - this.inputScrollOffset;
-    if (visibleRow < 0 || visibleRow >= Math.min(this.lines.length, this.maxVisibleLines)) {
+    if (!this.focused || this.cachedVisualLines.length === 0) return null;
+    const { visualRow, visualCol } = this.logicalToVisual(
+      this.cachedVisualLines, this.cursorRow, this.cursorCol,
+    );
+    const visibleRow = visualRow - this.inputScrollOffset;
+    if (visibleRow < 0 || visibleRow >= Math.min(this.cachedVisualLines.length, this.maxVisibleLines)) {
       return null; // cursor not in visible area
     }
     const acLines = this.getAutocompleteLineCount();
-    // col offset: border(1) + space(1) + prompt "❯ "(2) + file tags + cursorCol
-    const fileTagsWidth = this.cursorRow === 0 && this.attachedFiles.length > 0
-      ? this.attachedFiles.reduce((w, f) => w + f.split("/").pop()!.length + 3, 0) + 1 // [@name] + spaces
+    // File tags width only applies on the very first visual line (prompt row)
+    const fileTagsWidth = visualRow === 0 && this.attachedFiles.length > 0
+      ? this.attachedFiles.reduce((w, f) => w + f.split("/").pop()!.length + 3, 0) + 1
       : 0;
     return {
       row: acLines + 1 + visibleRow + 1,
-      col: this.cursorCol + 5 + fileTagsWidth,
+      col: visualCol + 5 + fileTagsWidth,
     };
   }
 
@@ -621,16 +658,72 @@ export class EditorComponent implements Component {
     this.cursorCol += char.length;
   }
 
+  /** Build a flat array of visual (wrapped) lines from all logical lines. */
+  private buildVisualLineMap(firstLineWidth: number, otherLinesWidth: number): WrappedLine[] {
+    const result: WrappedLine[] = [];
+    for (let i = 0; i < this.lines.length; i++) {
+      const width = i === 0 ? firstLineWidth : otherLinesWidth;
+      const wrapper = new TextWrapper(width);
+      const wrapped = wrapper.wrap(this.lines[i]!, { breakLongWords: true });
+      for (const wl of wrapped.lines) {
+        result.push({
+          content: wl.content,
+          isWrapped: wl.isWrapped,
+          originalLineIndex: i,
+          originalStartOffset: wl.originalStartOffset,
+          originalEndOffset: wl.originalEndOffset,
+        });
+      }
+    }
+    return result;
+  }
+
+  /** Map logical (cursorRow, cursorCol) to visual line coordinates. */
+  private logicalToVisual(
+    visualLines: WrappedLine[],
+    logicalRow: number,
+    logicalCol: number,
+  ): { visualRow: number; visualCol: number } {
+    for (let v = 0; v < visualLines.length; v++) {
+      const wl = visualLines[v]!;
+      if (wl.originalLineIndex !== logicalRow) continue;
+      if (logicalCol >= wl.originalStartOffset && logicalCol <= wl.originalEndOffset) {
+        // If col is at the end boundary and there's a next visual line for the same logical line,
+        // place cursor at start of next visual line (unless this is the last segment)
+        if (logicalCol === wl.originalEndOffset && v + 1 < visualLines.length &&
+            visualLines[v + 1]!.originalLineIndex === logicalRow) {
+          return { visualRow: v + 1, visualCol: 0 };
+        }
+        return { visualRow: v, visualCol: logicalCol - wl.originalStartOffset };
+      }
+    }
+    // Fallback: last visual line
+    return { visualRow: Math.max(0, visualLines.length - 1), visualCol: logicalCol };
+  }
+
+  /** Map visual line coordinates back to logical (cursorRow, cursorCol). */
+  private visualToLogical(
+    visualLines: WrappedLine[],
+    visualRow: number,
+  ): { logicalRow: number; startOffset: number } {
+    const clamped = Math.max(0, Math.min(visualRow, visualLines.length - 1));
+    const wl = visualLines[clamped];
+    if (!wl) return { logicalRow: 0, startOffset: 0 };
+    return { logicalRow: wl.originalLineIndex, startOffset: wl.originalStartOffset };
+  }
+
   private adjustInputScroll(): void {
-    if (this.lines.length <= this.maxVisibleLines) {
+    const totalVisual = this.cachedVisualLines.length;
+    if (totalVisual <= this.maxVisibleLines) {
       this.inputScrollOffset = 0;
       return;
     }
-    if (this.cursorRow < this.inputScrollOffset) {
-      this.inputScrollOffset = this.cursorRow;
+    const { visualRow } = this.logicalToVisual(this.cachedVisualLines, this.cursorRow, this.cursorCol);
+    if (visualRow < this.inputScrollOffset) {
+      this.inputScrollOffset = visualRow;
     }
-    if (this.cursorRow >= this.inputScrollOffset + this.maxVisibleLines) {
-      this.inputScrollOffset = this.cursorRow - this.maxVisibleLines + 1;
+    if (visualRow >= this.inputScrollOffset + this.maxVisibleLines) {
+      this.inputScrollOffset = visualRow - this.maxVisibleLines + 1;
     }
   }
 

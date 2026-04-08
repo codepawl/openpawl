@@ -822,8 +822,8 @@ export class TUI {
         }
       } else if (region === "content" && event.row >= this.editorRowStart && event.row <= this.editorRowEnd) {
         // Editor region — position cursor
-        const editor = this.focusedComponent as Component & { setCursorFromClick?: (col: number) => void };
-        editor.setCursorFromClick?.(event.col);
+        const editor = this.focusedComponent as Component & { setCursorFromClick?: (relativeRow: number, col: number) => void };
+        editor.setCursorFromClick?.(event.row - this.editorRowStart - 1, event.col);
       }
 
       this.requestRender();
