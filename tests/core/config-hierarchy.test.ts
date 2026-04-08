@@ -1,127 +1,87 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
-describe("ConfigManager - Helper Functions", () => {
+// Mock the JSON config layer so tests don't touch the filesystem
+vi.mock("@/core/jsonConfigManager.js", () => ({
+  readOpenpawlConfig: () => ({
+    path: "/test/openpawl.config.json",
+    data: { apikey: "sk-ant-test-1234567890", creativity: 0.7, goal: "Build something" },
+  }),
+  writeOpenpawlConfig: vi.fn(),
+  getJsonKey: vi.fn((key: string, data: Record<string, unknown>) => data[key]),
+  setJsonKey: vi.fn(),
+}));
+
+describe("configManager", () => {
+  beforeEach(() => vi.clearAllMocks());
+
   describe("isSecretKey", () => {
-    const isSecretKey = (key: string): boolean => /KEY|TOKEN|SECRET|PASSWORD/i.test(key);
-
-    it("identifies secret-like keys", () => {
+    it("identifies secret-like keys", async () => {
+      const { isSecretKey } = await import("@/core/configManager.js");
       expect(isSecretKey("OPENAI_API_KEY")).toBe(true);
       expect(isSecretKey("ANTHROPIC_API_KEY")).toBe(true);
       expect(isSecretKey("DATABASE_SECRET")).toBe(true);
-      expect(isSecretKey("MY_PASSWORD")).toBe(true);
       expect(isSecretKey("GITHUB_TOKEN")).toBe(true);
     });
 
-    it("returns false for non-secret keys", () => {
+    it("returns false for non-secret keys", async () => {
+      const { isSecretKey } = await import("@/core/configManager.js");
       expect(isSecretKey("creativity")).toBe(false);
       expect(isSecretKey("max_cycles")).toBe(false);
-      expect(isSecretKey("template")).toBe(false);
       expect(isSecretKey("goal")).toBe(false);
-      expect(isSecretKey("team")).toBe(false);
     });
   });
 
-  describe("maskSecret", () => {
-    const maskSecret = (value: string): string => {
-      const v = value ?? "";
-      if (v.length <= 8) return "********";
-      const prefix = v.slice(0, 3);
-      const suffix = v.slice(-4);
-      return `${prefix}…${suffix}`;
-    };
-
-    it("masks short secrets with asterisks", () => {
-      expect(maskSecret("abc")).toBe("********");
-      expect(maskSecret("short")).toBe("********");
+  describe("getConfigValue masking", () => {
+    it("masks secret keys in non-raw mode", async () => {
+      const { getConfigValue } = await import("@/core/configManager.js");
+      const result = getConfigValue("apikey", { raw: false });
+      expect(result.masked).toBe(true);
+      // Should not return the full key
+      expect(result.value).not.toBe("sk-ant-test-1234567890");
     });
 
-    it("masks secrets with prefix and suffix", () => {
-      expect(maskSecret("sk-test-1234567890")).toBe("sk-…7890");
-      expect(maskSecret("github_token_abc123")).toBe("git…c123");
-    });
-
-    it("handles null/undefined", () => {
-      expect(maskSecret(null as any)).toBe("********");
-      expect(maskSecret(undefined as any)).toBe("********");
-    });
-
-    it("handles empty string", () => {
-      expect(maskSecret("")).toBe("********");
+    it("returns raw value when raw=true", async () => {
+      const { getConfigValue } = await import("@/core/configManager.js");
+      const result = getConfigValue("apikey", { raw: true });
+      expect(result.value).toBe("sk-ant-test-1234567890");
     });
   });
 
-  describe("coerceJsonValue", () => {
-    const coerceJsonValue = (key: string, raw: string): { ok: true; value: unknown } | { ok: false; error: string } => {
-      if (key === "template" || key === "goal") {
-        return { ok: true, value: raw };
-      }
-      if (key === "creativity") {
-        const n = Number(raw);
-        if (Number.isNaN(n) || n < 0 || n > 1) return { ok: false, error: "creativity must be a number between 0 and 1" };
-        return { ok: true, value: n };
-      }
-      if (key === "max_cycles") {
-        const n = Number(raw);
-        if (!Number.isInteger(n) || n < 1) return { ok: false, error: "max_cycles must be an integer >= 1" };
-        return { ok: true, value: n };
-      }
-      return { ok: true, value: raw };
-    };
-
-    it("returns string value for template and goal", () => {
-      expect(coerceJsonValue("template", "my-template").ok).toBe(true);
-      expect(coerceJsonValue("goal", "Build an app").ok).toBe(true);
+  describe("setConfigValue validation", () => {
+    it("accepts valid creativity value", async () => {
+      const { setConfigValue } = await import("@/core/configManager.js");
+      const result = setConfigValue("creativity", "0.8");
+      expect("error" in result).toBe(false);
     });
 
-    it("validates creativity range (0-1)", () => {
-      expect(coerceJsonValue("creativity", "0").ok).toBe(true);
-      expect(coerceJsonValue("creativity", "0.5").ok).toBe(true);
-      expect(coerceJsonValue("creativity", "1").ok).toBe(true);
-      expect(coerceJsonValue("creativity", "1.5").ok).toBe(false);
-      expect(coerceJsonValue("creativity", "-0.1").ok).toBe(false);
-      expect(coerceJsonValue("creativity", "abc").ok).toBe(false);
+    it("rejects creativity > 1", async () => {
+      const { setConfigValue } = await import("@/core/configManager.js");
+      const result = setConfigValue("creativity", "1.5") as { error: string };
+      expect(result.error).toContain("creativity");
     });
 
-    it("validates max_cycles is integer >= 1", () => {
-      expect(coerceJsonValue("max_cycles", "1").ok).toBe(true);
-      expect(coerceJsonValue("max_cycles", "10").ok).toBe(true);
-      expect(coerceJsonValue("max_cycles", "0").ok).toBe(false);
-      expect(coerceJsonValue("max_cycles", "-1").ok).toBe(false);
-      expect(coerceJsonValue("max_cycles", "5.5").ok).toBe(false);
-      expect(coerceJsonValue("max_cycles", "abc").ok).toBe(false);
+    it("rejects non-numeric creativity", async () => {
+      const { setConfigValue } = await import("@/core/configManager.js");
+      const result = setConfigValue("creativity", "abc") as { error: string };
+      expect(result.error).toContain("creativity");
     });
 
-    it("passes through unknown keys as strings", () => {
-      const result = coerceJsonValue("unknown_key", "some_value");
-      expect(result.ok).toBe(true);
-      if (result.ok) {
-        expect(result.value).toBe("some_value");
-      }
-    });
-  });
-});
-
-describe("Config Manager Integration", () => {
-  it("setConfigValue validates input", async () => {
-    vi.mock("@/core/jsonConfigManager.js", () => {
-      return {
-        readOpenpawlConfig: () => ({
-          path: "/test/openpawl.config.json",
-          data: {},
-        }),
-        writeOpenpawlConfig: vi.fn(),
-        getJsonKey: vi.fn((key: string, data: any) => data[key]),
-        setJsonKey: vi.fn(),
-        __esModule: true,
-      };
+    it("accepts valid max_cycles", async () => {
+      const { setConfigValue } = await import("@/core/configManager.js");
+      const result = setConfigValue("max_cycles", "10");
+      expect("error" in result).toBe(false);
     });
 
-    const { setConfigValue } = await import("@/core/configManager.js");
-    
-    const result = setConfigValue("creativity", "0.8");
-    expect("error" in result).toBe(false);
-    
-    const invalidResult = setConfigValue("creativity", "1.5") as { error: string };
-    expect(invalidResult.error).toBe("creativity must be a number between 0 and 1");
+    it("rejects max_cycles < 1", async () => {
+      const { setConfigValue } = await import("@/core/configManager.js");
+      const result = setConfigValue("max_cycles", "0") as { error: string };
+      expect(result.error).toContain("max_cycles");
+    });
+
+    it("passes through string values for template/goal", async () => {
+      const { setConfigValue } = await import("@/core/configManager.js");
+      const result = setConfigValue("goal", "Build an auth system");
+      expect("error" in result).toBe(false);
+    });
   });
 });

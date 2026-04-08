@@ -3,7 +3,7 @@ import {
   WorkerBot,
   createWorkerTaskNode,
 } from "@/agents/worker-bot.js";
-import type { WorkerAdapter } from "@/interfaces/worker-adapter.js";
+import type { WorkerAdapter } from "@/adapters/worker-adapter.js";
 import type { TaskResult } from "@/core/state.js";
 import type { GraphState } from "@/core/graph-state.js";
 
