@@ -488,6 +488,7 @@ export class EditorComponent implements Component {
   }
 
   setCursorFromClick(relativeRow: number, termCol: number): void {
+    this.clearSelection();
     const acLines = this.getAutocompleteLineCount();
     const visualRow = relativeRow - acLines + this.inputScrollOffset;
     const wl = this.cachedVisualLines[visualRow];
