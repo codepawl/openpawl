@@ -48,6 +48,10 @@ export class EditorComponent implements Component {
   private acActive = false;
   private acMaxVisible = 8;
 
+  // Text selection state (for Ctrl+A select all, type-to-replace)
+  private selStart: { row: number; col: number } | null = null;
+  private selEnd: { row: number; col: number } | null = null;
+
   // Attached files (from @file mentions)
   private attachedFiles: string[] = [];
 
@@ -131,8 +135,10 @@ export class EditorComponent implements Component {
       for (let i = startLine; i < endLine; i++) {
         const prefix = i === 0 ? promptSymbol + " " + fileTags : "  ";
         const availWidth = i === 0 ? Math.max(1, textContentWidth) : contentWidth;
-        const display = truncate(this.lines[i]!, availWidth, "");
-        const padding = Math.max(0, availWidth - visibleWidth(display));
+        const rawDisplay = truncate(this.lines[i]!, availWidth, "");
+        // Apply selection highlight if active
+        const display = this.hasSelection() ? this.highlightSelection(rawDisplay, i) : rawDisplay;
+        const padding = Math.max(0, availWidth - visibleWidth(rawDisplay));
         result.push(border("│") + " " + prefix + display + " ".repeat(padding) + " " + border("│"));
       }
     }
@@ -204,6 +210,25 @@ export class EditorComponent implements Component {
       }
       // Other keys: dismiss autocomplete and fall through to normal handling
       this.dismissAutocomplete();
+    }
+
+    // Selection handling: typing replaces selection, arrows/escape clear it
+    if (this.hasSelection()) {
+      // Typing a character replaces the selection
+      if (event.type === "char" && !event.ctrl && !event.alt) {
+        this.deleteSelection();
+        // Fall through to normal char insertion below
+      } else if (event.type === "backspace" || event.type === "delete") {
+        this.deleteSelection();
+        this.onChange?.(this.getText());
+        return true;
+      } else if (event.type === "enter" && !event.shift) {
+        this.deleteSelection();
+        // Fall through to submit
+      } else if (event.type === "arrow" || event.type === "escape" || event.type === "home" || event.type === "end") {
+        this.clearSelection();
+        // Fall through to normal handling
+      }
     }
 
     // Shift+Enter → insert newline
@@ -321,10 +346,9 @@ export class EditorComponent implements Component {
       return true;
     }
 
-    // Ctrl+A — select all / go to start
+    // Ctrl+A — select all text
     if (event.type === "char" && event.ctrl && event.char === "a") {
-      this.cursorRow = 0;
-      this.cursorCol = 0;
+      this.selectAllText();
       return true;
     }
 
@@ -461,10 +485,84 @@ export class EditorComponent implements Component {
     this.cursorCol = end;
   }
 
-  /** Move cursor to end (triple-click selects all conceptually). */
+  /** Select all text in the editor (Ctrl+A). */
   selectAllText(): void {
-    this.cursorRow = this.lines.length - 1;
-    this.cursorCol = this.lines[this.cursorRow]?.length ?? 0;
+    this.selStart = { row: 0, col: 0 };
+    const lastRow = this.lines.length - 1;
+    this.selEnd = { row: lastRow, col: this.lines[lastRow]?.length ?? 0 };
+    this.cursorRow = lastRow;
+    this.cursorCol = this.lines[lastRow]?.length ?? 0;
+  }
+
+  /** Check if there's an active text selection. */
+  hasSelection(): boolean {
+    return this.selStart !== null && this.selEnd !== null;
+  }
+
+  /** Get the selected text, or null if no selection. */
+  getSelectedText(): string | null {
+    if (!this.selStart || !this.selEnd) return null;
+    const [s, e] = this.normalizeSelection();
+    if (s.row === e.row) {
+      return (this.lines[s.row] ?? "").slice(s.col, e.col);
+    }
+    const parts: string[] = [];
+    parts.push((this.lines[s.row] ?? "").slice(s.col));
+    for (let r = s.row + 1; r < e.row; r++) parts.push(this.lines[r] ?? "");
+    parts.push((this.lines[e.row] ?? "").slice(0, e.col));
+    return parts.join("\n");
+  }
+
+  /** Delete the selected text and position cursor at selection start. */
+  private deleteSelection(): void {
+    if (!this.selStart || !this.selEnd) return;
+    const [s, e] = this.normalizeSelection();
+    const before = (this.lines[s.row] ?? "").slice(0, s.col);
+    const after = (this.lines[e.row] ?? "").slice(e.col);
+    this.lines.splice(s.row, e.row - s.row + 1, before + after);
+    if (this.lines.length === 0) this.lines = [""];
+    this.cursorRow = s.row;
+    this.cursorCol = s.col;
+    this.clearSelection();
+  }
+
+  /** Clear selection state. */
+  private clearSelection(): void {
+    this.selStart = null;
+    this.selEnd = null;
+  }
+
+  /** Normalize selection so start <= end. */
+  private normalizeSelection(): [{ row: number; col: number }, { row: number; col: number }] {
+    const a = this.selStart!;
+    const b = this.selEnd!;
+    if (a.row < b.row || (a.row === b.row && a.col <= b.col)) return [a, b];
+    return [b, a];
+  }
+
+  /** Check if a cell is within the selection (for rendering). */
+  private isCellSelected(row: number, col: number): boolean {
+    if (!this.selStart || !this.selEnd) return false;
+    const [s, e] = this.normalizeSelection();
+    if (row < s.row || row > e.row) return false;
+    if (row === s.row && row === e.row) return col >= s.col && col < e.col;
+    if (row === s.row) return col >= s.col;
+    if (row === e.row) return col < e.col;
+    return true; // middle row
+  }
+
+  /** Apply reverse-video highlighting to selected characters in a display line. */
+  private highlightSelection(display: string, row: number): string {
+    if (!this.hasSelection()) return display;
+    let result = "";
+    for (let col = 0; col < display.length; col++) {
+      if (this.isCellSelected(row, col)) {
+        result += `\x1b[7m${display[col]}\x1b[27m`;
+      } else {
+        result += display[col];
+      }
+    }
+    return result;
   }
 
   getCursorPosition(): { row: number; col: number } | null {

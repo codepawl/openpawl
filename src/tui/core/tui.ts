@@ -582,17 +582,29 @@ export class TUI {
       return true;
     }
 
-    // Clipboard copy (only when selection exists — already resolved)
-    if (action === "editor.clipboard.copy" && this.selectionManager.hasSelection()) {
-      const raw = this.selectionManager.getSelectedText(this.lastFullContentLines);
-      const text = cleanCopyText(raw);
-      if (text.trim()) {
-        void this.copyManager.copyToClipboard(text);
-        this.onFlashMessage?.("Copied!");
+    // Clipboard copy — check editor selection first, then messages selection
+    if (action === "editor.clipboard.copy") {
+      const editor = this.focusedComponent as Component & { hasSelection?: () => boolean; getSelectedText?: () => string | null };
+      if (editor?.hasSelection?.()) {
+        const text = editor.getSelectedText?.();
+        if (text?.trim()) {
+          void this.copyManager.copyToClipboard(text);
+          this.onFlashMessage?.("Copied!");
+        }
+        this.requestRender();
+        return true;
       }
-      this.selectionManager.clearSelection();
-      this.requestRender();
-      return true;
+      if (this.selectionManager.hasSelection()) {
+        const raw = this.selectionManager.getSelectedText(this.lastFullContentLines);
+        const text = cleanCopyText(raw);
+        if (text.trim()) {
+          void this.copyManager.copyToClipboard(text);
+          this.onFlashMessage?.("Copied!");
+        }
+        this.selectionManager.clearSelection();
+        this.requestRender();
+        return true;
+      }
     }
 
     // Messages scroll
