@@ -79,7 +79,9 @@ export class MessagesComponent implements Component {
           msgLines.push("  " + accentBorder("┃") + " " + nameFn(`[${nameLabel}]`));
           const mdLines = renderMarkdown(msg.content || "", maxBubbleWidth - 4);
           for (const line of mdLines) {
-            msgLines.push("  " + accentBorder("┃") + " " + line);
+            // Wrap in ctp.text() so plain paragraph text gets a readable color
+            // (markdown elements like code/links already have their own colors)
+            msgLines.push("  " + accentBorder("┃") + " " + ctp.text(line));
           }
 
           this.pushMaybeCollapsed(allLines, msgLines, msg, width);

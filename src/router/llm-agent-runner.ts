@@ -85,8 +85,9 @@ export function createLLMAgentRunner(opts: LLMAgentRunnerOptions = {}): AgentRun
               }
             },
             onChunk: (token) => onToken?.(agentId, token),
-            onToolCall: (name) => onToolCall?.(agentId, name, "running"),
-            onToolResult: (name) => onToolCall?.(agentId, name, "completed"),
+            // Tool status is already emitted by handleTool above — don't duplicate
+            onToolCall: undefined,
+            onToolResult: undefined,
             signal,
             maxTurns: 10,
           });
