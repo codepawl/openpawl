@@ -55,15 +55,19 @@ export class InputParser {
     while (this.buffer.length > 0) {
       // Bracketed paste mode: accumulate until end marker
       if (this.inPaste) {
-        const str = String.fromCharCode(...this.buffer);
+        // Decode as UTF-8 (not per-byte String.fromCharCode which corrupts multi-byte chars)
+        const buf = Buffer.from(this.buffer);
+        const str = buf.toString("utf-8");
         const endIdx = str.indexOf("\x1b[201~");
         if (endIdx !== -1) {
           this.pasteBuffer += str.slice(0, endIdx);
-          this.onEvent({ type: "paste", text: this.pasteBuffer });
+          // Normalize line endings: \r\n → \n, standalone \r → \n
+          const normalized = this.pasteBuffer.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+          this.onEvent({ type: "paste", text: normalized });
           this.pasteBuffer = "";
           this.inPaste = false;
-          // Remove consumed bytes
-          const consumed = Buffer.from(str.slice(0, endIdx + 6)).length;
+          // Remove consumed bytes (re-encode to count actual byte length)
+          const consumed = Buffer.byteLength(str.slice(0, endIdx + 6), "utf-8");
           this.buffer.splice(0, consumed);
           continue;
         }
