@@ -21,23 +21,13 @@ export class ConfirmationGate {
       isMultiAgent: boolean;
     },
   ): ConfirmationRequest | null {
-    // Cost exceeds threshold
-    if (context.estimatedCost > this.costThreshold) {
-      return {
-        message: `This task may cost ~$${context.estimatedCost.toFixed(2)}. Proceed?`,
-        details: [`Estimated cost: $${context.estimatedCost.toFixed(2)}`],
-        estimatedCost: `$${context.estimatedCost.toFixed(2)}`,
-        risk: context.estimatedCost > 2 ? "high" : "moderate",
-      };
-    }
-
     // Multi-agent with 3+ agents
     if (context.isMultiAgent && decision.agents.length >= 3) {
       const agentNames = decision.agents.map((a) => a.role).join(", ");
       return {
         message: `This will use ${decision.agents.length} agents (${agentNames}). Proceed?`,
         details: decision.agents.map((a) => `${a.role}: ${a.task || "assigned"}`),
-        estimatedCost: `~$${context.estimatedCost.toFixed(2)}`,
+        estimatedCost: "",
         risk: "moderate",
       };
     }
@@ -47,7 +37,7 @@ export class ConfirmationGate {
       return {
         message: `This will modify ${context.fileCount} files. Proceed?`,
         details: [`${context.fileCount} files will be modified or deleted`],
-        estimatedCost: `~$${context.estimatedCost.toFixed(2)}`,
+        estimatedCost: "",
         risk: "high",
       };
     }

@@ -47,7 +47,7 @@ export function renderRunDiff(diff: RunDiff, options: CliDiffOptions = {}): stri
   // Metrics
   const m = diff.metricDiffs;
   lines.push(formatMetric("Confidence", m.averageConfidenceDelta, formatConfidence, false));
-  lines.push(formatMetric("Cost", m.totalCostDelta, formatCost, true));
+  lines.push(formatMetric("Tokens", m.totalTokenDelta ?? 0, (v) => `${v > 0 ? "+" : ""}${v.toLocaleString()}`, true));
   lines.push(formatMetric("Duration", m.totalDurationDelta, formatDuration, true));
   lines.push(formatMetric("Reworks", m.reworkCountDelta, (v) => String(v), true));
   lines.push(formatMetric("Auto-approved", m.autoApprovedDelta, (v) => `${v > 0 ? "+" : ""}${v}`, false));
@@ -97,8 +97,8 @@ export function renderOverallTrend(chain: DiffChain): string {
   const confValues = buildTrendValues(chain, "confidence");
   lines.push(`Confidence:    ${confValues} ${trendArrows(trend.confidenceTrend)}`);
 
-  const costValues = buildTrendValues(chain, "cost");
-  lines.push(`Cost:          ${costValues} ${trendArrows(trend.costTrend)}`);
+  const tokenValues = buildTrendValues(chain, "tokens");
+  lines.push(`Tokens:        ${tokenValues} ${trendArrows(trend.costTrend)}`);
 
   lines.push(`Learning efficiency: ${trend.learningEfficiency.toFixed(3)} per run`);
 
@@ -110,7 +110,7 @@ export function renderOverallTrend(chain: DiffChain): string {
   return lines.join("\n");
 }
 
-function buildTrendValues(chain: DiffChain, metric: "confidence" | "cost"): string {
+function buildTrendValues(chain: DiffChain, metric: "confidence" | "cost" | "tokens"): string {
   // We can reconstruct from the diffs: first value + cumulative deltas
   if (chain.runDiffs.length === 0) return "—";
 
@@ -190,10 +190,6 @@ function formatDelta(delta: number, lowerIsBetter: boolean): string {
 
 function formatConfidence(v: number): string {
   return v.toFixed(2);
-}
-
-function formatCost(v: number): string {
-  return `$${v.toFixed(4)}`;
 }
 
 function formatDuration(ms: number): string {

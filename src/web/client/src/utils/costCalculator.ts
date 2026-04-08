@@ -1,33 +1,25 @@
-import { priceRegistry } from "./PriceRegistry";
-
-const MICRO_MULTIPLIER = 1_000_000; // Use micro-USD to avoid floating-point errors
-
+/** @deprecated Dollar cost estimation removed. */
 export async function initPriceRegistry(): Promise<void> {
-  await priceRegistry.init();
+  // No-op — pricing removed
 }
 
+/** @deprecated Returns 0. Dollar cost estimation removed. */
 export function calculateCost(
-  inputTokens: number,
-  outputTokens: number,
-  cachedInputTokens: number,
-  model: string
+  _inputTokens: number,
+  _outputTokens: number,
+  _cachedInputTokens: number,
+  _model: string
 ): number {
-  const pricing = priceRegistry.getPricing(model);
-  const cachedPricing = priceRegistry.getCachedPricing(model);
-
-  // Calculate full-price input tokens (total - cached)
-  const fullPriceInputTokens = Math.max(0, inputTokens - cachedInputTokens);
-
-  // Use micro-USD for precision: (tokens / 1M) * price * 1M
-  const inputMicro = Math.round((fullPriceInputTokens / 1_000_000) * pricing.inputPerM * MICRO_MULTIPLIER);
-  const cachedMicro = Math.round((cachedInputTokens / 1_000_000) * cachedPricing.cachedPerM! * MICRO_MULTIPLIER);
-  const outputMicro = Math.round((outputTokens / 1_000_000) * pricing.outputPerM * MICRO_MULTIPLIER);
-
-  // Convert back from micro-USD to regular USD
-  const totalMicro = inputMicro + cachedMicro + outputMicro;
-  return totalMicro / MICRO_MULTIPLIER;
+  return 0;
 }
 
-export function formatCurrency(usd: number): string {
-  return `🪙 $${usd.toFixed(4)}`;
+export function formatCurrency(_usd: number): string {
+  return "";
+}
+
+export function formatTokens(count: number): string {
+  if (count < 1000) return String(count);
+  if (count < 10_000) return `${(count / 1000).toFixed(1)}k`;
+  if (count < 1_000_000) return `${Math.round(count / 1000)}k`;
+  return `${(count / 1_000_000).toFixed(1)}M`;
 }

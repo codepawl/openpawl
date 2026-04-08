@@ -55,7 +55,7 @@ export function renderPreviewTable(
   lines.push(`└${bBorder}┘`);
 
   const summaryParts: string[] = [];
-  summaryParts.push(`Estimated cost: ~$${estimate.estimatedUSD.toFixed(2)}`);
+  summaryParts.push(`Estimated tokens: ~${estimate.estimatedTokens?.toLocaleString() ?? "N/A"}`);
   summaryParts.push(`Parallel waves: ${estimate.parallelWaves}`);
   if (estimate.rfcRequired) {
     const rfcCount = tasks.filter(

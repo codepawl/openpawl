@@ -7,6 +7,9 @@ import { EventEmitter } from "node:events";
 import { Result, ok, err } from "neverthrow";
 import os from "node:os";
 import path from "node:path";
+import { ContextTracker } from "../context/context-tracker.js";
+import { compact, type CompactableMessage } from "../context/compaction.js";
+import type { ContextLevel } from "../context/types.js";
 import type {
   PromptIntent,
   RouteDecision,
@@ -33,6 +36,7 @@ export interface PromptRouterConfig {
   autoFollowUp?: boolean;
   showRoutingDecision?: boolean;
   customAgentsDir?: string;
+  contextTracker?: ContextTracker;
 }
 
 const ROUTER_DEFAULTS = {
@@ -54,10 +58,11 @@ export class PromptRouter extends EventEmitter {
   private classifier: IntentClassifier;
   private resolver: AgentResolver;
   private dispatcher: Dispatcher;
-  private config: Required<Omit<PromptRouterConfig, "classificationModel" | "skipClassificationPatterns" | "customAgentsDir">> & {
+  private config: Required<Omit<PromptRouterConfig, "classificationModel" | "skipClassificationPatterns" | "customAgentsDir" | "contextTracker">> & {
     customAgentsDir: string;
   };
   private sessionManager: SessionManager;
+  private contextTracker: ContextTracker | null;
   private lastAgentBySession = new Map<string, string>();
   private pendingConfirmation = new Map<string, RouteDecision>();
   private slashCommands: Map<string, SlashHandler>;
@@ -70,6 +75,7 @@ export class PromptRouter extends EventEmitter {
   ) {
     super();
     this.sessionManager = sessionManager;
+    this.contextTracker = config.contextTracker ?? null;
 
     this.config = {
       defaultAgent: config.defaultAgent ?? ROUTER_DEFAULTS.defaultAgent,
@@ -103,7 +109,7 @@ export class PromptRouter extends EventEmitter {
       ["cost", (sid) => this.handleCost(sid)],
       ["status", (sid) => this.handleStatus(sid)],
       ["clear", (sid) => this.handleClear(sid)],
-      ["compact", (sid) => this.handleCompact(sid)],
+      ["compact", (sid, a) => this.handleCompact(sid, a)],
       ["model", (sid, a) => this.handleModel(sid, a)],
       ["agent", (sid, a) => this.handleSetAgent(sid, a)],
       ["export", (sid, a) => this.handleExport(sid, a)],
@@ -189,7 +195,7 @@ export class PromptRouter extends EventEmitter {
     if (decision.requiresConfirmation) {
       this.pendingConfirmation.set(sessionId, decision);
       const agentNames = decision.agents.map((a) => a.role).join(", ");
-      const costStr = decision.estimatedCost ? ` (~$${decision.estimatedCost.toFixed(2)})` : "";
+      const costStr = "";
       return ok({
         strategy: "single",
         agentResults: [{
@@ -209,10 +215,18 @@ export class PromptRouter extends EventEmitter {
       });
     }
 
-    // 8. Dispatch
-    const dispatchResult = await this.dispatcher.dispatch(sessionId, mentions.cleanedPrompt, decision);
+    // 8. Build session history for context
+    const activeSession = this.sessionManager.getActive();
+    const sessionHistory = activeSession
+      ? activeSession.buildContextMessages()
+          .filter(m => m.role !== "system")
+          .map(m => ({ role: m.role, content: m.content }))
+      : [];
 
-    // 9. Track last agent for conversation continuity
+    // 9. Dispatch
+    const dispatchResult = await this.dispatcher.dispatch(sessionId, mentions.cleanedPrompt, decision, sessionHistory);
+
+    // 10. Track last agent for conversation continuity
     if (dispatchResult.isOk()) {
       const results = dispatchResult.value.agentResults;
       const lastAgent = results[results.length - 1];
@@ -256,7 +270,7 @@ export class PromptRouter extends EventEmitter {
       "  /agents          List available agents",
       "  /model [name]    Show or switch current model",
       "  /agent <id>      Set default agent for this session",
-      "  /cost            Show session cost breakdown",
+      "  /cost            Show session token usage",
       "  /status          Show active agents, model, token usage",
       "  /clear           Clear chat display",
       "  /compact         Force context compression",
@@ -290,15 +304,17 @@ export class PromptRouter extends EventEmitter {
   private async handleCost(_sessionId: string): Promise<Result<string, RouterError>> {
     const session = this.sessionManager.getActive();
     if (!session) return ok("No active session.");
-    const { input, output, usd } = session.cost;
+    const { input, output } = session.cost;
     const breakdown = session.getState().providerBreakdown;
+    const total = input + output;
+    const fmt = (n: number) => n < 1000 ? String(n) : n < 10_000 ? `${(n / 1000).toFixed(1)}k` : n < 1_000_000 ? `${Math.round(n / 1000)}k` : `${(n / 1_000_000).toFixed(1)}M`;
     const lines = [
-      `Session cost: $${usd.toFixed(4)}`,
-      `  Input tokens:  ${input.toLocaleString()}`,
-      `  Output tokens: ${output.toLocaleString()}`,
+      `Session tokens: ${fmt(total)}`,
+      `  Input:  ${input.toLocaleString()}`,
+      `  Output: ${output.toLocaleString()}`,
     ];
     for (const [provider, data] of Object.entries(breakdown)) {
-      lines.push(`  ${provider}: ${data.tokens.toLocaleString()} tokens ($${data.cost.toFixed(4)})`);
+      lines.push(`  ${provider}: ${fmt(data.tokens)}`);
     }
     return ok(lines.join("\n"));
   }
@@ -313,7 +329,7 @@ export class PromptRouter extends EventEmitter {
       `Status: ${state.status}`,
       `Messages: ${state.messageCount}`,
       `Active agents: ${state.activeAgents.join(", ") || "none"}`,
-      `Cost: $${state.totalCostUSD.toFixed(4)}`,
+      `Tokens: ${state.totalInputTokens.toLocaleString()} in / ${state.totalOutputTokens.toLocaleString()} out`,
     ];
     return ok(lines.join("\n"));
   }
@@ -324,9 +340,36 @@ export class PromptRouter extends EventEmitter {
     return ok("Display cleared.");
   }
 
-  private async handleCompact(_sessionId: string): Promise<Result<string, RouterError>> {
+  private async handleCompact(_sessionId: string, args: string): Promise<Result<string, RouterError>> {
+    const session = this.sessionManager.getActive();
+    if (!session) return ok("No active session.");
+
+    const messages = session.buildContextMessages();
+    const tracker = this.contextTracker ?? new ContextTracker(128_000);
+    const before = tracker.snapshot(messages);
+
+    const levelUp: Record<ContextLevel, ContextLevel> = {
+      normal: "high", warning: "high", high: "critical",
+      critical: "emergency", emergency: "emergency",
+    };
+    const targetLevel = (args.includes("--force") || args.includes("--full"))
+      ? "emergency" as ContextLevel
+      : levelUp[before.level];
+
+    const result = await compact(messages as CompactableMessage[], targetLevel);
+
+    if (!result) {
+      return ok(`Context: ${before.estimatedTokens.toLocaleString()} tokens (${before.utilizationPercent}% — ${before.level}). No compaction needed.`);
+    }
+
     this.emit("command:compact");
-    return ok("Context compressed. Older messages summarized to save tokens.");
+    return ok([
+      `Compacted: ${result.strategy}`,
+      `  Before: ${result.beforeTokens.toLocaleString()} tokens`,
+      `  After:  ${result.afterTokens.toLocaleString()} tokens`,
+      `  Saved:  ${(result.beforeTokens - result.afterTokens).toLocaleString()} tokens`,
+      `  Messages affected: ${result.messagesAffected}`,
+    ].join("\n"));
   }
 
   private async handleModel(_sessionId: string, args: string): Promise<Result<string, RouterError>> {

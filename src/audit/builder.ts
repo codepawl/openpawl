@@ -19,9 +19,9 @@ import type { RecordingEvent } from "../replay/types.js";
 import { getRoleName } from "../core/bot-definitions.js";
 import type { BotDefinition } from "../core/bot-definitions.js";
 
-// Per-token cost estimate (conservative, covers most models)
-const COST_PER_INPUT_TOKEN = 0.000003;
-const COST_PER_OUTPUT_TOKEN = 0.000015;
+// Dollar cost estimation removed — these are kept as zero for type compat
+const COST_PER_INPUT_TOKEN = 0;
+const COST_PER_OUTPUT_TOKEN = 0;
 
 export async function buildAuditTrail(
   sessionId: string,

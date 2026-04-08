@@ -5,7 +5,7 @@
 
 import { defaultTheme } from "../themes/default.js";
 import type { StatusBarState } from "./status-data.js";
-import { formatCost, formatTokens } from "./status-data.js";
+import { formatTokens } from "./status-data.js";
 
 export interface StatusSection {
   content: string;
@@ -30,12 +30,12 @@ export function renderModelSection(state: StatusBarState): StatusSection {
 }
 
 export function renderCostSection(state: StatusBarState): StatusSection {
-  const cost = state.totalCostUSD;
-  const display = formatCost(cost);
-  const colorFn = cost > 5 ? defaultTheme.error : cost > 1 ? defaultTheme.warning : defaultTheme.success;
+  const total = state.totalInputTokens + state.totalOutputTokens;
+  if (total === 0) return { content: "", minWidth: 0, priority: 2 };
+  const display = `tokens: ${formatTokens(total)}`;
   return {
-    content: colorFn(display),
-    minWidth: 6,
+    content: defaultTheme.dim(display),
+    minWidth: 10,
     priority: 2,
   };
 }

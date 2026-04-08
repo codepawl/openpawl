@@ -4,6 +4,7 @@
 
 export interface CostEstimate {
   estimatedUSD: number;
+  estimatedTokens?: number;
   parallelWaves: number;
   rfcRequired: boolean;
   estimatedMinutes: number;

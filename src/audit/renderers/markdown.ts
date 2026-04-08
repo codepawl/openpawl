@@ -56,7 +56,7 @@ function renderHeader(audit: AuditTrail): string {
     `**Goal:** ${audit.goal}`,
     `**Date:** ${date}`,
     `**Duration:** ${duration}`,
-    `**Total Cost:** $${audit.summary.totalCostUSD.toFixed(2)}`,
+    `**Total Tokens:** ${audit.summary.totalTokensInput.toLocaleString()} in / ${audit.summary.totalTokensOutput.toLocaleString()} out`,
     `**Team:** ${audit.teamComposition.join(", ")}`,
   ].join("\n");
 }
@@ -137,29 +137,27 @@ function renderApprovalHistory(audit: AuditTrail): string {
 
 function renderCostBreakdown(audit: AuditTrail): string {
   if (audit.costBreakdown.length === 0) {
-    return "## Cost Breakdown\n\nNo cost data available.";
+    return "## Token Usage\n\nNo token data available.";
   }
 
   const lines = [
-    "## Cost Breakdown",
+    "## Token Usage",
     "",
-    "| Agent | Tasks | Tokens | Cost |",
-    "|-------|-------|--------|------|",
+    "| Agent | Tasks | Tokens |",
+    "|-------|-------|--------|",
   ];
 
   let totalTasks = 0;
   let totalTokens = 0;
-  let totalCost = 0;
 
   for (const entry of audit.costBreakdown) {
     const tokens = entry.tokensInput + entry.tokensOutput;
-    lines.push(`| ${entry.agent} | ${entry.tasks} | ${tokens.toLocaleString()} | $${entry.costUSD.toFixed(3)} |`);
+    lines.push(`| ${entry.agent} | ${entry.tasks} | ${tokens.toLocaleString()} |`);
     totalTasks += entry.tasks;
     totalTokens += tokens;
-    totalCost += entry.costUSD;
   }
 
-  lines.push(`| **Total** | **${totalTasks}** | **${totalTokens.toLocaleString()}** | **$${totalCost.toFixed(3)}** |`);
+  lines.push(`| **Total** | **${totalTasks}** | **${totalTokens.toLocaleString()}** |`);
 
   return lines.join("\n");
 }

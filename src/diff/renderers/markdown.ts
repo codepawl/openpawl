@@ -47,7 +47,7 @@ export function renderRunDiffMarkdown(diff: RunDiff): string {
   sections.push("| Metric | Delta |");
   sections.push("|--------|-------|");
   sections.push(`| Confidence | ${formatDelta(m.averageConfidenceDelta)} |`);
-  sections.push(`| Cost | ${formatCostDelta(m.totalCostDelta)} |`);
+  sections.push(`| Tokens | ${(m.totalTokenDelta ?? 0) >= 0 ? "+" : ""}${(m.totalTokenDelta ?? 0).toLocaleString()} |`);
   sections.push(`| Duration | ${formatDurationDelta(m.totalDurationDelta)} |`);
   sections.push(`| Reworks | ${m.reworkCountDelta >= 0 ? "+" : ""}${m.reworkCountDelta} |`);
   sections.push(`| Auto-approved | ${m.autoApprovedDelta >= 0 ? "+" : ""}${m.autoApprovedDelta} |`);
@@ -101,7 +101,7 @@ export function renderOverallTrendMarkdown(chain: DiffChain): string {
   sections.push(`## Overall Trend (${chain.totalRuns} runs)`);
   sections.push("");
   sections.push(`- Confidence: ${trendLabel(trend.confidenceTrend)} ${trendArrow(trend.confidenceTrend)}`);
-  sections.push(`- Cost: ${trendLabel(trend.costTrend)} ${trendArrow(trend.costTrend)}`);
+  sections.push(`- Tokens: ${trendLabel(trend.costTrend)} ${trendArrow(trend.costTrend)}`);
   sections.push(`- Learning efficiency: ${trend.learningEfficiency.toFixed(3)} per run`);
 
   if (trend.plateauDetected && trend.plateauMessage) {
@@ -124,14 +124,14 @@ export function renderLearningProgression(chain: DiffChain): string {
     sections.push(`### Run ${diff.fromRun} → Run ${diff.toRun}`);
     sections.push("");
     sections.push(`- Confidence delta: ${formatDelta(m.averageConfidenceDelta)}`);
-    sections.push(`- Cost delta: ${formatCostDelta(m.totalCostDelta)}`);
+    sections.push(`- Token delta: ${(m.totalTokenDelta ?? 0) >= 0 ? "+" : ""}${(m.totalTokenDelta ?? 0).toLocaleString()}`);
     sections.push(`- Tasks added: ${m.tasksAddedCount}, removed: ${m.tasksRemovedCount}`);
     sections.push(`- Rework delta: ${m.reworkCountDelta >= 0 ? "+" : ""}${m.reworkCountDelta}`);
     sections.push("");
   }
 
   const trend = chain.overallTrend;
-  sections.push(`**Overall:** Confidence ${trendLabel(trend.confidenceTrend)}, Cost ${trendLabel(trend.costTrend)}`);
+  sections.push(`**Overall:** Confidence ${trendLabel(trend.confidenceTrend)}, Tokens ${trendLabel(trend.costTrend)}`);
 
   if (trend.plateauDetected && trend.plateauMessage) {
     sections.push("");
@@ -151,11 +151,6 @@ function formatTaskRow(task: TaskDiff): string {
 function formatDelta(v: number): string {
   const sign = v >= 0 ? "+" : "";
   return `${sign}${v.toFixed(2)}`;
-}
-
-function formatCostDelta(v: number): string {
-  const sign = v >= 0 ? "+" : "-";
-  return `${sign}$${Math.abs(v).toFixed(4)}`;
 }
 
 function formatDurationDelta(ms: number): string {

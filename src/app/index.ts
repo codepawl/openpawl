@@ -28,6 +28,7 @@ import { LeaderKeyHandler } from "../tui/keybindings/leader-key.js";
 import { CommandPalette, type PaletteSource } from "../tui/keybindings/command-palette.js";
 import { KeybindingHelp, buildHelpSections } from "../tui/keybindings/keybinding-help.js";
 import { ThinkingIndicator } from "../tui/components/thinking-indicator.js";
+import { ToolCallTokenFilter } from "../tui/text/tool-call-filter.js";
 
 import type { AppLayout } from "./layout.js";
 
@@ -35,6 +36,17 @@ import type { AppLayout } from "./layout.js";
 import type { SessionManager } from "../session/session-manager.js";
 import type { Session } from "../session/session.js";
 import type { PromptRouter } from "../router/prompt-router.js";
+
+// ---------------------------------------------------------------------------
+// Token count formatter
+// ---------------------------------------------------------------------------
+
+function formatTokenCount(count: number): string {
+  if (count < 1000) return String(count);
+  if (count < 10_000) return `${(count / 1000).toFixed(1)}k`;
+  if (count < 1_000_000) return `${Math.round(count / 1000)}k`;
+  return `${(count / 1_000_000).toFixed(1)}M`;
+}
 
 // ---------------------------------------------------------------------------
 // Agent color helper — maps agent IDs to theme.agentColors deterministically
@@ -83,8 +95,11 @@ function agentDisplayName(agentId: string): string {
 function wireRouterEvents(
   router: PromptRouter,
   layout: AppLayout,
+  onAssistantResponse?: (agentId: string, content: string) => void,
 ): () => void {
   let streamingForAgent: string | null = null;
+  let streamedContent = "";
+  let tokenFilter: ToolCallTokenFilter | null = null;
   const thinking = new ThinkingIndicator();
   let thinkingMsgAdded = false;
 
@@ -99,7 +114,12 @@ function wireRouterEvents(
 
   const onAgentStart = (_sessionId: string, agentId: string) => {
     streamingForAgent = agentId;
+    streamedContent = "";
     layout.messages.clearToolCalls();
+    tokenFilter = new ToolCallTokenFilter((filtered) => {
+      layout.messages.appendToLast(filtered);
+      layout.tui.requestRender();
+    });
 
     // Show thinking indicator — no agent label yet (avoids duplicate)
     thinking.start(); // no agent name — just "◐ thinking..."
@@ -141,8 +161,14 @@ function wireRouterEvents(
       });
     }
 
-    layout.messages.appendToLast(token);
-    layout.tui.requestRender();
+    streamedContent += token;
+
+    if (tokenFilter) {
+      tokenFilter.feed(token);
+    } else {
+      layout.messages.appendToLast(token);
+      layout.tui.requestRender();
+    }
   };
 
   let toolSpinnerInterval: ReturnType<typeof setInterval> | null = null;
@@ -177,8 +203,16 @@ function wireRouterEvents(
     layout.tui.requestRender();
   };
 
-  const onAgentDone = (_sessionId: string, _agentId: string) => {
+  const onAgentDone = (_sessionId: string, agentId: string, result?: { response?: string }) => {
+    // Save assistant response to session
+    const responseText = result?.response || streamedContent;
+    if (responseText && agentId !== "system") {
+      onAssistantResponse?.(agentId, responseText);
+    }
     streamingForAgent = null;
+    streamedContent = "";
+    tokenFilter?.flush();
+    tokenFilter = null;
     thinking.stop();
     thinkingMsgAdded = false;
     stopToolSpinner();
@@ -188,6 +222,8 @@ function wireRouterEvents(
 
   const onDispatchError = (_sessionId: string, error: { type: string }) => {
     streamingForAgent = null;
+    tokenFilter?.flush();
+    tokenFilter = null;
     thinking.stop();
     thinkingMsgAdded = false;
     stopToolSpinner();
@@ -226,10 +262,10 @@ function wireSessionEvents(
   sessionMgr: SessionManager,
   layout: AppLayout,
 ): () => void {
-  const onCostUpdated = (_sessionId: string, cost: { usd: number }) => {
-    // Yellow when cost > $0.50, overlay0 otherwise
-    const costColor = cost.usd > 0.50 ? ctp.yellow : ctp.overlay0;
-    layout.statusBar.updateSegment(4, `$${cost.usd.toFixed(2)}`, costColor);
+  const onCostUpdated = (_sessionId: string, cost: { input?: number; output?: number }) => {
+    const total = (cost.input ?? 0) + (cost.output ?? 0);
+    const display = total > 0 ? `tokens: ${formatTokenCount(total)}` : "";
+    layout.statusBar.updateSegment(4, display, ctp.overlay0);
     layout.tui.requestRender();
   };
 
@@ -312,9 +348,10 @@ async function handleWithRouter(
 
   layout.statusBar.updateSegment(3, "idle", ctp.overlay0);
 
-  // Update cost display
+  // Update token display
   const cost = session.cost;
-  layout.statusBar.updateSegment(4, `$${cost.usd.toFixed(2)}`, ctp.green);
+  const totalTokens = (cost.input ?? 0) + (cost.output ?? 0);
+  layout.statusBar.updateSegment(4, totalTokens > 0 ? `tokens: ${formatTokenCount(totalTokens)}` : "", ctp.overlay0);
   layout.tui.requestRender();
 }
 
@@ -415,6 +452,7 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
 
   // Register app commands (/status, /settings, /model, /mode, /cost, etc.)
   registerAllCommands(registry, tuiSession);
+  console.error("[debug] registry has", registry.getAll().map((c: { name: string }) => c.name));
 
   // Set up autocomplete (updated later when router is ready)
   layout.editor.setAutocompleteProvider(
@@ -1364,28 +1402,30 @@ async function initSessionRouter(
     });
 
     // Status bar reads from cost tracker
-    costTracker.on("cost:update", (event: { totalCostUSD: number }) => {
-      const costColor = event.totalCostUSD > 0.50 ? ctp.yellow : ctp.overlay0;
-      layout.statusBar.updateSegment(4, `$${event.totalCostUSD.toFixed(2)}`, costColor);
+    costTracker.on("cost:update", (event: { totalInputTokens: number; totalOutputTokens: number }) => {
+      const total = event.totalInputTokens + event.totalOutputTokens;
+      const display = total > 0 ? `tokens: ${formatTokenCount(total)}` : "";
+      layout.statusBar.updateSegment(4, display, ctp.overlay0);
       layout.tui.requestRender();
     });
 
-    // Wire /cost command to cost tracker
+    // Wire /cost command to cost tracker (shows token usage)
     registry.register({
       name: "cost",
-      description: "Show session cost breakdown",
+      description: "Show session token usage",
       async execute(_args, msgCtx) {
         const sessionId = ctx.chatSession?.id ?? "";
         const summary = costTracker.getSessionCost(sessionId);
+        const total = summary.totalInputTokens + summary.totalOutputTokens;
         const lines = [
-          `\u26a1 Cost: $${summary.totalCostUSD.toFixed(4)}`,
-          `  Input tokens:  ${summary.totalInputTokens.toLocaleString()}`,
-          `  Output tokens: ${summary.totalOutputTokens.toLocaleString()}`,
+          `\u26a1 Tokens: ${formatTokenCount(total)}`,
+          `  Input:  ${summary.totalInputTokens.toLocaleString()}`,
+          `  Output: ${summary.totalOutputTokens.toLocaleString()}`,
         ];
         if (Object.keys(summary.byAgent).length > 0) {
           lines.push("", "  By agent:");
           for (const [agent, data] of Object.entries(summary.byAgent)) {
-            lines.push(`    ${agent}: ${data.tokens.toLocaleString()} tokens ($${data.costUSD.toFixed(4)})`);
+            lines.push(`    ${agent}: ${formatTokenCount(data.tokens)}`);
           }
         }
         msgCtx.addMessage("system", lines.join("\n"));
@@ -1444,11 +1484,10 @@ async function initSessionRouter(
     // ErrorPresenter not available
   }
 
-  // Create or resume session
-  if (opts?.resume) {
-    const latestResult = await ctx.sessionMgr.resumeLatest();
-    ctx.chatSession = latestResult.isOk() ? latestResult.value : null;
-  }
+  // Always try to resume the latest session first.
+  // Falls back to creating a new session if none exists or resume fails.
+  const latestResult = await ctx.sessionMgr.resumeLatest();
+  ctx.chatSession = latestResult.isOk() ? latestResult.value : null;
   if (!ctx.chatSession) {
     const createResult = await ctx.sessionMgr.create(process.cwd());
     if (createResult.isOk()) {
@@ -1457,7 +1496,11 @@ async function initSessionRouter(
   }
 
   // Wire events
-  ctx.cleanupRouter = wireRouterEvents(ctx.router, layout);
+  ctx.cleanupRouter = wireRouterEvents(ctx.router, layout, (agentId, content) => {
+    if (ctx.chatSession) {
+      ctx.chatSession.addMessage({ role: "assistant", content, agentId });
+    }
+  });
   ctx.cleanupSession = wireSessionEvents(ctx.sessionMgr, layout);
 
   // Register router-powered commands
@@ -1510,7 +1553,7 @@ function registerRouterCommands(
         `**Title:** ${state.title}`,
         `**Status:** ${state.status}`,
         `**Messages:** ${state.messageCount}`,
-        `**Cost:** $${state.totalCostUSD.toFixed(4)}`,
+        `**Tokens:** ${formatTokenCount(state.totalInputTokens + state.totalOutputTokens)}`,
         `**Input tokens:** ${state.totalInputTokens.toLocaleString()}`,
         `**Output tokens:** ${state.totalOutputTokens.toLocaleString()}`,
       ];

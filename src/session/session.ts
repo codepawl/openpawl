@@ -49,7 +49,7 @@ export class Session {
     return {
       input: this.state.totalInputTokens,
       output: this.state.totalOutputTokens,
-      usd: this.state.totalCostUSD,
+      usd: 0,
     };
   }
 
@@ -156,20 +156,18 @@ export class Session {
     provider: string,
     input: number,
     output: number,
-    costUSD: number,
+    _costUSD: number,
   ): void {
     this.state.totalInputTokens += input;
     this.state.totalOutputTokens += output;
-    this.state.totalCostUSD += costUSD;
 
     const existing = this.state.providerBreakdown[provider];
     if (existing) {
       existing.tokens += input + output;
-      existing.cost += costUSD;
     } else {
       this.state.providerBreakdown[provider] = {
         tokens: input + output,
-        cost: costUSD,
+        cost: 0,
       };
     }
     this.touch();

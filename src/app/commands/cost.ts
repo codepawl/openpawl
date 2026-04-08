@@ -1,5 +1,5 @@
 /**
- * /cost command — show session cost and token usage.
+ * /cost command — show session token usage.
  */
 import type { SlashCommand } from "../../tui/index.js";
 import type { SessionManager } from "../session.js";
@@ -7,7 +7,7 @@ import type { SessionManager } from "../session.js";
 export function createCostCommand(session: SessionManager): SlashCommand {
   return {
     name: "cost",
-    description: "Show session cost and token usage",
+    description: "Show session token usage",
     async execute(_args, ctx) {
       const stats = session.getStats();
       const elapsed = ((Date.now() - stats.startedAt) / 1000).toFixed(0);

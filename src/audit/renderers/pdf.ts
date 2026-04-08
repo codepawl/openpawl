@@ -61,7 +61,7 @@ export async function renderAuditPDF(
     doc.text(`Goal: ${audit.goal}`);
     doc.text(`Date: ${new Date(audit.startedAt).toISOString().replace("T", " ").slice(0, 19)} UTC`);
     doc.text(`Duration: ${formatDuration(audit.durationMs)}`);
-    doc.text(`Total Cost: $${audit.summary.totalCostUSD.toFixed(2)}`);
+    doc.text(`Total Tokens: ${audit.summary.totalTokensInput.toLocaleString()} in / ${audit.summary.totalTokensOutput.toLocaleString()} out`);
     doc.text(`Team: ${audit.teamComposition.join(", ")}`);
     doc.moveDown();
 
@@ -120,11 +120,11 @@ export async function renderAuditPDF(
       doc.moveDown(0.3);
       doc.fontSize(9).font("Helvetica");
 
-      doc.font("Helvetica-Bold").text("Agent               Tasks   Tokens      Cost");
+      doc.font("Helvetica-Bold").text("Agent               Tasks   Tokens");
       doc.font("Helvetica");
       for (const entry of audit.costBreakdown) {
         const tokens = entry.tokensInput + entry.tokensOutput;
-        doc.text(`${pad(entry.agent, 20)}${pad(String(entry.tasks), 8)}${pad(tokens.toLocaleString(), 12)}$${entry.costUSD.toFixed(3)}`);
+        doc.text(`${pad(entry.agent, 20)}${pad(String(entry.tasks), 8)}${tokens.toLocaleString()}`);
       }
       doc.moveDown();
     }

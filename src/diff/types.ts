@@ -19,6 +19,7 @@ export interface TaskDiff {
 export interface MetricDiff {
   averageConfidenceDelta: number;
   totalCostDelta: number;
+  totalTokenDelta?: number;
   totalDurationDelta: number;
   reworkCountDelta: number;
   autoApprovedDelta: number;

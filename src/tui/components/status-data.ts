@@ -51,7 +51,7 @@ const DEFAULT_STATE: StatusBarState = {
   totalInputTokens: 0,
   totalOutputTokens: 0,
   totalCostUSD: 0,
-  costDisplay: "$0.00",
+  costDisplay: "",
   activeAgents: [],
   lastAgentId: null,
   isStreaming: false,
@@ -107,11 +107,12 @@ export class StatusDataStore extends EventEmitter {
     this.notifyChange();
   }
 
-  handleCostUpdate(input: number, output: number, costUSD: number): void {
+  handleCostUpdate(input: number, output: number, _costUSD: number): void {
     this.state.totalInputTokens = input;
     this.state.totalOutputTokens = output;
-    this.state.totalCostUSD = costUSD;
-    this.state.costDisplay = formatCost(costUSD);
+    this.state.totalCostUSD = 0;
+    const total = input + output;
+    this.state.costDisplay = total > 0 ? `tokens: ${formatTokens(total)}` : "";
     this.notifyChange();
   }
 
@@ -236,10 +237,9 @@ function formatModelDisplay(model: string, provider: string): string {
   return provider ? `${short} via ${provider}` : short;
 }
 
-export function formatCost(usd: number): string {
-  if (usd < 10) return `$${usd.toFixed(2)}`;
-  if (usd < 100) return `$${usd.toFixed(1)}`;
-  return `$${Math.round(usd)}`;
+/** @deprecated Dollar cost display removed. Use formatTokens instead. */
+export function formatCost(_usd: number): string {
+  return "";
 }
 
 export function formatTokens(count: number): string {
