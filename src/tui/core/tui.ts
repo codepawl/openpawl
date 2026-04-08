@@ -541,6 +541,16 @@ export class TUI {
     }
 
     if (event.type === "scroll_up" || event.type === "scroll_down") {
+      // If scroll is in the editor region, scroll editor content instead
+      const scrollRow = (event as { row?: number }).row ?? 0;
+      if (scrollRow >= this.editorRowStart && scrollRow <= this.editorRowEnd) {
+        const editor = this.focusedComponent as Component & { scrollInput?: (delta: number) => boolean };
+        const delta = event.type === "scroll_up" ? -3 : 3;
+        if (editor?.scrollInput?.(delta)) {
+          this.requestRender();
+          return;
+        }
+      }
       if (this.scrollableComponent) {
         if (event.type === "scroll_up") this.scrollUp(3);
         else this.scrollDown(3);

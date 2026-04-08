@@ -140,9 +140,9 @@ export class EditorComponent implements Component {
       const endVis = Math.min(totalVisual, startVis + this.maxVisibleLines);
       for (let v = startVis; v < endVis; v++) {
         const wl = this.cachedVisualLines[v]!;
-        const isFirstVisualLine = v === 0 || (wl.originalLineIndex === 0 && wl.originalStartOffset === 0);
-        const prefix = isFirstVisualLine ? promptSymbol + " " + fileTags : "  ";
-        const availWidth = isFirstVisualLine ? textContentWidth : contentWidth;
+        const isPromptLine = v === 0; // Only absolute first visual line gets the prompt
+        const prefix = isPromptLine ? promptSymbol + " " + fileTags : "  ";
+        const availWidth = isPromptLine ? textContentWidth : contentWidth;
         const rawDisplay = truncate(wl.content, availWidth, "");
         const display = this.hasSelection() ? this.highlightSelection(rawDisplay, wl) : rawDisplay;
         const padding = Math.max(0, availWidth - visibleWidth(rawDisplay));
@@ -482,7 +482,16 @@ export class EditorComponent implements Component {
     this.autocompleteProvider = provider;
   }
 
-  /** Set cursor column from a click position (1-based terminal column). */
+  /** Scroll input content by delta visual lines. Returns true if consumed. */
+  scrollInput(delta: number): boolean {
+    const totalVisual = this.cachedVisualLines.length;
+    if (totalVisual <= this.maxVisibleLines) return false;
+    const newOffset = Math.max(0, Math.min(this.inputScrollOffset + delta, totalVisual - this.maxVisibleLines));
+    if (newOffset === this.inputScrollOffset) return false;
+    this.inputScrollOffset = newOffset;
+    return true;
+  }
+
   /** Check if autocomplete popup is currently visible. */
   isAutocompleteActive(): boolean {
     return this.acActive && this.acSuggestions.length > 0;
@@ -505,8 +514,11 @@ export class EditorComponent implements Component {
       : 0;
     const prefixWidth = 4 + (isFirstVisualLine ? fileTagsWidth : 0);
     const col = Math.max(0, termCol - prefixWidth - 1);
+    // Clamp to visual line content length to prevent cursor past actual text
+    const visualContentLen = wl.originalEndOffset - wl.originalStartOffset;
+    const clampedCol = Math.min(col, visualContentLen);
     this.cursorRow = wl.originalLineIndex;
-    this.cursorCol = Math.min(wl.originalStartOffset + col, this.lines[this.cursorRow]?.length ?? 0);
+    this.cursorCol = Math.min(wl.originalStartOffset + clampedCol, this.lines[this.cursorRow]?.length ?? 0);
   }
 
   /** Select the word at cursor (double-click). */
