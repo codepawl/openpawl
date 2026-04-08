@@ -12,6 +12,6 @@ echo "pre-commit: lint..."
 bunx eslint src/ --ext .ts,.tsx
 
 echo "pre-commit: tests..."
-bunx vitest run
+bun test
 
 echo "pre-commit: all checks passed"

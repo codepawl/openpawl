@@ -679,9 +679,10 @@ export class TUI {
   private buildKeyContext(): KeyContext {
     const fc = this.focusedComponent as Component & {
       isAutocompleteActive?: () => boolean;
+      hasSelection?: () => boolean;
     };
     return {
-      hasSelection: this.selectionManager.hasSelection(),
+      hasSelection: this.selectionManager.hasSelection() || (fc?.hasSelection?.() ?? false),
       hasRunningTask: !!this.onAbort,
       hasActiveView: this.keyHandlerStack.length > 0,
       isAutocompleteVisible: fc?.isAutocompleteActive?.() ?? false,
@@ -702,7 +703,7 @@ export class TUI {
 
   /** Contextual Ctrl+C: copy selection → close view → abort task → exit. */
   private handleCtrlC(): void {
-    // Priority 0: If there's a text selection → copy to clipboard, consume event
+    // Priority 0a: If there's a message-area text selection → copy to clipboard
     if (this.selectionManager.hasSelection()) {
       const raw = this.selectionManager.getSelectedText(this.lastFullContentLines);
       const text = cleanCopyText(raw);
@@ -712,6 +713,18 @@ export class TUI {
         this.onFlashMessage?.("Copied!");
       }
       this.selectionManager.clearSelection();
+      this.requestRender();
+      return;
+    }
+
+    // Priority 0b: If the editor has a text selection → copy to clipboard
+    const editor = this.focusedComponent as Component & { hasSelection?: () => boolean; getSelectedText?: () => string | null };
+    if (editor?.hasSelection?.()) {
+      const text = editor.getSelectedText?.();
+      if (text?.trim()) {
+        void this.copyManager.copyToClipboard(text);
+        this.onFlashMessage?.("Copied!");
+      }
       this.requestRender();
       return;
     }
@@ -822,8 +835,8 @@ export class TUI {
         }
       } else if (region === "content" && event.row >= this.editorRowStart && event.row <= this.editorRowEnd) {
         // Editor region — position cursor
-        const editor = this.focusedComponent as Component & { setCursorFromClick?: (col: number) => void };
-        editor.setCursorFromClick?.(event.col);
+        const editor = this.focusedComponent as Component & { setCursorFromClick?: (relativeRow: number, col: number) => void };
+        editor.setCursorFromClick?.(event.row - this.editorRowStart - 1, event.col);
       }
 
       this.requestRender();
