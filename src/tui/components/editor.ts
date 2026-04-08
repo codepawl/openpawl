@@ -589,16 +589,26 @@ export class EditorComponent implements Component {
     return true; // middle row
   }
 
-  /** Apply reverse-video highlighting to selected characters in a visual line. */
+  /** Apply reverse-video highlighting to selected characters in a visual line.
+   *  Iterates by code point to avoid splitting surrogate pairs (emoji, CJK). */
   private highlightSelection(display: string, wl: WrappedLine): string {
     if (!this.hasSelection()) return display;
     let result = "";
-    for (let col = 0; col < display.length; col++) {
-      if (this.isCellSelected(wl.originalLineIndex, wl.originalStartOffset + col)) {
-        result += `\x1b[7m${display[col]}\x1b[27m`;
+    let logicalCol = 0;
+    let i = 0;
+    while (i < display.length) {
+      const cp = display.codePointAt(i)!;
+      const charLen = cp > 0xffff ? 2 : 1;
+      const char = display.slice(i, i + charLen);
+
+      if (this.isCellSelected(wl.originalLineIndex, wl.originalStartOffset + logicalCol)) {
+        result += `\x1b[7m${char}\x1b[27m`;
       } else {
-        result += display[col];
+        result += char;
       }
+
+      logicalCol++;
+      i += charLen;
     }
     return result;
   }
