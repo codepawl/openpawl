@@ -98,6 +98,7 @@ function wireRouterEvents(
 
   const onAgentStart = (_sessionId: string, agentId: string) => {
     streamingForAgent = agentId;
+    layout.messages.clearToolCalls();
 
     // Show thinking indicator — no agent label yet (avoids duplicate)
     thinking.start(); // no agent name — just "◐ thinking..."
@@ -143,19 +144,35 @@ function wireRouterEvents(
     layout.tui.requestRender();
   };
 
-  const onAgentTool = (_sessionId: string, agentId: string, toolName: string, status: string) => {
-    const symbolFn = status === "completed" ? ctp.green
-      : status === "failed" ? ctp.red
-        : ctp.teal;
-    const symbol = status === "completed" ? defaultTheme.symbols.success
-      : status === "failed" ? defaultTheme.symbols.error
-        : defaultTheme.symbols.pending;
-    layout.messages.addMessage({
-      role: "tool",
-      content: `${symbolFn(symbol)} ${toolName} (${status})`,
-      agentName: agentDisplayName(agentId),
-      timestamp: new Date(),
-    });
+  let toolSpinnerInterval: ReturnType<typeof setInterval> | null = null;
+
+  const startToolSpinner = () => {
+    if (toolSpinnerInterval) return;
+    toolSpinnerInterval = setInterval(() => {
+      if (layout.messages.hasRunningToolCalls()) {
+        layout.messages.advanceToolSpinners();
+        layout.tui.requestRender();
+      }
+    }, 80);
+  };
+
+  const stopToolSpinner = () => {
+    if (toolSpinnerInterval) {
+      clearInterval(toolSpinnerInterval);
+      toolSpinnerInterval = null;
+    }
+  };
+
+  const onAgentTool = (_sessionId: string, _agentId: string, toolName: string, status: string, details?: { executionId?: string; inputSummary?: string; duration?: number; outputSummary?: string; success?: boolean }) => {
+    const execId = details?.executionId ?? `fallback_${Date.now()}`;
+
+    if (status === "running") {
+      layout.messages.startToolCall(execId, toolName, details?.inputSummary ?? toolName, _agentId);
+      startToolSpinner();
+    } else if (status === "completed" || status === "failed") {
+      layout.messages.completeToolCall(execId, status === "completed", details?.outputSummary ?? "", details?.duration ?? 0);
+    }
+
     layout.tui.requestRender();
   };
 
@@ -163,6 +180,7 @@ function wireRouterEvents(
     streamingForAgent = null;
     thinking.stop();
     thinkingMsgAdded = false;
+    stopToolSpinner();
     layout.statusBar.updateSegment(3, "idle", ctp.overlay0);
     layout.tui.requestRender();
   };
@@ -171,6 +189,8 @@ function wireRouterEvents(
     streamingForAgent = null;
     thinking.stop();
     thinkingMsgAdded = false;
+    stopToolSpinner();
+    layout.messages.clearToolCalls();
     layout.messages.addMessage({
       role: "error",
       content: `Dispatch error: ${error.type}`,
@@ -188,6 +208,7 @@ function wireRouterEvents(
 
   // Return cleanup function
   return () => {
+    stopToolSpinner();
     router.off("dispatch:agent:start", onAgentStart);
     router.off("dispatch:agent:token", onAgentToken);
     router.off("dispatch:agent:tool", onAgentTool);
@@ -532,15 +553,14 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
   }
 
   const BANNER_ART = [
-    "                                            \u2584\u2584 ",
-    "                                            \u2588\u2588 ",
-    "\u2584\u2588\u2588\u2588\u2584 \u2588\u2588\u2588\u2588\u2584 \u2584\u2588\u2580\u2588\u2584 \u2588\u2588\u2588\u2588\u2584 \u2588\u2588\u2588\u2588\u2584  \u2580\u2580\u2588\u2584 \u2588\u2588   \u2588\u2588 \u2588\u2588 ",
-    "\u2588\u2588 \u2588\u2588 \u2588\u2588 \u2588\u2588 \u2588\u2588\u2584\u2588\u2580 \u2588\u2588 \u2588\u2588 \u2588\u2588 \u2588\u2588 \u2584\u2588\u2580\u2588\u2588 \u2588\u2588 \u2588 \u2588\u2588 \u2588\u2588 ",
-    "\u2580\u2588\u2588\u2588\u2580 \u2588\u2588\u2588\u2588\u2580 \u2580\u2588\u2584\u2584\u2584 \u2588\u2588 \u2588\u2588 \u2588\u2588\u2588\u2588\u2580 \u2580\u2588\u2584\u2588\u2588  \u2588\u2588\u2580\u2588\u2588  \u2588\u2588 ",
-    "      \u2588\u2588                \u2588\u2588                     ",
-    "      \u2580\u2580                \u2580\u2580                     ",
+    "  ___                   ____                _ ",
+    " / _ \\ _ __   ___ _ __ |  _ \\ __ ___      _| |",
+    "| | | | '_ \\ / _ \\ '_ \\| |_) / _` \\ \\ /\\ / / |",
+    "| |_| | |_) |  __/ | | |  __/ (_| |\\ V  V /| |",
+    " \\___/| .__/ \\___|_| |_|_|   \\__,_| \\_/\\_/ |_|",
+    "      |_|",
   ];
-  const BANNER_WIDTH = 52;
+  const BANNER_WIDTH = 53;
 
   /** Build the welcome banner content, freshly computed for current terminal width. */
   const buildWelcomeContent = (): string => {
@@ -1115,7 +1135,7 @@ async function initSessionRouter(
 
   // Create LLM-backed agent runner with token streaming and tool support.
   const tokenEmitter = { emit: (_agentId: string, _token: string) => {} };
-  const toolEmitter = { emit: (_agentId: string, _tool: string, _status: string) => {} };
+  const toolEmitter = { emit: (_agentId: string, _tool: string, _status: string, _details?: Record<string, unknown>) => {} };
 
   // Lazy-load tool registry and executor for tool support
   let toolRegistry: import("../tools/registry.js").ToolRegistry | null = null;
@@ -1213,7 +1233,7 @@ async function initSessionRouter(
 
   const agentRunner = createLLMAgentRunner({
     onToken: (agentId, token) => tokenEmitter.emit(agentId, token),
-    onToolCall: (agentId, toolName, status) => toolEmitter.emit(agentId, toolName, status),
+    onToolCall: (agentId, toolName, status, details) => toolEmitter.emit(agentId, toolName, status, details as Record<string, unknown> | undefined),
     getToolSchemas: toolRegistry
       ? (toolNames) => toolRegistry!.exportForLLM(toolNames)
       : undefined,
@@ -1247,8 +1267,8 @@ async function initSessionRouter(
   tokenEmitter.emit = (agentId: string, token: string) => {
     ctx.router?.emit("dispatch:agent:token", ctx.chatSession?.id ?? "", agentId, token);
   };
-  toolEmitter.emit = (agentId: string, toolName: string, status: string) => {
-    ctx.router?.emit("dispatch:agent:tool", ctx.chatSession?.id ?? "", agentId, toolName, status);
+  toolEmitter.emit = (agentId: string, toolName: string, status: string, details?: Record<string, unknown>) => {
+    ctx.router?.emit("dispatch:agent:tool", ctx.chatSession?.id ?? "", agentId, toolName, status, details);
   };
 
   // ── Wire CostTracker — real-time token/cost tracking ──────────
