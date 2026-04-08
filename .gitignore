@@ -39,6 +39,7 @@ static/
 
 # Runtime configs (keep example)
 teamclaw.config.json
+openpawl.config.json
 !teamclaw.config.example.json
 
 # External/standalone projects (not part of TeamClaw)
