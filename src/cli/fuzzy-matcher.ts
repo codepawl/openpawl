@@ -3,42 +3,14 @@
  */
 
 import levenshtein from "damerau-levenshtein";
+import { getAllCommandNames } from "./command-registry.js";
 
-/** All valid top-level openpawl commands. */
-export const COMMANDS = [
-    "setup",
-    "work",
-    "config",
-    "model",
-    "web",
-    "check",
-    "logs",
-    "demo",
-    "lessons",
-    "memory",
-    "profile",
-    "replay",
-    "audit",
-    "agent",
-    "forecast",
-    "heatmap",
-    "diff",
-    "uninstall",
-    "clean",
-    "run",
-    "onboard",
-    "think",
-    "handoff",
-    "score",
-    "journal",
-    "clarity",
-    "drift",
-    "update",
-    "standup",
-    "templates",
-    "cache",
-    "providers",
-] as const;
+/** All valid top-level openpawl commands (derived from registry + hidden commands). */
+export const COMMANDS: readonly string[] = [
+    ...getAllCommandNames(),
+    "onboard",       // hidden: internal daemon setup
+    "think-worker",  // hidden: internal async worker
+];
 
 /** Known subcommands keyed by parent command. */
 export const SUBCOMMANDS: Record<string, string[]> = {

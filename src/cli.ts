@@ -12,11 +12,11 @@
  */
 
 import { createRequire } from "node:module";
-import pc from "picocolors";
 import { intro, outro } from "@clack/prompts";
 import { logger } from "./core/logger.js";
 import { COMMANDS, findClosestCommand, findClosestSubcommand } from "./cli/fuzzy-matcher.js";
 import { handleUnknownCommand, handleUnknownSubcommand } from "./cli/unknown-command.js";
+import { findCommand, generateHelp, generateCommandHelp, getAllCommandNames } from "./cli/command-registry.js";
 
 function parseGoalArg(args: string[]): { goal?: string; rest: string[] } {
     let goal: string | undefined;
@@ -51,80 +51,7 @@ function parseGoalArg(args: string[]): { goal?: string; rest: string[] } {
 //   Pillar 4 — (auto, work): Web Dashboard auto-start
 
 function printHelp(): void {
-    const require = createRequire(import.meta.url);
-    const { version } = require("../package.json") as { version: string };
-
-    const section = (s: string) => pc.bold(pc.yellow(s));
-    const cmd = (c: string) => pc.green(c);
-    const desc = (d: string) => pc.dim(d);
-    const exCmd = (c: string) => pc.cyan(c);
-    const pad = (s: string, w = 15) => s + " ".repeat(Math.max(1, w - s.length));
-
-    const lines = [
-        "",
-        pc.bold(pc.cyan("OpenPawl")) + " — Your AI team for shipping goals" + "  " + pc.dim(`v${version}`),
-        "",
-        section("USAGE"),
-        "  openpawl <command> [options]",
-        "",
-        section("GETTING STARTED"),
-        "  " + cmd(pad("setup")) + desc("Configure OpenPawl for the first time"),
-        "  " + cmd(pad("check")) + desc("Verify your setup is working"),
-        "  " + cmd(pad("demo")) + desc("See OpenPawl in action (no API key needed)"),
-        "",
-        section("DAILY WORKFLOW"),
-        "  " + cmd(pad("work")) + desc("Start a sprint toward a goal"),
-        "  " + cmd(pad("standup")) + desc("See what was done, blocked, and next"),
-        "  " + cmd(pad("think")) + desc("Debate a question with your AI team"),
-        "  " + cmd(pad("clarity")) + desc("Check goal clarity before sprinting"),
-        "",
-        section("MEMORY & DECISIONS"),
-        "  " + cmd(pad("journal")) + desc("Search and manage architectural decisions"),
-        "  " + cmd(pad("drift")) + desc("Check if a goal conflicts with past decisions"),
-        "  " + cmd(pad("lessons")) + desc("Export what your team has learned"),
-        "  " + cmd(pad("handoff")) + desc("Generate CONTEXT.md handoff file"),
-        "",
-        section("TEAM & PROVIDERS"),
-        "  " + cmd(pad("templates")) + desc("Browse and install team templates"),
-        "  " + cmd(pad("model")) + desc("Manage AI models per agent"),
-        "  " + cmd(pad("providers")) + desc("Configure and test AI providers"),
-        "  " + cmd(pad("agent")) + desc("Add custom agents"),
-        "  " + cmd(pad("config")) + desc("Manage configuration"),
-        "",
-        section("HISTORY & ANALYSIS"),
-        "  " + cmd(pad("replay")) + desc("Replay past sessions"),
-        "  " + cmd(pad("audit")) + desc("Export decision logs"),
-        "  " + cmd(pad("heatmap")) + desc("Agent performance visualization"),
-        "  " + cmd(pad("forecast")) + desc("Estimate run cost before execution"),
-        "  " + cmd(pad("diff")) + desc("Compare runs"),
-        "  " + cmd(pad("score")) + desc("Your vibe coding collaboration score"),
-        "",
-        section("UTILITIES"),
-        "  " + cmd(pad("memory")) + desc("Global memory: health, promote, export"),
-        "  " + cmd(pad("cache")) + desc("Response cache management"),
-        "  " + cmd(pad("logs")) + desc("View session and gateway logs"),
-        "  " + cmd(pad("profile")) + desc("Agent performance profiles"),
-        "  " + cmd(pad("web")) + desc("Start web dashboard"),
-        "  " + cmd(pad("clean")) + desc("Remove session data"),
-        "  " + cmd(pad("update")) + desc("Self-update OpenPawl"),
-        "",
-        section("OPTIONS"),
-        "  " + cmd(pad("--help, -h")) + desc("Show this help"),
-        "  " + cmd(pad("--version")) + desc("Show version"),
-        "  " + cmd(pad("--no-web")) + desc("Disable dashboard"),
-        "  " + cmd(pad("--no-interactive")) + desc("Skip post-session menu"),
-        "  " + cmd(pad("--no-stream")) + desc("Hide streaming LLM output"),
-        "  " + cmd(pad("--mock-llm")) + desc("Use mock responses (testing)"),
-        "",
-        section("EXAMPLES"),
-        "  " + exCmd("openpawl setup") + "                          " + desc("Get started"),
-        "  " + exCmd('openpawl work --goal "Build a CLI"') + "      " + desc("Run with a goal"),
-        "  " + exCmd("openpawl check") + "                          " + desc("Verify setup"),
-        "",
-        desc("Run openpawl <command> --help for details on any command."),
-        "",
-    ];
-    console.log(lines.join("\n"));
+    console.log(generateHelp());
 }
 
 async function main(): Promise<void> {
@@ -206,8 +133,18 @@ async function main(): Promise<void> {
         process.exit(1);
     }
 
-    // Case-insensitive command resolution
-    const cmd = COMMANDS.find((c) => c === rawCmd.toLowerCase()) ?? rawCmd;
+    // Case-insensitive command resolution (use both old COMMANDS array and new registry)
+    const allNames = getAllCommandNames();
+    const cmd = allNames.find((c) => c === rawCmd.toLowerCase()) ?? COMMANDS.find((c) => c === rawCmd.toLowerCase()) ?? rawCmd;
+
+    // Per-command --help: openpawl <command> --help
+    if (args.includes("--help") || args.includes("-h")) {
+        const cmdDef = findCommand(cmd);
+        if (cmdDef) {
+            console.log(generateCommandHelp(cmdDef));
+            return;
+        }
+    }
 
     // -------------------------------------------------------------------------
     // Pillar 1: openpawl setup
