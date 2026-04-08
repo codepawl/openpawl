@@ -9,6 +9,7 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "outDir": "dist",
+    "types": ["bun-types"],
     "baseUrl": ".",
     "paths": {
       "@/*": [
