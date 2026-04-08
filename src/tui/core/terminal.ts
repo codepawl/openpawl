@@ -89,11 +89,10 @@ export class ProcessTerminal implements Terminal {
     process.stdout.write("\x1b[?1049h"); // enter alt screen
     process.stdout.write("\x1b[H");      // cursor to top-left
 
-    // Disable mouse reporting (prevent scroll wheel → arrow key translation)
-    process.stdout.write("\x1b[?1000l"); // disable basic mouse
-    process.stdout.write("\x1b[?1002l"); // disable button-event tracking
-    process.stdout.write("\x1b[?1003l"); // disable all-motion tracking
-    process.stdout.write("\x1b[?1006l"); // disable SGR extended mode
+    // Enable mouse tracking for scroll wheel + click/drag selection
+    process.stdout.write("\x1b[?1000h"); // button press/release tracking
+    process.stdout.write("\x1b[?1002h"); // button-event tracking (drag)
+    process.stdout.write("\x1b[?1006h"); // SGR extended mode (decimal coordinates)
 
     // Hide cursor and enable bracketed paste
     process.stdout.write("\x1b[?25l"); // hide cursor

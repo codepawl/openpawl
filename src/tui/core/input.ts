@@ -17,6 +17,9 @@ export type KeyEvent =
   | { type: "pagedown" }
   | { type: "scroll_up" }
   | { type: "scroll_down" }
+  | { type: "mouse_click"; button: "left" | "middle" | "right"; col: number; row: number }
+  | { type: "mouse_drag"; col: number; row: number }
+  | { type: "mouse_release"; col: number; row: number }
   | { type: "paste"; text: string }
   | { type: "resize"; columns: number; rows: number }
   | { type: "unknown"; raw: Buffer };
@@ -209,14 +212,31 @@ export class InputParser {
     const terminator = this.buffer[i]!;
     const paramStr = String.fromCharCode(...this.buffer.slice(2, i));
 
-    // SGR mouse sequences — consume and discard (mouse support removed)
+    // SGR mouse events: ESC[<button;col;rowM (press) or ESC[<button;col;rowm (release)
     if (paramStr.startsWith("<") && (terminator === 0x4d || terminator === 0x6d)) {
-      // Still parse scroll events — they're useful for keyboard-style navigation
       const parts = paramStr.slice(1).split(";");
       const button = parseInt(parts[0] ?? "", 10);
+      const col = parseInt(parts[1] ?? "1", 10);
+      const row = parseInt(parts[2] ?? "1", 10);
+      const pressed = terminator === 0x4d; // M = press, m = release
+
+      // Scroll: button 64 = up, 65 = down
       if (button === 64) { this.onEvent({ type: "scroll_up" }); return i + 1; }
       if (button === 65) { this.onEvent({ type: "scroll_down" }); return i + 1; }
-      return i + 1; // discard all other mouse events
+
+      // Release
+      if (!pressed) { this.onEvent({ type: "mouse_release", col, row }); return i + 1; }
+
+      // Drag (button 32-34 = left/middle/right + motion)
+      if (button >= 32 && button <= 34) {
+        this.onEvent({ type: "mouse_drag", col, row });
+        return i + 1;
+      }
+
+      // Click (button 0=left, 1=middle, 2=right)
+      const buttonMap: Record<number, "left" | "middle" | "right"> = { 0: "left", 1: "middle", 2: "right" };
+      this.onEvent({ type: "mouse_click", button: buttonMap[button] ?? "left", col, row });
+      return i + 1;
     }
 
     // Check for bracketed paste start: ESC[200~

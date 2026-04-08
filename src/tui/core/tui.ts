@@ -49,6 +49,16 @@ export class TUI {
   private editorRowStart = 0;  // first row of editor region (1-based)
   private editorRowEnd = 0;    // last row of editor region (1-based)
   private statusBarRow = 0;    // status bar row (1-based)
+
+  // Mouse state
+  private lastClickTime = 0;
+  private lastClickRow = 0;
+  private lastClickCol = 0;
+  private clickCount = 0;
+  private mouseDownPos: { row: number; col: number } | null = null;
+  private isDragging = false;
+  private autoScrollTimer: ReturnType<typeof setInterval> | null = null;
+
   // Key handler stack — interactive views push handlers that take priority
   private keyHandlerStack: { handleKey: (event: KeyEvent) => boolean }[] = [];
 
@@ -513,6 +523,12 @@ export class TUI {
   // ── Input ───────────────────────────────────────────────
 
   private handleEvent(event: KeyEvent): void {
+    // Mouse events — separate path
+    if (event.type === "mouse_click" || event.type === "mouse_drag" || event.type === "mouse_release") {
+      this.handleMouse(event);
+      return;
+    }
+
     if (event.type === "scroll_up" || event.type === "scroll_down") {
       if (this.scrollableComponent) {
         if (event.type === "scroll_up") this.scrollUp(3);
@@ -750,6 +766,107 @@ export class TUI {
       }
       return result;
     });
+  }
+
+  // ── Mouse handling ─────────────────────────────────────
+
+  private handleMouse(event: KeyEvent): void {
+    if (event.type === "mouse_click" && "button" in event) {
+      if (event.button !== "left") return;
+
+      // Multi-click detection
+      const now = Date.now();
+      const samePos = event.row === this.lastClickRow && Math.abs(event.col - this.lastClickCol) <= 1;
+      this.clickCount = (samePos && now - this.lastClickTime < 400) ? this.clickCount + 1 : 1;
+      this.lastClickTime = now;
+      this.lastClickRow = event.row;
+      this.lastClickCol = event.col;
+
+      const region = this.getRegionType(event.row);
+      this.selectionManager.clearSelection();
+
+      if (region === "content" && event.row < this.editorRowStart) {
+        // Messages region
+        if (this.clickCount === 1) {
+          this.mouseDownPos = { row: event.row, col: event.col };
+          this.isDragging = false;
+        } else if (this.clickCount === 2) {
+          this.mouseDownPos = null;
+          this.selectionManager.selectWordAt(event.row, event.col, this.lastScreenLines);
+        } else if (this.clickCount >= 3) {
+          this.mouseDownPos = null;
+          this.selectionManager.selectLine(event.row, this.lastScreenLines);
+        }
+      } else if (region === "content" && event.row >= this.editorRowStart && event.row <= this.editorRowEnd) {
+        // Editor region — position cursor
+        const editor = this.focusedComponent as Component & { setCursorFromClick?: (col: number) => void };
+        editor.setCursorFromClick?.(event.col);
+      }
+
+      this.requestRender();
+      return;
+    }
+
+    if (event.type === "mouse_drag" && "col" in event) {
+      // Lazy drag: start selection on first move from mousedown position
+      if (this.mouseDownPos && !this.isDragging) {
+        const moved = event.row !== this.mouseDownPos.row || event.col !== this.mouseDownPos.col;
+        if (moved) {
+          this.isDragging = true;
+          this.selectionManager.startSelection(this.mouseDownPos.row, this.mouseDownPos.col);
+        }
+      }
+      if (this.isDragging && this.selectionManager.isSelecting()) {
+        // Clamp drag to messages area
+        const row = Math.min(event.row, this.contentRowEnd);
+        this.selectionManager.updateSelection(row, event.col);
+
+        // Auto-scroll when dragging near edges
+        if (event.row <= 1) {
+          this.startAutoScroll("up");
+        } else if (event.row >= this.terminal.rows - this.getFixedHeight()) {
+          this.startAutoScroll("down");
+        } else {
+          this.stopAutoScroll();
+        }
+
+        this.requestRender();
+      }
+      return;
+    }
+
+    if (event.type === "mouse_release") {
+      this.stopAutoScroll();
+      if (this.isDragging && this.selectionManager.isSelecting()) {
+        this.selectionManager.endSelection();
+        // Copy selection to clipboard
+        const text = this.selectionManager.getSelectedText(this.lastFullContentLines);
+        if (text) {
+          void this.copyManager.copyToClipboard(text);
+          this.onFlashMessage?.("Copied!");
+        }
+      }
+      this.mouseDownPos = null;
+      this.isDragging = false;
+      this.requestRender();
+      return;
+    }
+  }
+
+  private startAutoScroll(direction: "up" | "down"): void {
+    if (this.autoScrollTimer) return;
+    this.autoScrollTimer = setInterval(() => {
+      if (direction === "up") this.scrollUp(2);
+      else this.scrollDown(2);
+      this.requestRender();
+    }, 80);
+  }
+
+  private stopAutoScroll(): void {
+    if (this.autoScrollTimer) {
+      clearInterval(this.autoScrollTimer);
+      this.autoScrollTimer = null;
+    }
   }
 
   private getFixedHeight(): number {
