@@ -126,10 +126,13 @@ function wireRouterEvents(
       layout.tui.requestRender();
     });
 
-    // Show thinking indicator — no agent label yet (avoids duplicate)
-    thinking.start(); // no agent name — just "◐ thinking..."
+    // Add agent message immediately (badge visible from the start)
+    // Thinking indicator text becomes the message content — renders inside tree
+    thinking.start();
     layout.messages.addMessage({
-      role: "system",
+      role: "agent",
+      agentName: agentDisplayName(agentId),
+      agentColor: getAgentColorFn(agentId),
       content: thinking.getCurrentText(),
       timestamp: new Date(),
     });
@@ -140,18 +143,12 @@ function wireRouterEvents(
   };
 
   const onAgentToken = (_sessionId: string, agentId: string, token: string) => {
-    // Stop thinking indicator on first token — replace with agent message
+    // Stop thinking indicator on first token — clear thinking text from agent message
     if (thinking.isVisible()) {
       thinking.stop();
       thinkingMsgAdded = false;
-      // Replace thinking message with the real agent message (with label)
-      layout.messages.replaceLastWith({
-        role: "agent",
-        agentName: agentDisplayName(agentId),
-        agentColor: getAgentColorFn(agentId),
-        content: "",
-        timestamp: new Date(),
-      });
+      // Clear the thinking text — streaming content will replace it
+      layout.messages.replaceLast("");
       layout.statusBar.updateSegment(3, `${agentDisplayName(agentId)} working...`, ctp.teal);
     }
     if (streamingForAgent !== agentId) {
