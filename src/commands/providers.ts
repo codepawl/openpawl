@@ -8,11 +8,12 @@ import {
   cancel,
 } from "@clack/prompts";
 import {
-  PROVIDER_CATALOG,
   getProvidersByCategory,
   getGroupVariants,
+  getProviderMeta,
   type ProviderMeta,
 } from "../providers/provider-catalog.js";
+import { getProviderRegistry } from "../providers/provider-registry.js";
 import { searchableSelect, clampSelectOptions } from "../utils/searchable-select.js";
 import {
   readGlobalConfig,
@@ -154,7 +155,7 @@ export async function addProvider(args: string[]): Promise<void> {
   const directId = args[0];
   let selectedId: string;
 
-  if (directId && PROVIDER_CATALOG[directId]) {
+  if (directId && getProviderRegistry().getDefinition(directId)) {
     selectedId = directId;
   } else {
     const categories = [
@@ -184,7 +185,7 @@ export async function addProvider(args: string[]): Promise<void> {
     ) as string;
   }
 
-  let meta = PROVIDER_CATALOG[selectedId]!;
+  let meta = getProviderMeta(selectedId)!;
 
   // If the selected provider is a group parent, show sub-selection for variants
   if (meta.group && meta.group === selectedId) {
@@ -197,7 +198,7 @@ export async function addProvider(args: string[]): Promise<void> {
         }),
       ) as string;
       selectedId = variantChoice;
-      meta = PROVIDER_CATALOG[selectedId]!;
+      meta = getProviderMeta(selectedId)!;
     }
   }
 

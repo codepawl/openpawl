@@ -73,7 +73,7 @@ export function deserialize(raw: string): Result<SessionState, SessionError> {
 
   // Apply defaults for optional fields that may be missing (backward compat)
   const defaults: Partial<SessionState> = {
-    title: "New session",
+    title: "Untitled session",
     updatedAt: state.createdAt as string,
     status: "active",
     messageCount: (state.messages as unknown[]).length,

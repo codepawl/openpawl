@@ -17,6 +17,7 @@ import type { SprintRunner } from "../../sprint/sprint-runner.js";
 import type { SprintTask, SprintResult, SprintState } from "../../sprint/types.js";
 import { createSprintRunner } from "../../sprint/create-sprint-runner.js";
 import { renderPanel, panelSection } from "../../tui/components/panel.js";
+import { ctp } from "../../tui/themes/default.js";
 
 export interface SprintCommandDeps {
   agents: AgentRegistry;
@@ -207,12 +208,24 @@ export function createSprintCommand(deps: SprintCommandDeps): SlashCommand {
         ctx.requestRender();
       });
 
+      runner.on("sprint:planning", () => {
+        layout.messages.addMessage({
+          role: "agent",
+          agentName: agentDisplayName("planner"),
+          content: "Analyzing goal and generating task plan...",
+          timestamp: new Date(),
+        });
+        layout.statusBar.updateSegment(3, "Planning sprint...", ctp.teal);
+        ctx.requestRender();
+      });
+
       runner.on("sprint:plan", ({ tasks }: { tasks: SprintTask[] }) => {
         const lines = [
           ...panelSection("Task Plan"),
           formatTaskList(tasks),
         ];
         ctx.addMessage("system", renderPanel(sprintPanelOpts(`Sprint \u2014 ${tasks.length} tasks`), lines).join("\n"));
+        layout.statusBar.updateSegment(3, "Executing tasks...", ctp.teal);
         ctx.requestRender();
       });
 
@@ -255,6 +268,7 @@ export function createSprintCommand(deps: SprintCommandDeps): SlashCommand {
 
       runner.on("sprint:done", ({ result }: { result: SprintResult }) => {
         ctx.addMessage("system", buildSummaryPanel(result));
+        layout.statusBar.updateSegment(3, "idle", ctp.overlay0);
         ctx.requestRender();
       });
 

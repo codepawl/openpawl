@@ -61,6 +61,7 @@ export interface SprintEventMap {
   "sprint:done": { result: SprintResult };
   "sprint:error": { error: Error; task?: SprintTask };
   "sprint:warning": { warning: string; type: string; taskIndex?: number };
+  "sprint:planning": undefined;
   "sprint:paused": undefined;
   "sprint:resumed": undefined;
 }

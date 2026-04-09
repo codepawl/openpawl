@@ -46,7 +46,6 @@ interface DashboardState {
     webhookOnCycleEnd: string;
     webhookSecret: string;
     // Project settings
-    workspaceDir: string;
     projectName: string;
     goal: string;
     teamMode: TeamMode;
@@ -123,9 +122,6 @@ async function loadDashboardState(): Promise<DashboardState> {
             : "") ||
         (typeof data.webhook_secret === "string" ? data.webhook_secret : "");
 
-    const workspaceDir =
-        (typeof globalCfg.workspaceDir === "string" ? globalCfg.workspaceDir : "") ||
-        (typeof data.workspace_dir === "string" ? data.workspace_dir : "");
     const projectName = typeof data.project_name === "string" ? data.project_name : "";
     const goal = typeof data.goal === "string" ? data.goal : "";
     const teamModeRaw = data.team_mode ?? parsed?.team_mode;
@@ -146,7 +142,6 @@ async function loadDashboardState(): Promise<DashboardState> {
         webhookOnTaskComplete,
         webhookOnCycleEnd,
         webhookSecret,
-        workspaceDir,
         projectName,
         goal,
         teamMode,
@@ -432,11 +427,6 @@ async function projectMenu(state: DashboardState): Promise<void> {
                 message: "Project Settings",
                 options: clampSelectOptions([
                     {
-                        value: "workspace",
-                        label: `Workspace Directory`,
-                        hint: state.workspaceDir || "not set",
-                    },
-                    {
                         value: "project",
                         label: `Project Name`,
                         hint: state.projectName || "not set",
@@ -459,21 +449,10 @@ async function projectMenu(state: DashboardState): Promise<void> {
                     { value: "back", label: "Back to Main Menu" },
                 ]),
             }),
-        ) as "workspace" | "project" | "goal" | "teammode" | "template" | "back";
+        ) as "project" | "goal" | "teammode" | "template" | "back";
 
         if (choice === "back") {
             back = true;
-            continue;
-        }
-        if (choice === "workspace") {
-            const raw = handleCancel(
-                await text({
-                    message: "Workspace directory (absolute path)",
-                    initialValue: state.workspaceDir,
-                    placeholder: "~/openpawl-workspace",
-                }),
-            ) as string;
-            state.workspaceDir = raw.trim() || state.workspaceDir;
             continue;
         }
         if (choice === "project") {
@@ -586,7 +565,6 @@ function saveState(state: DashboardState): void {
         ...globalCfg,
         model: state.model,
         dashboardPort: state.webPort,
-        workspaceDir: state.workspaceDir || globalCfg.workspaceDir,
         streaming: { enabled: state.streamingEnabled, showThinking: globalCfg.streaming?.showThinking ?? false },
         ...({
             webhookOnTaskComplete: state.webhookOnTaskComplete || undefined,
@@ -610,7 +588,6 @@ function saveState(state: DashboardState): void {
         max_cycles: state.maxCycles,
         project_name: state.projectName || undefined,
         goal: state.goal || undefined,
-        workspace_dir: state.workspaceDir || undefined,
         team_mode: state.teamMode,
         template: state.templateId || undefined,
     } as Record<string, unknown>;

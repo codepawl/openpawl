@@ -22,7 +22,6 @@ import { logger } from "../../core/logger.js";
 
 export interface WizardState {
     providerEntries: ProviderConfigEntry[];
-    workspaceDir: string;
     projectName: string;
     selectedModel: string;
     goal: string;

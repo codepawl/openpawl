@@ -71,6 +71,19 @@ export function getProjectContext(projectDir: string): string {
     }
   }
 
+  // Read workspace rules (.openpawl/rules.md)
+  const rulesPath = join(projectDir, ".openpawl", "rules.md");
+  if (existsSync(rulesPath)) {
+    try {
+      const rules = readFileSync(rulesPath, "utf-8").trim();
+      // Skip if only the template comments remain
+      const meaningful = rules.split("\n").filter((l) => !l.startsWith("#") && l.trim()).join("\n").trim();
+      if (meaningful) {
+        parts.push(`## Workspace Rules (from .openpawl/rules.md)\n\n${rules.slice(0, MAX_CONTEXT_CHARS)}`);
+      }
+    } catch { /* ignore read errors */ }
+  }
+
   if (parts.length === 0) {
     cachedContext = "";
     cachedDir = projectDir;

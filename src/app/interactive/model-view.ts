@@ -5,6 +5,7 @@
 import type { KeyEvent } from "../../tui/core/input.js";
 import type { TUI } from "../../tui/core/tui.js";
 import { InteractiveView } from "./base-view.js";
+import { SettingsView } from "./settings-view.js";
 import { discoverModels, getCurrentModel, type DiscoveredModel, type ProviderStatus } from "../../providers/model-discovery.js";
 import { ctp } from "../../tui/themes/default.js";
 
@@ -12,6 +13,7 @@ interface ModelItem {
   model: DiscoveredModel;
   selectable: boolean;
 }
+
 
 export class ModelView extends InteractiveView {
   private currentModel: string;
@@ -33,11 +35,11 @@ export class ModelView extends InteractiveView {
     void this.loadModels();
   }
 
-  private async loadModels(): Promise<void> {
+  private async loadModels(forceRefresh = false): Promise<void> {
     this.loading = true;
     this.render();
 
-    const result = await discoverModels();
+    const result = await discoverModels(forceRefresh);
     this.providerStatuses = result.providers;
     this.items = result.models
       .filter((m) => m.status === "available" || m.status === "configured")
@@ -58,9 +60,24 @@ export class ModelView extends InteractiveView {
     return this.items.filter((item) => this.matchesFilter(item.model.displayName || item.model.model));
   }
 
-  protected getItemCount(): number { return this.getFilteredItems().length; }
+  // +1 for the "Add provider..." action at the bottom
+  protected getItemCount(): number { return this.getFilteredItems().length + 1; }
+
+  private isAddProviderSelected(): boolean {
+    return this.selectedIndex === this.getFilteredItems().length;
+  }
+
+  private openProviderSettings(): void {
+    this.deactivate();
+    const view = new SettingsView(this.tui, () => { /* closed */ });
+    view.activate();
+  }
 
   private selectAndClose(): void {
+    if (this.isAddProviderSelected()) {
+      this.openProviderSettings();
+      return;
+    }
     const filtered = this.getFilteredItems();
     const item = filtered[this.selectedIndex];
     if (item?.selectable) {
@@ -74,11 +91,15 @@ export class ModelView extends InteractiveView {
       this.selectAndClose();
       return true;
     }
+    if (event.type === "char" && event.char === "r" && !this.loading) {
+      void this.loadModels(true);
+      return true;
+    }
     return true;
   }
 
   protected override getPanelTitle(): string { return "\u26a1 Models"; }
-  protected override getPanelFooter(): string { return "\u2191\u2193 navigate \u00b7 Enter select \u00b7 Type to filter \u00b7 Esc close"; }
+  protected override getPanelFooter(): string { return "\u2191\u2193 navigate \u00b7 Enter select \u00b7 r refresh \u00b7 Type to filter \u00b7 Esc close"; }
 
   protected renderLines(): string[] {
     const t = this.theme;
@@ -92,7 +113,13 @@ export class ModelView extends InteractiveView {
 
     if (this.items.length === 0) {
       lines.push(`    ${ctp.overlay1("No models available.")}`);
-      lines.push(`    ${ctp.overlay0("Run /settings to configure a provider.")}`);
+      lines.push("");
+      const addSelected = this.isAddProviderSelected();
+      const addCursor = addSelected ? ctp.mauve("\u25b8 ") : "  ";
+      const addLabel = addSelected
+        ? this.theme.bold(ctp.overlay1("+ Add provider..."))
+        : ctp.overlay0("+ Add provider...");
+      lines.push(`      ${addCursor}${addLabel}`);
       lines.push("");
       return lines;
     }
@@ -155,6 +182,15 @@ export class ModelView extends InteractiveView {
         lines.push(`      ${ctp.surface2("\u25cb")} ${ctp.overlay0(p.name)}  ${ctp.overlay0("/settings to add")}`);
       }
     }
+
+    // "Add provider..." action item
+    lines.push("");
+    const addSelected = this.isAddProviderSelected();
+    const addCursor = addSelected ? ctp.mauve("\u25b8 ") : "  ";
+    const addLabel = addSelected
+      ? this.theme.bold(ctp.overlay1("+ Add provider..."))
+      : ctp.overlay0("+ Add provider...");
+    lines.push(`      ${addCursor}${addLabel}`);
 
     lines.push("");
     lines.push(ctp.overlay0("    /model <name> for any model \u00b7 /settings to add providers"));

@@ -111,6 +111,7 @@ export interface OpenPawlGlobalConfig {
     showThinking: boolean;
   };
   providers?: ProviderConfigEntry[];
+  /** @deprecated Use .openpawl/ in cwd instead. Kept for backwards compatibility. */
   workspaceDir?: string;
   proxy?: {
     path?: string;
@@ -421,7 +422,44 @@ export function normalizeGlobalConfig(input: Partial<OpenPawlGlobalConfig>): Ope
   };
 }
 
-export function readGlobalConfig(): OpenPawlGlobalConfig | null {
+// ─── Workspace config overlay ────────────────────────────────────────────────
+// When set, workspace config is deep-merged on top of global config.
+// All existing callsites of readGlobalConfig() automatically get merged results.
+
+let workspaceOverlay: Partial<OpenPawlGlobalConfig> | null = null;
+
+/**
+ * Set workspace config overlay. When non-null, readGlobalConfig() returns
+ * the deep-merged result (workspace wins on conflicts).
+ */
+export function setWorkspaceOverlay(overlay: Partial<OpenPawlGlobalConfig> | null): void {
+  workspaceOverlay = overlay;
+}
+
+/** Shallow-merge two objects, recursing into nested plain objects. */
+function deepMergeConfig<T extends Record<string, unknown>>(base: T, overlay: Partial<T>): T {
+  const result = { ...base };
+  for (const key of Object.keys(overlay) as Array<keyof T>) {
+    const bVal = base[key];
+    const oVal = overlay[key];
+    if (oVal === undefined) continue;
+    if (
+      bVal && oVal &&
+      typeof bVal === "object" && typeof oVal === "object" &&
+      !Array.isArray(bVal) && !Array.isArray(oVal)
+    ) {
+      result[key] = deepMergeConfig(
+        bVal as Record<string, unknown>,
+        oVal as Record<string, unknown>,
+      ) as T[keyof T];
+    } else {
+      result[key] = oVal as T[keyof T];
+    }
+  }
+  return result;
+}
+
+function readGlobalConfigRaw(): OpenPawlGlobalConfig | null {
   const configPath = getGlobalConfigPath();
   if (!existsSync(configPath)) return null;
   try {
@@ -431,6 +469,15 @@ export function readGlobalConfig(): OpenPawlGlobalConfig | null {
   } catch {
     return null;
   }
+}
+
+export function readGlobalConfig(): OpenPawlGlobalConfig | null {
+  const base = readGlobalConfigRaw();
+  if (!workspaceOverlay) return base;
+  if (!base) return normalizeGlobalConfig(workspaceOverlay);
+  return normalizeGlobalConfig(
+    deepMergeConfig(base as unknown as Record<string, unknown>, workspaceOverlay as unknown as Record<string, unknown>) as Partial<OpenPawlGlobalConfig>,
+  );
 }
 
 export function readGlobalConfigWithDefaults(): OpenPawlGlobalConfig {

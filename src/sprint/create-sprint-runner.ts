@@ -61,6 +61,7 @@ export function createSprintRunner(opts: CreateSprintRunnerOptions): SprintRunne
           const inputSummary = `${name}(${JSON.stringify(args).slice(0, 100)})`;
           const startTime = Date.now();
 
+          this.recordToolCall(name);
           this.emit("sprint:agent:tool", {
             agentName,
             toolName: name,

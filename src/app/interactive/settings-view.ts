@@ -6,6 +6,7 @@
 import type { KeyEvent } from "../../tui/core/input.js";
 import type { TUI } from "../../tui/core/tui.js";
 import { InteractiveView } from "./base-view.js";
+import { getProviderRegistry } from "../../providers/provider-registry.js";
 
 interface SettingField {
   key: string;
@@ -17,7 +18,7 @@ interface SettingField {
 }
 
 const FIELDS: SettingField[] = [
-  { key: "provider", label: "provider", description: "LLM provider", type: "select", options: ["ollama", "chatgpt", "github-copilot", "anthropic", "openai", "groq", "deepseek", "openrouter", "gemini", "grok", "mistral", "together", "fireworks", "cerebras", "perplexity", "lmstudio"] },
+  { key: "provider", label: "provider", description: "LLM provider", type: "select", options: [] /* populated at runtime from ProviderRegistry */ },
   { key: "model", label: "model", description: "Active model", type: "select", options: [] },
   { key: "apikey", label: "apikey", description: "API key", type: "password" },
   { key: "mode", label: "mode", description: "Default execution mode", type: "select", options: ["auto", "ask", "build", "brainstorm", "loop-hell"] },
@@ -48,6 +49,11 @@ export class SettingsView extends InteractiveView {
   }
 
   override activate(): void {
+    // Populate provider options from registry on first activation
+    const providerField = FIELDS.find((f) => f.key === "provider");
+    if (providerField && providerField.options!.length === 0) {
+      providerField.options = getProviderRegistry().getAll().map((d) => d.id);
+    }
     this.loadValues();
     super.activate();
   }
@@ -108,21 +114,39 @@ export class SettingsView extends InteractiveView {
   }
 
   private async loadAndEditModels(field: SettingField): Promise<void> {
+    const selectedProvider = this.values.get("provider") ?? "";
     this.editError = "Loading models...";
     this.render();
 
     try {
       const { discoverModels } = await import("../../providers/model-discovery.js");
       const result = await discoverModels(true); // force refresh
-      const available = result.models.filter((m) => m.status === "available" || m.status === "configured");
+
+      // Filter to selected provider only
+      let available = result.models.filter(
+        (m) => (m.status === "available" || m.status === "configured") &&
+               (!selectedProvider || m.provider === selectedProvider),
+      );
+
+      // Fallback: show default models from registry if live discovery found nothing
+      if (available.length === 0 && selectedProvider) {
+        const defaults = getProviderRegistry().getDefinition(selectedProvider)?.defaultModels ?? [];
+        available = defaults.map((id) => ({
+          provider: selectedProvider,
+          model: id,
+          displayName: id,
+          status: "configured" as const,
+        }));
+      }
 
       if (available.length === 0) {
-        this.editError = "No models found. Is your provider running?";
+        this.editError = selectedProvider
+          ? `No models found for ${selectedProvider}. Is it running?`
+          : "No models found. Is your provider running?";
         this.render();
         return;
       }
 
-      // Set options dynamically from discovered models
       field.options = available.map((m) => m.model);
       this.editing = true;
       this.editError = null;
@@ -293,6 +317,8 @@ export class SettingsView extends InteractiveView {
     } catch {
       // Config unavailable
     }
+    // Re-render now that async values are loaded
+    this.render();
   }
 
   private getRawValue(key: string): string {
@@ -315,14 +341,14 @@ export class SettingsView extends InteractiveView {
       if ("error" in result) return;
       this.values.set(key, value);
 
-      // Auto-suggest default model when provider changes
+      // Reset model when provider changes — old model is invalid for new provider
       if (key === "provider" && value) {
-        const currentModel = this.values.get("model") ?? "";
-        const defaultModel = DEFAULT_MODELS[value];
-        if (defaultModel && !currentModel) {
+        const defaultModel = DEFAULT_MODELS[value] ?? "";
+        this.values.set("model", defaultModel);
+        if (defaultModel) {
           const modelResult = setConfigValue("model", defaultModel);
-          if (!("error" in modelResult)) {
-            this.values.set("model", defaultModel);
+          if ("error" in modelResult) {
+            this.values.set("model", "");
           }
         }
       }
@@ -351,6 +377,9 @@ export class SettingsView extends InteractiveView {
         } catch {
           this.connectionStatus.set(key, "fail");
         }
+        // Sync registry so model picker and status bar update
+        getProviderRegistry().refreshModels(this.values.get("provider") ?? "").catch(() => {});
+
         this.render();
       }
     } catch {

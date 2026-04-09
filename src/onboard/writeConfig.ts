@@ -15,7 +15,6 @@ export interface PersistConfig {
   roster: RosterEntry[];
   workers?: Record<string, string>;
   goal: string;
-  workspaceDir?: string;
   templateId?: string;
   projectName?: string;
   teamMode?: "manual" | "autonomous";
@@ -32,7 +31,7 @@ export function writeConfig(cfg: PersistConfig): void {
     config.workers = cfg.workers;
   }
   if (cfg.goal) config.goal = cfg.goal;
-  if (cfg.authToken) config.token = cfg.authToken;   if (cfg.workspaceDir) config.workspace_dir = cfg.workspaceDir;
+  if (cfg.authToken) config.token = cfg.authToken;
   if (cfg.templateId) config.template = cfg.templateId;
   if (cfg.projectName) config.project_name = cfg.projectName;
   if (cfg.teamMode) config.team_mode = cfg.teamMode;

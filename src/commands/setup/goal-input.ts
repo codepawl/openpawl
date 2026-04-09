@@ -353,7 +353,7 @@ export async function stepGoal(state: WizardState): Promise<void> {
     ) as string;
 
     if (method === "file") {
-        const resolved = await pickGoalFile(state.workspaceDir, state.projectName);
+        const resolved = await pickGoalFile(process.cwd(), state.projectName);
         if (resolved === null) {
             state.goal = await promptGoalText(defaultGoal);
             return;

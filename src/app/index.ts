@@ -632,6 +632,14 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
         // Check TUI registry first (has /help, /status, /settings, etc.)
         const result = registry.lookup(`/${parsed.name} ${parsed.args}`);
         if (result) {
+          // Auto-name session from sprint goal
+          if (parsed.name === "sprint" && parsed.args.trim() && ctx.chatSession) {
+            const title = ctx.chatSession.getState().title;
+            if (title === "Untitled session" || title === "New session") {
+              const { generateSessionName } = await import("../session/session-name.js");
+              ctx.chatSession.setTitle(generateSessionName(parsed.args));
+            }
+          }
           await result.command.execute(result.args, msgCtx);
         } else if (ctx.router && ctx.chatSession) {
           // Fall through to PromptRouter for its slash commands (/agents, /compact, etc.)
@@ -728,9 +736,10 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
         }
 
         // Auto-name session from first user message
-        if (ctx.chatSession?.getState().title === "New session") {
-          const name = text.replace(/\s+/g, " ").trim().slice(0, 60);
-          if (name) ctx.chatSession.setTitle(name);
+        if (ctx.chatSession?.getState().title === "Untitled session" || ctx.chatSession?.getState().title === "New session") {
+          const { generateSessionName } = await import("../session/session-name.js");
+          const name = generateSessionName(text);
+          if (name !== "Untitled session") ctx.chatSession.setTitle(name);
         }
 
         // Guard: don't attempt LLM calls when no provider is configured
@@ -947,6 +956,33 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
       layout.statusBar.updateSegment(1, "\u25cb disconnected", ctp.red);
     }
   }
+  // ── Provider registry: background refresh + status bar sync ──────────
+  {
+    const { getProviderRegistry } = await import("../providers/provider-registry.js");
+    const providerRegistry = getProviderRegistry();
+
+    // Non-blocking background discovery (populates model lists, checks health)
+    providerRegistry.refreshAll().catch(() => {});
+
+    // When registry state changes (provider save, refresh, wizard), re-sync status bar
+    providerRegistry.on("models:refreshed", async () => {
+      try {
+        const { resetGlobalProviderManager } = await import("../providers/provider-factory.js");
+        resetGlobalProviderManager();
+        const newState = await detectConfig();
+        ctx.configState = newState;
+        if (newState.hasProvider) {
+          layout.statusBar.updateSegment(0, newState.providerName, ctp.subtext1);
+          layout.statusBar.updateSegment(1,
+            newState.isConnected ? "\u25cf connected" : "\u25cb disconnected",
+            newState.isConnected ? ctp.green : ctp.red,
+          );
+        }
+        layout.tui.requestRender();
+      } catch { /* swallow — status bar stays as-is */ }
+    });
+  }
+
   if (!configState.hasProvider) {
     // Hide chat UI during first-run setup — only wizard + status bar visible
     layout.editor.hidden = true;
@@ -981,6 +1017,10 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
           layout.statusBar.updateSegment(1, "\u25cb disconnected", ctp.red);
         }
       }
+
+      // Refresh provider registry so model lists and state sync
+      const { getProviderRegistry } = await import("../providers/provider-registry.js");
+      getProviderRegistry().refreshAll().catch(() => {});
 
       // Re-initialize session router so TUI can talk to the LLM
       await initSessionRouter(ctx, opts, layout, registry).catch(() => {});

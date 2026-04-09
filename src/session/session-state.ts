@@ -156,7 +156,7 @@ export function createEmptySession(workingDirectory: string): SessionState {
   const now = new Date().toISOString();
   return {
     id: shortId(12),
-    title: "New session",
+    title: "Untitled session",
     createdAt: now,
     updatedAt: now,
     status: "active",

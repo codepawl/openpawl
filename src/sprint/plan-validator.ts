@@ -6,7 +6,7 @@
 import type { SprintTask } from "./types.js";
 
 export interface PlanWarning {
-  type: "dependency_order" | "over_engineering" | "missing_setup" | "missing_test" | "assumed_library";
+  type: "dependency_order" | "over_engineering" | "missing_setup" | "missing_test" | "assumed_library" | "goal_coverage";
   message: string;
   taskIndex?: number;
 }
@@ -118,7 +118,45 @@ export function validatePlan(tasks: SprintTask[], goal: string): PlanWarning[] {
     }
   }
 
+  // 6. Goal coverage — check if tasks actually address what the user asked for
+  const domainKeywords = extractDomainKeywords(goal);
+  if (domainKeywords.length > 0) {
+    const featureTasks = tasks.filter((t, i) => {
+      const d = t.description.toLowerCase();
+      // Exclude setup (first) and test (last) tasks from this check
+      if (i === 0 && SETUP_KEYWORDS.some(kw => d.includes(kw))) return false;
+      if (TEST_KEYWORDS.some(kw => d.includes(kw))) return false;
+      return true;
+    });
+    const goalRelevant = featureTasks.filter(t =>
+      domainKeywords.some(kw => t.description.toLowerCase().includes(kw)),
+    );
+    if (featureTasks.length > 0 && goalRelevant.length === 0) {
+      warnings.push({
+        type: "goal_coverage",
+        message: `No tasks reference the goal's domain (${domainKeywords.slice(0, 5).join(", ")}). Plan may be generic boilerplate.`,
+      });
+    }
+  }
+
   return warnings;
+}
+
+/** Common programming terms to exclude from domain keyword extraction. */
+const GENERIC_TERMS = new Set([
+  "build", "create", "make", "app", "application", "website", "web", "site",
+  "project", "system", "platform", "tool", "service", "api", "server", "client",
+  "frontend", "backend", "database", "the", "a", "an", "with", "for", "and", "or",
+  "using", "from", "that", "this", "simple", "basic", "full", "stack", "modern",
+]);
+
+/** Extract domain-specific keywords from the goal (nouns that aren't common programming terms). */
+function extractDomainKeywords(goal: string): string[] {
+  return goal
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter(w => w.length > 2 && !GENERIC_TERMS.has(w));
 }
 
 /**

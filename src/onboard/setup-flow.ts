@@ -4,7 +4,8 @@ import { detectProviders, type DetectedProvider } from "../providers/detect.js";
 import { validateApiKey } from "../providers/validate.js";
 import { fetchModelsForProvider } from "../providers/model-fetcher.js";
 import { getCachedModels, setCachedModels } from "../providers/model-cache.js";
-import { PROVIDER_CATALOG, getProviderMeta } from "../providers/provider-catalog.js";
+import { getProviderMeta } from "../providers/provider-catalog.js";
+import { getProviderRegistry } from "../providers/provider-registry.js";
 import { maskCredential } from "../credentials/masking.js";
 import { CredentialStore } from "../credentials/credential-store.js";
 import {
@@ -53,11 +54,13 @@ function buildProviderOptions(
     options.push({ value: d.type, label: meta.menuLabel || meta.name, hint });
   }
 
-  for (const [id, meta] of Object.entries(PROVIDER_CATALOG)) {
-    if (added.has(id) || meta.group) continue;
-    added.add(id);
-    const hint = id === currentProvider ? "current" : undefined;
-    options.push({ value: id, label: meta.menuLabel || meta.name, hint });
+  for (const def of getProviderRegistry().getAll()) {
+    if (added.has(def.id)) continue;
+    const meta = getProviderMeta(def.id);
+    if (!meta || meta.group) continue;
+    added.add(def.id);
+    const hint = def.id === currentProvider ? "current" : undefined;
+    options.push({ value: def.id, label: meta.menuLabel || meta.name, hint });
   }
 
   return options;

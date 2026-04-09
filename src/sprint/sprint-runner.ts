@@ -11,26 +11,29 @@ import { validatePlan, reorderSetupFirst } from "./plan-validator.js";
 import { resolveModelForAgent } from "../core/model-config.js";
 
 const PLANNER_PROMPT = (goal: string, maxTasks: number) =>
-  `Break this goal into concrete, actionable tasks (max ${maxTasks}). ` +
-  `Each task should be a single unit of work that one developer could complete.\n\n` +
+  `You are planning a sprint to accomplish this goal: "${goal}"\n\n` +
+  `STEP 1 — GOAL ANALYSIS:\n` +
+  `Before generating tasks, identify the 3-5 core feature areas the goal requires.\n` +
+  `Example: "coffee shop website" → menu display, product pages, shopping cart, order checkout, admin dashboard.\n` +
+  `Example: "todo app" → task list view, add/edit/delete tasks, filters/search, persistence.\n` +
+  `Think about what a USER of this product would actually use.\n\n` +
+  `STEP 2 — TASK ALLOCATION (max ${maxTasks} tasks):\n` +
+  `Distribute tasks across the feature areas you identified:\n` +
+  `- Task 1: ALWAYS project setup (init project, install deps, create config)\n` +
+  `- Tasks 2–${Math.max(3, maxTasks - 1)}: Core features from your goal analysis. ` +
+  `Most tasks (60-80%) should directly implement what the user asked for. ` +
+  `Do NOT fill the plan with generic auth/login/CRUD — only include auth if the goal requires it.\n` +
+  `- Last task: ALWAYS testing (write and run tests to verify the build)\n` +
+  `- If the goal implies a web app, include at least one frontend/UI task.\n\n` +
   `RULES:\n` +
-  `1. TASK ORDER: Task 1 MUST be project setup (init project, install dependencies, create config). ` +
-  `The last task MUST be testing (write and run tests to verify everything works).\n` +
-  `2. DEPENDENCY ORDER: Order tasks by dependency chain. Database/schema before auth. ` +
-  `Auth before protected routes. Shared utilities before features that use them. ` +
+  `1. GOAL FOCUS: Task descriptions must be specific to the domain. ` +
+  `"Create src/pages/menu.tsx with coffee product cards, prices, and add-to-cart buttons" NOT "Implement /api/users endpoint".\n` +
+  `2. DEPENDENCY ORDER: Order tasks so dependencies come first. ` +
   `If task N needs output from task M, M must come first. Include "dependsOn" with 1-based task numbers.\n` +
   `3. MVP SCOPE: Build the MINIMUM viable version. Do NOT add:\n` +
-  `   - Payment processing (Stripe, PayPal) unless explicitly requested\n` +
-  `   - Email services (SendGrid, EmailJS, Nodemailer) unless explicitly requested\n` +
-  `   - OAuth/social login unless explicitly requested\n` +
-  `   - Docker, CI/CD, monitoring, analytics unless explicitly requested\n` +
-  `4. NO ASSUMED LIBRARIES: Only use libraries/ORMs (Prisma, TypeORM, Mongoose, Drizzle) ` +
-  `if the user specifically mentioned them. Prefer built-in or standard-library approaches.\n` +
-  `5. SPECIFICITY: Each task must specify:\n` +
-  `   - The exact file path to create or modify\n` +
-  `   - What the file should contain (endpoints, functions, components, schemas)\n` +
-  `   - Good: "Create src/server.ts using Bun.serve with GET /health and POST /users endpoints"\n` +
-  `   - Bad: "Set up the backend"\n\n` +
+  `   - Payment (Stripe, PayPal), email (SendGrid, Nodemailer), OAuth/social login, Docker, CI/CD, monitoring — unless explicitly requested\n` +
+  `4. NO ASSUMED LIBRARIES: Only use ORMs/frameworks (Prisma, TypeORM, Mongoose) if the user mentioned them. Prefer built-in approaches.\n` +
+  `5. SPECIFICITY: Each task must name the exact file path, what it should contain, and the technology to use.\n\n` +
   `Output as a JSON array:\n` +
   `[{"description": "...", "dependsOn": []}, {"description": "...", "dependsOn": [1]}]\n\n` +
   `Goal: ${goal}`;
@@ -117,6 +120,7 @@ export class SprintRunner extends EventEmitter {
     }
 
     // Phase 1: Planning
+    this.emitTyped("sprint:planning", undefined);
     let planResponse: string;
     try {
       planResponse = await this.runAgent("planner", {

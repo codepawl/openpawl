@@ -12,7 +12,8 @@ import type { OpenPawlGlobalConfig, ProviderConfigEntry } from "../../core/globa
 import { InteractiveView } from "./base-view.js";
 import { renderPanel } from "../../tui/components/panel.js";
 import { detectProviders } from "../../providers/detect.js";
-import { PROVIDER_CATALOG, getProviderMeta } from "../../providers/provider-catalog.js";
+import { getProviderMeta } from "../../providers/provider-catalog.js";
+import { getProviderRegistry } from "../../providers/provider-registry.js";
 import { validateApiKey } from "../../providers/validate.js";
 import { fetchModelsForProvider } from "../../providers/model-fetcher.js";
 import { getCachedModels, setCachedModels } from "../../providers/model-cache.js";
@@ -216,11 +217,13 @@ export class SetupWizardView extends InteractiveView {
 
     // All providers section
     this.providerItems.push({ type: "header", label: "All Providers" });
-    for (const [id, meta] of Object.entries(PROVIDER_CATALOG)) {
-      if (detectedIds.has(id) || meta.group) continue;
+    for (const def of getProviderRegistry().getAll()) {
+      if (detectedIds.has(def.id)) continue;
+      const meta = getProviderMeta(def.id);
+      if (!meta || meta.group) continue;
       this.providerItems.push({
         type: "provider",
-        id,
+        id: def.id,
         label: meta.name,
         hint: meta.authMethod === "local" ? "local" : undefined,
       });
