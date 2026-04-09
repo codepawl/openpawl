@@ -57,7 +57,16 @@ export function createSprintRunner(opts: CreateSprintRunnerOptions): SprintRunne
         handleTool: async (name, args) => {
           if (!toolExecutor) return "Tool execution not available";
 
-          this.emit("sprint:agent:tool", { agent: agentName, tool: name, args });
+          const execId = `sprint_tc_${Date.now()}`;
+          const inputSummary = `${name}(${JSON.stringify(args).slice(0, 100)})`;
+          const startTime = Date.now();
+
+          this.emit("sprint:agent:tool", {
+            agentName,
+            toolName: name,
+            status: "running",
+            details: { executionId: execId, inputSummary },
+          });
 
           const result = await toolExecutor.execute(name, args, {
             agentId: agentName,
@@ -66,13 +75,29 @@ export function createSprintRunner(opts: CreateSprintRunnerOptions): SprintRunne
             abortSignal: runOpts.signal,
           });
 
+          const duration = Date.now() - startTime;
+
           if (result.isOk()) {
+            this.emit("sprint:agent:tool", {
+              agentName,
+              toolName: name,
+              status: "completed",
+              details: { executionId: execId, duration, outputSummary: result.value.summary.slice(0, 200), success: true },
+            });
             return result.value.summary;
           }
-          return `Error: ${result.error.type} — ${result.error.toolName}`;
+
+          const errMsg = `${result.error.type} — ${result.error.toolName}`;
+          this.emit("sprint:agent:tool", {
+            agentName,
+            toolName: name,
+            status: "failed",
+            details: { executionId: execId, duration, outputSummary: errMsg, success: false },
+          });
+          return `Error: ${errMsg}`;
         },
         onChunk: (token) => {
-          this.emit("sprint:agent:token", { agent: agentName, token });
+          this.emit("sprint:agent:token", { agentName, token });
         },
         signal: runOpts.signal,
         maxTurns: 10,

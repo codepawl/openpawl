@@ -63,10 +63,18 @@ export class SprintRunner extends EventEmitter {
     this.emitTyped("sprint:start", { goal });
 
     // Phase 1: Planning
-    const planResponse = await this.runAgent("planner", {
-      prompt: PLANNER_PROMPT(goal, options?.maxTasks ?? 10),
-      signal: this.abortController.signal,
-    });
+    let planResponse: string;
+    try {
+      planResponse = await this.runAgent("planner", {
+        prompt: PLANNER_PROMPT(goal, options?.maxTasks ?? 10),
+        signal: this.abortController.signal,
+      });
+    } catch (err) {
+      this.state.phase = "stopped";
+      const error = err instanceof Error ? err : new Error(String(err));
+      this.emitTyped("sprint:error", { error });
+      throw err;
+    }
     this.state.tasks = parseTasks(planResponse);
     if (this.state.tasks.length === 0) {
       this.state.phase = "done";
@@ -130,6 +138,10 @@ export class SprintRunner extends EventEmitter {
 
   stop(): void {
     this.state.phase = "stopped";
+    // Unblock if paused, so the execution loop can reach the abort check
+    this.pauseResolve?.();
+    this.pauseResolve = null;
+    this.paused = false;
     this.abortController?.abort();
   }
 

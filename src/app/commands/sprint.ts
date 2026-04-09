@@ -219,26 +219,24 @@ export function createSprintCommand(deps: SprintCommandDeps): SlashCommand {
         ctx.requestRender();
       });
 
-      runner.on("sprint:agent:token", ({ agent, token }: { agent: string; token: string }) => {
-        void agent;
+      runner.on("sprint:agent:token", ({ token }: { agentName: string; token: string }) => {
         layout.messages.appendToLast(token);
         ctx.requestRender();
       });
 
-      runner.on("sprint:agent:tool", ({ agent, tool, args: toolArgs }: { agent: string; tool: string; args: unknown }) => {
-        const inputSummary = typeof toolArgs === "object" && toolArgs !== null
-          ? JSON.stringify(toolArgs).slice(0, 80)
-          : String(toolArgs).slice(0, 80);
-        const executionId = `sprint-${agent}-${tool}-${Date.now()}`;
-        layout.messages.startToolCall(executionId, tool, inputSummary, agent);
+      runner.on("sprint:agent:tool", (data: {
+        agentName: string;
+        toolName: string;
+        status: string;
+        details?: { executionId?: string; inputSummary?: string; duration?: number; outputSummary?: string; success?: boolean };
+      }) => {
+        const execId = data.details?.executionId ?? `sprint_${Date.now()}`;
+        if (data.status === "running") {
+          layout.messages.startToolCall(execId, data.toolName, data.details?.inputSummary ?? data.toolName, data.agentName);
+        } else if (data.status === "completed" || data.status === "failed") {
+          layout.messages.completeToolCall(execId, data.status === "completed", data.details?.outputSummary ?? "", data.details?.duration ?? 0);
+        }
         ctx.requestRender();
-
-        // Auto-complete tool call view after a short delay since sprint
-        // tool calls don't have separate completion events.
-        setTimeout(() => {
-          layout.messages.completeToolCall(executionId, true, "", 0);
-          ctx.requestRender();
-        }, 500);
       });
 
       runner.on("sprint:task:complete", ({ task }: { task: SprintTask }) => {
