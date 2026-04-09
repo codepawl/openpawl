@@ -1774,11 +1774,13 @@ function registerRouterCommands(
     description: "List available agents",
     async execute(_args, ctx) {
       const { renderPanel, panelSection } = await import("../tui/components/panel.js");
+      const { labelValue } = await import("../tui/primitives/columns.js");
+      const { getAgentColor } = await import("../tui/primitives/badge.js");
       const agents = router.getRegistry().getAll();
       const contentLines = [...panelSection("Built-in")];
       for (const a of agents) {
-        const colorFn = getAgentColorFn(a.id);
-        contentLines.push(`  ${colorFn("@" + a.id.padEnd(14))} ${ctp.overlay1(a.description)}`);
+        const colorFn = getAgentColor(a.id);
+        contentLines.push(labelValue("@" + a.id, a.description, { labelWidth: 16, labelColor: colorFn, valueColor: ctp.overlay1, gap: 1 }));
       }
       contentLines.push("");
       contentLines.push(ctp.overlay0("Use @agent in your prompt to route directly."));

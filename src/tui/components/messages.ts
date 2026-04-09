@@ -6,11 +6,12 @@ import type { Component } from "../core/component.js";
 import type { LayoutConfig } from "../layout/responsive.js";
 import { wrapText } from "../utils/wrap.js";
 import { visibleWidth } from "../utils/text-width.js";
-import { bold } from "../core/ansi.js";
 import { defaultTheme, ctp } from "../themes/default.js";
 import { renderMarkdown } from "./markdown.js";
 import { CopyManager } from "../text/copy-manager.js";
 import { ToolCallView } from "./tool-call-view.js";
+import { separator } from "../primitives/separator.js";
+import { agentBadge } from "../primitives/badge.js";
 
 export interface ChatMessage {
   role: "user" | "assistant" | "agent" | "tool" | "system" | "error";
@@ -67,7 +68,7 @@ export class MessagesComponent implements Component {
 
       // Dimmed divider between consecutive system messages
       if (i > 0 && msg.role === "system" && this.messages[i - 1]!.role === "system") {
-        allLines.push("  " + ctp.surface1("─".repeat(Math.min(30, maxBubbleWidth - 4))));
+        allLines.push(separator({ width: Math.min(30, maxBubbleWidth - 4), padding: 2 }));
       }
 
       this.messageBoundaries.push(allLines.length);
@@ -126,9 +127,8 @@ export class MessagesComponent implements Component {
       case "assistant":
       case "agent": {
         const nameLabel = msg.agentName ?? (msg.role.charAt(0).toUpperCase() + msg.role.slice(1));
-        const accentColor = msg.agentColor ?? ctp.lavender;
         const lines: string[] = [];
-        lines.push("  " + accentColor("◆") + " " + bold(accentColor(nameLabel)));
+        lines.push("  " + agentBadge(nameLabel));
         lines.push("");
         const mdLines = renderMarkdown((msg.content || "").replace(/^\n+/, ""), maxBubbleWidth - 4);
         for (const line of mdLines) {

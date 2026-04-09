@@ -1,9 +1,9 @@
 /**
- * Modal overlay — renders its child component centered over the current screen.
+ * Modal overlay — renders its child component centered in a bordered panel.
  */
 import type { Component } from "../core/component.js";
 import type { KeyEvent } from "../core/input.js";
-import { visibleWidth } from "../utils/text-width.js";
+import { renderPanel } from "./panel.js";
 
 export class OverlayComponent implements Component {
   readonly id: string;
@@ -19,19 +19,13 @@ export class OverlayComponent implements Component {
   render(termWidth: number): string[] {
     const contentWidth = Math.min(this.width, termWidth - 4);
     const childLines = this.child.render(contentWidth);
-    const padding = Math.max(0, Math.floor((termWidth - contentWidth - 2) / 2));
-    const pad = " ".repeat(padding);
 
-    const lines: string[] = [];
-    lines.push(pad + "┌" + "─".repeat(contentWidth) + "┐");
-    for (const line of childLines) {
-      const lineWidth = visibleWidth(line);
-      const rightPad = Math.max(0, contentWidth - lineWidth);
-      lines.push(pad + "│" + line + " ".repeat(rightPad) + "│");
-    }
-    lines.push(pad + "└" + "─".repeat(contentWidth) + "┘");
-
-    return lines;
+    return renderPanel({
+      width: contentWidth + 4, // add border + padding
+      termWidth,
+      align: "center",
+      padding: { top: 0, bottom: 0, left: 1, right: 1 },
+    }, childLines);
   }
 
   onKey(event: KeyEvent): boolean {

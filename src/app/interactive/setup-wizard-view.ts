@@ -158,9 +158,9 @@ export class SetupWizardView extends InteractiveView {
     const contentLines = this.renderLines();
     const title = this.getPanelTitle();
     const footer = this.getPanelFooter();
-    const cols = this.tui.getTerminal().columns;
-    const width = Math.max(60, Math.min(cols - 6, 90));
-    const panelLines = renderPanel({ title, footer, width }, contentLines);
+    const termWidth = this.tui.getTerminal().columns;
+    const width = Math.max(60, Math.min(termWidth - 6, 90));
+    const panelLines = renderPanel({ title, footer, width, termWidth }, contentLines);
     this.tui.setInteractiveView(panelLines);
   }
 

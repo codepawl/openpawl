@@ -6,7 +6,9 @@ import type { KeyEvent } from "../../tui/core/input.js";
 import type { TUI } from "../../tui/core/tui.js";
 import { InteractiveView } from "./base-view.js";
 import { ctp } from "../../tui/themes/default.js";
-import { visibleWidth } from "../../tui/utils/text-width.js";
+import { separator } from "../../tui/primitives/separator.js";
+import { renderSelectableList, type SelectableItem } from "../../tui/primitives/selectable-list.js";
+import { renderConfirmPrompt } from "../../tui/primitives/confirm.js";
 import type { SessionListItem } from "../../session/session-state.js";
 
 export interface SessionPickerResult {
@@ -31,31 +33,24 @@ export class SessionPickerView extends InteractiveView {
     this.fullscreen = true;
   }
 
-  // Items: sessions + "New session" row
   protected getItemCount(): number {
-    return this.sessions.length + 1;
+    return this.sessions.length + 1; // sessions + "New session"
   }
 
   protected handleCustomKey(event: KeyEvent): boolean {
     if (event.type === "enter") {
       if (this.confirmingDelete) {
-        // Confirm delete
         this.onResult({ action: "delete", sessionId: this.confirmingDelete });
         this.deactivate();
         return true;
       }
-
       if (this.selectedIndex >= this.sessions.length) {
-        // "New session" selected
         this.onResult({ action: "new" });
-        this.deactivate();
       } else {
         const session = this.sessions[this.selectedIndex];
-        if (session) {
-          this.onResult({ action: "resume", sessionId: session.id });
-          this.deactivate();
-        }
+        if (session) this.onResult({ action: "resume", sessionId: session.id });
       }
+      this.deactivate();
       return true;
     }
 
@@ -67,7 +62,6 @@ export class SessionPickerView extends InteractiveView {
       const session = this.sessions[this.selectedIndex];
       if (session) {
         if (this.confirmingDelete === session.id) {
-          // Second press confirms
           this.onResult({ action: "delete", sessionId: session.id });
           this.deactivate();
         } else {
@@ -78,7 +72,6 @@ export class SessionPickerView extends InteractiveView {
       return true;
     }
 
-    // Any navigation clears delete confirmation
     if (event.type === "arrow") {
       this.confirmingDelete = null;
     }
@@ -88,64 +81,74 @@ export class SessionPickerView extends InteractiveView {
 
   protected override getPanelTitle(): string { return "Sessions"; }
   protected override getPanelFooter(): string {
-    if (this.confirmingDelete) return "Press Enter to permanently delete this session, or Esc to keep it";
+    if (this.confirmingDelete) {
+      return renderConfirmPrompt({
+        message: "Delete this session permanently?",
+        confirmLabel: "Enter",
+        cancelLabel: "Esc",
+        dangerLevel: "danger",
+      }).replace(/\x1b\[[0-9;]*m/g, ""); // footer is styled by panel, strip ANSI
+    }
     return "\u2191\u2193 navigate  Enter select  d delete  Esc cancel";
   }
 
   protected renderLines(): string[] {
-    const t = this.theme;
-    const lines: string[] = [];
     const width = this.tui.getTerminal().columns;
-    const maxTitleW = Math.min(45, Math.floor(width * 0.45));
+    const innerW = Math.min(70, width - 10);
 
+    // Build selectable items from sessions
+    const items: SelectableItem[] = this.sessions.map((s) => ({
+      id: s.id,
+      label: (s.title || "Untitled").slice(0, 45),
+      meta: `${s.messageCount} msgs  ${formatRelativeTime(s.updatedAt)}`,
+    }));
+
+    // Mark delete-confirming item
+    const deleteIdx = this.confirmingDelete
+      ? this.sessions.findIndex((s) => s.id === this.confirmingDelete)
+      : -1;
+
+    // Render session list (without "New session" — that's separate)
     const { start, end, aboveCount, belowCount } = this.getVisibleRange();
-    const itemLines: string[] = [];
+    const sessionEnd = Math.min(end, this.sessions.length);
 
-    // Render session rows
-    for (let vi = start; vi < end && vi < this.sessions.length; vi++) {
-      const session = this.sessions[vi]!;
-      const isSelected = vi === this.selectedIndex;
-      const isDeleting = this.confirmingDelete === session.id;
+    const listLines = renderSelectableList({
+      items: items.slice(start, sessionEnd),
+      selectedIndex: this.selectedIndex - start,
+      width: innerW,
+      scrollIndicators: false, // we handle these ourselves
+    });
 
-      const cursor = isSelected ? ctp.mauve("\u25b8 ") : "  ";
-      const title = truncate(session.title || "Untitled", maxTitleW);
-      const msgs = `${session.messageCount} msgs`;
-      const time = formatRelativeTime(session.updatedAt);
-      const meta = t.dim(`${msgs.padEnd(10)}${time}`);
-
-      if (isDeleting) {
-        itemLines.push(`    ${cursor}${ctp.red(title)}  ${meta}  ${ctp.red("Delete? Enter/Esc")}`);
-      } else if (isSelected) {
-        itemLines.push(`    ${cursor}${ctp.text(title)}  ${meta}`);
-      } else {
-        itemLines.push(`    ${cursor}${ctp.overlay1(title)}  ${meta}`);
+    // Highlight delete-confirming item in red
+    if (deleteIdx >= start && deleteIdx < sessionEnd) {
+      const relIdx = deleteIdx - start;
+      if (relIdx < listLines.length) {
+        listLines[relIdx] = listLines[relIdx]!.replace(/\x1b\[38;2;\d+;\d+;\d+m/g, "") ;
+        // Re-render the line with red
+        const s = this.sessions[deleteIdx]!;
+        listLines[relIdx] = `    ${ctp.mauve("\u276f ")}${ctp.red((s.title || "Untitled").slice(0, 45))}  ${ctp.red("press Enter to delete")}`;
       }
     }
 
-    // "New session" row
-    if (end > this.sessions.length || this.sessions.length < this.maxVisible) {
-      const isSelected = this.selectedIndex >= this.sessions.length;
-      const cursor = isSelected ? ctp.mauve("\u25b8 ") : "  ";
+    const result = this.addScrollIndicators(listLines, aboveCount, belowCount);
+
+    // Separator + "New session" row
+    if (sessionEnd >= this.sessions.length) {
       if (this.sessions.length > 0) {
-        itemLines.push(`    ${t.dim("\u2500".repeat(Math.min(40, maxTitleW)))}`);
+        result.push(separator({ width: Math.min(40, innerW), padding: 4 }));
       }
-      const label = isSelected ? ctp.green("+  New session") : t.dim("+  New session");
-      itemLines.push(`    ${cursor}${label}`);
+      const isSelected = this.selectedIndex >= this.sessions.length;
+      const cursor = isSelected ? ctp.mauve("\u276f ") : "  ";
+      const label = isSelected ? ctp.green("+  New session") : this.theme.dim("+  New session");
+      result.push(`    ${cursor}${label}`);
     }
 
-    const withScroll = this.addScrollIndicators(itemLines, aboveCount, belowCount);
-    lines.push(...withScroll);
-    lines.push("");
-    return lines;
+    result.push("");
+    return result;
   }
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-function truncate(s: string, max: number): string {
-  if (visibleWidth(s) <= max) return s.padEnd(max);
-  return s.slice(0, max - 1) + "\u2026";
-}
 
 export function formatRelativeTime(isoString: string): string {
   const now = Date.now();

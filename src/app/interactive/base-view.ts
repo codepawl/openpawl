@@ -153,7 +153,8 @@ export abstract class InteractiveView {
     const title = this.getPanelTitle();
     const footer = this.getPanelFooter();
     if (title) {
-      const panelLines = renderPanel({ title, footer }, contentLines);
+      const termWidth = this.tui.getTerminal().columns;
+      const panelLines = renderPanel({ title, footer, termWidth }, contentLines);
       this.tui.setInteractiveView(panelLines);
     } else {
       this.tui.setInteractiveView(contentLines);

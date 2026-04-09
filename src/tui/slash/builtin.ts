@@ -3,6 +3,7 @@
  */
 import type { SlashCommand, CommandContext } from "./registry.js";
 import { renderPanel, panelSection } from "../components/panel.js";
+import { labelValue } from "../primitives/columns.js";
 
 export function createBuiltinCommands(
   getRegistry: () => { getAll: () => SlashCommand[] },
@@ -16,17 +17,16 @@ export function createBuiltinCommands(
         const commands = getRegistry().getAll();
         const contentLines = [...panelSection("Commands")];
         for (const cmd of commands) {
-          const name = `/${cmd.name}`.padEnd(16);
-          contentLines.push(`  ${name}${cmd.description}`);
+          contentLines.push(labelValue(`/${cmd.name}`, cmd.description, { labelWidth: 16, gap: 1 }));
         }
         contentLines.push("");
         contentLines.push(...panelSection("Shortcuts"));
-        contentLines.push("  @file          Attach file to prompt");
-        contentLines.push("  @agent         Route to specific agent");
-        contentLines.push("  !command       Run shell command");
-        contentLines.push("  Shift+Tab      Cycle mode (DEF/AUTO/PLAN)");
-        contentLines.push("  Ctrl+P         Command palette");
-        contentLines.push("  Ctrl+X + key   Leader shortcuts");
+        contentLines.push(labelValue("@file", "Attach file to prompt", { labelWidth: 16, gap: 1 }));
+        contentLines.push(labelValue("@agent", "Route to specific agent", { labelWidth: 16, gap: 1 }));
+        contentLines.push(labelValue("!command", "Run shell command", { labelWidth: 16, gap: 1 }));
+        contentLines.push(labelValue("Shift+Tab", "Cycle mode (DEF/AUTO/PLAN)", { labelWidth: 16, gap: 1 }));
+        contentLines.push(labelValue("Ctrl+P", "Command palette", { labelWidth: 16, gap: 1 }));
+        contentLines.push(labelValue("Ctrl+X + key", "Leader shortcuts", { labelWidth: 16, gap: 1 }));
         const panel = renderPanel({ title: "Help", footer: "Press any key to close" }, contentLines);
         ctx.addMessage("system", panel.join("\n"));
       },

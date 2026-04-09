@@ -4,7 +4,7 @@
 import type { Component } from "../core/component.js";
 import type { StyleFn } from "../themes/theme.js";
 import { ctp } from "../themes/default.js";
-import { visibleWidth } from "../utils/text-width.js";
+import { separator } from "../primitives/separator.js";
 
 export class DividerComponent implements Component {
   readonly id: string;
@@ -13,7 +13,7 @@ export class DividerComponent implements Component {
   private style: StyleFn;
   private label: string | null = null;
 
-  constructor(id: string, char = "─", style: StyleFn = ctp.surface1) {
+  constructor(id: string, char = "\u2500", style: StyleFn = ctp.surface1) {
     this.id = id;
     this.char = char;
     this.style = style;
@@ -25,17 +25,11 @@ export class DividerComponent implements Component {
   }
 
   render(width: number): string[] {
-    if (!this.label) {
-      return [this.style(this.char.repeat(width))];
-    }
-    const labelStr = ` ${this.label} `;
-    const labelLen = visibleWidth(labelStr);
-    const leftLen = Math.max(2, Math.floor((width - labelLen) / 2));
-    const rightLen = Math.max(2, width - leftLen - labelLen);
-    return [
-      this.style(this.char.repeat(leftLen)) +
-      ctp.overlay1(labelStr) +
-      this.style(this.char.repeat(rightLen)),
-    ];
+    return [separator({
+      width,
+      char: this.char,
+      label: this.label ?? undefined,
+      color: this.style,
+    })];
   }
 }
