@@ -735,15 +735,15 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
     lines.push(ctp.overlay0(" ".repeat(tagPad) + tagline));
     lines.push("");
 
-    // Command table — build rows first, then center the block
-    const leftItems: [string, string][] = [
+    // Command table — two sections stacked vertically, centered as a block
+    const cmdPad = 12; // align descriptions after longest command
+    const allItems: ([string, string] | null)[] = [
       [ctp.blue("/help"), "Show commands"],
       [ctp.blue("/settings"), "Configure provider"],
       [ctp.blue("/agents"), "List agents"],
       [ctp.peach("!command"), "Run shell command"],
       [ctp.blue("@file"), "Reference a file"],
-    ];
-    const rightItems: [string, string][] = [
+      null, // blank line separator
       [ctp.blue("@coder"), "Coder"],
       [ctp.blue("@reviewer"), "Reviewer"],
       [ctp.blue("@planner"), "Planner"],
@@ -752,26 +752,12 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
     ];
 
     const tableLines: string[] = [];
-    if (termWidth >= 60) {
-      // Two-column: fixed-width table, then center the whole block
-      const lColWidth = 28; // "/settings   Configure provider" ~28 visible chars
-      for (let r = 0; r < leftItems.length; r++) {
-        const [lCmd, lDesc] = leftItems[r]!;
-        const [rCmd, rDesc] = rightItems[r]!;
-        const lText = `${lCmd}  ${ctp.subtext0(lDesc)}`;
-        const lVis = visibleWidth(lText);
-        const gap = " ".repeat(Math.max(2, lColWidth - lVis));
-        tableLines.push(`${lText}${gap}${rCmd}  ${ctp.subtext0(rDesc)}`);
-      }
-    } else {
-      // Single-column: stack commands then agents
-      for (const [cmd, desc] of leftItems) {
-        tableLines.push(`${cmd}  ${ctp.subtext0(desc)}`);
-      }
-      tableLines.push("");
-      for (const [cmd, desc] of rightItems) {
-        tableLines.push(`${cmd}  ${ctp.subtext0(desc)}`);
-      }
+    for (const item of allItems) {
+      if (!item) { tableLines.push(""); continue; }
+      const [cmd, desc] = item;
+      const cmdVis = visibleWidth(cmd);
+      const gap = " ".repeat(Math.max(2, cmdPad - cmdVis));
+      tableLines.push(`${cmd}${gap}${ctp.subtext0(desc)}`);
     }
 
     // Center the table block
