@@ -5,7 +5,7 @@
 import type { Component } from "../core/component.js";
 import type { LayoutConfig } from "../layout/responsive.js";
 import { wrapText } from "../utils/wrap.js";
-import { visibleWidth } from "../utils/text-width.js";
+import { visibleWidth, stripAnsi } from "../utils/text-width.js";
 import { defaultTheme, ctp } from "../themes/default.js";
 import { renderMarkdown } from "./markdown.js";
 import { CopyManager } from "../text/copy-manager.js";
@@ -29,6 +29,41 @@ export interface ChatMessage {
 const COLLAPSE_THRESHOLD = 15;
 /** Number of preview lines shown when collapsed. */
 const COLLAPSE_PREVIEW = 3;
+
+// ── Agent message tree rendering helpers ─────────────────────────────────────
+
+type MessageSegment =
+  | { type: "tool"; line: string }
+  | { type: "text"; lines: string[] };
+
+/** Check if a line is a baked tool summary (starts with ✓, ✗, ⏳, or ○). */
+function isToolLine(line: string): boolean {
+  const stripped = stripAnsi(line).trimStart();
+  return /^[✓✗⏳○⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/.test(stripped);
+}
+
+/** Split baked agent message content into tool lines and text blocks. */
+function parseMessageSegments(content: string): MessageSegment[] {
+  const lines = content.split("\n");
+  const segments: MessageSegment[] = [];
+  let textBuf: string[] = [];
+
+  for (const line of lines) {
+    if (isToolLine(line)) {
+      if (textBuf.length > 0) {
+        segments.push({ type: "text", lines: textBuf });
+        textBuf = [];
+      }
+      segments.push({ type: "tool", line });
+    } else {
+      textBuf.push(line);
+    }
+  }
+  if (textBuf.length > 0) {
+    segments.push({ type: "text", lines: textBuf });
+  }
+  return segments;
+}
 
 export class MessagesComponent implements Component {
   readonly id: string;
@@ -78,15 +113,22 @@ export class MessagesComponent implements Component {
         allLines.push(separator({ width: Math.min(30, maxBubbleWidth - 4), padding: 2 }));
       }
 
-      // Insert live tool call views before the last (streaming) message
+      // Insert live tool call views before the last (streaming) message — with tree connectors
       if (i === toolInsertBefore) {
-        for (const id of this.toolCallOrder) {
-          const view = this.activeToolCalls.get(id);
+        const toolIds = [...this.toolCallOrder];
+        const connector = ctp.overlay0("├─");
+        const vertLine = ctp.overlay0("│");
+        for (const tid of toolIds) {
+          const view = this.activeToolCalls.get(tid);
           if (view) {
-            allLines.push(...view.render(bubblePct > 0 ? maxBubbleWidth : width));
+            const rendered = view.render(bubblePct > 0 ? maxBubbleWidth : width);
+            for (let r = 0; r < rendered.length; r++) {
+              const prefix = r === 0 ? "  " + connector + " " : "  " + vertLine + "  ";
+              allLines.push(prefix + rendered[r]!.trimStart());
+            }
           }
         }
-        allLines.push("");
+        allLines.push("  " + vertLine);
       }
 
       this.messageBoundaries.push(allLines.length);
@@ -141,11 +183,57 @@ export class MessagesComponent implements Component {
         const nameLabel = msg.agentName ?? (msg.role.charAt(0).toUpperCase() + msg.role.slice(1));
         const lines: string[] = [];
         lines.push("  " + agentBadge(nameLabel));
-        lines.push("");
-        const mdLines = renderMarkdown((msg.content || "").replace(/^\n+/, ""), maxBubbleWidth - 4);
-        for (const line of mdLines) {
-          lines.push("    " + line);
+
+        const segments = parseMessageSegments((msg.content || "").replace(/^\n+/, ""));
+        const hasTools = segments.some(s => s.type === "tool");
+
+        if (!hasTools) {
+          // No tools — badge + blank + indented response
+          lines.push("");
+          for (const seg of segments) {
+            if (seg.type === "text") {
+              const md = renderMarkdown(seg.lines.join("\n"), maxBubbleWidth - 4);
+              for (const ml of md) lines.push("    " + ml);
+            }
+          }
+          return lines;
         }
+
+        // Tree rendering: tool lines with connectors, text blocks indented
+        const BRANCH = ctp.overlay0("├─");
+        const LAST   = ctp.overlay0("└─");
+        const VERT   = ctp.overlay0("│");
+
+        for (let si = 0; si < segments.length; si++) {
+          const seg = segments[si]!;
+
+          if (seg.type === "tool") {
+            const isLastTool = !segments.slice(si + 1).some(s => s.type === "tool");
+            const isFinalSeg = si === segments.length - 1;
+            const connector = (isLastTool && isFinalSeg) ? LAST : BRANCH;
+            lines.push("  " + connector + " " + seg.line);
+            continue;
+          }
+
+          // Text segment
+          const trimmed = seg.lines.join("\n").replace(/^\n+/, "").replace(/\n+$/, "");
+          if (!trimmed) continue;
+
+          const isFinal = si === segments.length - 1;
+          if (isFinal) {
+            // Final response: vert line separator, then indented text
+            lines.push("  " + VERT);
+            const md = renderMarkdown(trimmed, maxBubbleWidth - 4);
+            for (const ml of md) lines.push("    " + ml);
+          } else {
+            // Intermediate text: continuation lines with vert prefix
+            lines.push("  " + VERT);
+            const md = renderMarkdown(trimmed, maxBubbleWidth - 6);
+            for (const ml of md) lines.push("  " + VERT + " " + ml);
+            lines.push("  " + VERT);
+          }
+        }
+
         return lines;
       }
       case "error": {
