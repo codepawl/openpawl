@@ -108,7 +108,7 @@ export function renderBriefing(data: BriefingData): string {
   // Cache stats footer
   if (data.cacheStats) {
     const hitPct = Math.round(data.cacheStats.hitRate * 100);
-    lines.push(color(pc.dim, `Cache: ${hitPct}% hit rate  |  Saved $${data.cacheStats.totalSavingsUSD.toFixed(2)} this week`));
+    lines.push(color(pc.dim, `Cache: ${hitPct}% hit rate`));
   }
 
   lines.push(color(pc.dim, SEPARATOR));

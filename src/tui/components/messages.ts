@@ -6,6 +6,7 @@ import type { Component } from "../core/component.js";
 import type { LayoutConfig } from "../layout/responsive.js";
 import { wrapText } from "../utils/wrap.js";
 import { visibleWidth } from "../utils/text-width.js";
+import { bold } from "../core/ansi.js";
 import { defaultTheme, ctp } from "../themes/default.js";
 import { renderMarkdown } from "./markdown.js";
 import { CopyManager } from "../text/copy-manager.js";
@@ -124,14 +125,14 @@ export class MessagesComponent implements Component {
       }
       case "assistant":
       case "agent": {
-        const nameLabel = msg.agentName ?? msg.role;
-        const nameFn = msg.agentColor ?? defaultTheme.agentName;
-        const accentBorder = msg.agentColor ?? ctp.overlay2;
+        const nameLabel = msg.agentName ?? (msg.role.charAt(0).toUpperCase() + msg.role.slice(1));
+        const accentColor = msg.agentColor ?? ctp.lavender;
         const lines: string[] = [];
-        lines.push("  " + accentBorder("┃") + " " + nameFn(`[${nameLabel}]`));
-        const mdLines = renderMarkdown(msg.content || "", maxBubbleWidth - 4);
+        lines.push("  " + accentColor("◆") + " " + bold(accentColor(nameLabel)));
+        lines.push("");
+        const mdLines = renderMarkdown((msg.content || "").replace(/^\n+/, ""), maxBubbleWidth - 4);
         for (const line of mdLines) {
-          lines.push("  " + accentBorder("┃") + " " + ctp.text(line));
+          lines.push("    " + line);
         }
         return lines;
       }
@@ -157,8 +158,8 @@ export class MessagesComponent implements Component {
           return wrapped.map((line) => "  " + line);
         }
         const colorFn = detectSystemColor(content);
-        const wrapped = wrapText(content, maxBubbleWidth - 2);
-        return wrapped.map((line) => "  " + colorFn(line));
+        const mdLines = renderMarkdown(content, maxBubbleWidth - 2);
+        return mdLines.map((line) => "  " + colorFn(line));
       }
       default: {
         const hasAnsi = (msg.content || "").includes("\x1b[");
@@ -283,6 +284,40 @@ export class MessagesComponent implements Component {
   clearToolCalls(): void {
     this.activeToolCalls.clear();
     this.toolCallOrder = [];
+  }
+
+  /**
+   * Bake completed tool call summaries into the last agent message,
+   * then clear the live tool views. This makes tool status scroll with
+   * the conversation instead of sticking above the input.
+   */
+  bakeToolCalls(): void {
+    if (this.toolCallOrder.length === 0) return;
+
+    // Build a compact summary of all tool calls
+    const summaryLines: string[] = [];
+    for (const id of this.toolCallOrder) {
+      const view = this.activeToolCalls.get(id);
+      if (view) {
+        summaryLines.push(view.renderOneLiner());
+      }
+    }
+
+    if (summaryLines.length > 0) {
+      // Insert as a system message before the last agent message
+      const toolSummary = summaryLines.join("\n");
+      // Find the last agent/assistant message and prepend tool info
+      for (let i = this.messages.length - 1; i >= 0; i--) {
+        const msg = this.messages[i]!;
+        if (msg.role === "agent" || msg.role === "assistant") {
+          msg.content = toolSummary + "\n\n" + (msg.content || "");
+          this.renderCache.delete(i);
+          break;
+        }
+      }
+    }
+
+    this.clearToolCalls();
   }
 
   clear(): void {

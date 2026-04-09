@@ -72,15 +72,9 @@ export interface ForecastAccuracyEntry {
   recordedAt: number;
 }
 
-export interface ModelPricing {
-  inputPer1M: number;
-  outputPer1M: number;
-}
-
 export interface SimilarRun {
   sessionId: string;
   goal: string;
-  totalCostUSD: number;
   averageConfidence: number;
   totalRuns: number;
   teamComposition: string[];

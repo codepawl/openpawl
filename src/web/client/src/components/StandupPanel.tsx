@@ -6,7 +6,6 @@ interface SessionSummary {
   tasksCompleted: number;
   reworkCount: number;
   allApproved: boolean;
-  costUSD: number;
 }
 
 interface BlockedItem {
@@ -26,14 +25,12 @@ interface StandupData {
   date: string;
   yesterday: {
     sessions: SessionSummary[];
-    totalCostUSD: number;
     totalTasks: number;
     teamLearnings: string[];
   };
   blocked: BlockedItem[];
   suggested: SuggestionItem[];
   streak: number;
-  weekCostUSD: number;
   globalPatternsCount: number;
 }
 
@@ -81,7 +78,6 @@ export function StandupPanel() {
   }
 
   const sessionCount = data.yesterday.sessions.length;
-  const costStr = `$${data.yesterday.totalCostUSD.toFixed(2)}`;
 
   return (
     <div className="bg-stone-800 rounded-lg p-4 border border-stone-700">
@@ -96,7 +92,7 @@ export function StandupPanel() {
           <span className="text-stone-500">No sessions yesterday</span>
         ) : (
           <span>
-            {sessionCount} session{sessionCount !== 1 ? "s" : ""} &middot; {data.yesterday.totalTasks} tasks &middot; {costStr}
+            {sessionCount} session{sessionCount !== 1 ? "s" : ""} &middot; {data.yesterday.totalTasks} tasks
           </span>
         )}
       </div>
@@ -125,7 +121,6 @@ export function StandupPanel() {
       {/* Footer */}
       <div className="flex items-center gap-3 text-xs text-stone-500">
         {data.streak > 0 && <span>{data.streak}-day streak</span>}
-        <span>${data.weekCostUSD.toFixed(2)}/wk</span>
         {data.globalPatternsCount > 0 && <span>{data.globalPatternsCount} patterns</span>}
       </div>
 
@@ -149,7 +144,7 @@ export function StandupPanel() {
                 <div key={s.sessionId} className="text-xs text-stone-300 mb-1">
                   <span className="text-emerald-400">{s.goal}</span>
                   <span className="text-stone-500 ml-1">
-                    — {s.tasksCompleted} tasks{s.reworkCount > 0 ? `, ${s.reworkCount} rework` : ""} — ${s.costUSD.toFixed(2)}
+                    — {s.tasksCompleted} tasks{s.reworkCount > 0 ? `, ${s.reworkCount} rework` : ""}
                   </span>
                 </div>
               ))}

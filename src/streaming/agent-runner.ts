@@ -8,7 +8,7 @@ import { Result, ok, err } from "neverthrow";
 import type { AgentRunResult, StreamEvent, LLMMessage, StreamError, ToolCallRecord } from "./types.js";
 import type { ContextBuilder } from "./context-builder.js";
 import { ToolCallHandler } from "./tool-call-handler.js";
-import type { CostTracker } from "./cost-tracker.js";
+import type { TokenTracker } from "./cost-tracker.js";
 import type { AgentDefinition } from "../router/router-types.js";
 import type { ResolvedToolSet, ToolExecutionContext } from "../tools/types.js";
 import type { Session } from "../session/session.js";
@@ -32,7 +32,7 @@ export class AgentRunner extends EventEmitter {
     private llmProvider: LLMStreamProvider,
     private contextBuilder: ContextBuilder,
     private toolCallHandler: ToolCallHandler,
-    private costTracker: CostTracker,
+    private tokenTracker: TokenTracker,
     private contextTracker?: ContextTracker,
     private onContextUpdate?: (utilization: number, level: ContextLevel) => void,
   ) {
@@ -163,7 +163,7 @@ export class AgentRunner extends EventEmitter {
       totalOutput += turnUsage.output;
 
       // Track cost
-      this.costTracker.recordUsage(sessionId, agentId, "default", model ?? "default", turnUsage.input, turnUsage.output);
+      this.tokenTracker.recordUsage(sessionId, agentId, "default", model ?? "default", turnUsage.input, turnUsage.output);
 
       // Check for tool calls in the response
       const toolCalls = this.toolCallHandler.parseToolCalls(turnContent);
@@ -209,7 +209,6 @@ export class AgentRunner extends EventEmitter {
     }
 
     const duration = Date.now() - startTime;
-    const costUSD = this.costTracker.getSessionCost(sessionId).byAgent[agentId]?.costUSD ?? 0;
 
     const result: AgentRunResult = {
       agentId,
@@ -218,7 +217,6 @@ export class AgentRunner extends EventEmitter {
       toolCalls: allToolCalls,
       inputTokens: totalInput,
       outputTokens: totalOutput,
-      costUSD,
       duration,
     };
 
@@ -230,7 +228,6 @@ export class AgentRunner extends EventEmitter {
       toolCallCount: allToolCalls.length,
       inputTokens: totalInput,
       outputTokens: totalOutput,
-      costUSD,
       duration,
       timestamp: Date.now(),
     });
@@ -284,7 +281,6 @@ export class AgentRunner extends EventEmitter {
       toolCalls,
       inputTokens: input,
       outputTokens: output,
-      costUSD: 0,
       duration: Date.now() - startTime,
       error: "Aborted by user",
     });

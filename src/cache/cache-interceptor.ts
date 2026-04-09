@@ -11,8 +11,6 @@ import {
   CACHE_TTL,
   NEVER_CACHE_ROLES,
   MIN_CACHE_RESPONSE_LENGTH,
-  COST_PER_INPUT_TOKEN,
-  COST_PER_OUTPUT_TOKEN,
 } from "./types.js";
 import type { CacheEntry, SessionCacheStats } from "./types.js";
 import { logger } from "../core/logger.js";
@@ -24,7 +22,6 @@ const sessionStats: SessionCacheStats = {
   hits: 0,
   misses: 0,
   savedMs: 0,
-  savedUSD: 0,
 };
 
 export function getSessionCacheStats(): SessionCacheStats {
@@ -35,7 +32,6 @@ export function resetSessionCacheStats(): void {
   sessionStats.hits = 0;
   sessionStats.misses = 0;
   sessionStats.savedMs = 0;
-  sessionStats.savedUSD = 0;
 }
 
 async function ensureStore(): Promise<void> {
@@ -85,7 +81,6 @@ export async function* streamWithCache(
       sessionStats.hits++;
       const savedMs = 3000; // estimated time saved per hit
       sessionStats.savedMs += savedMs;
-      sessionStats.savedUSD += cached.costUSD;
       logger.debug(`[cache hit] ${agentRole} (saved ~${(savedMs / 1000).toFixed(1)}s)`);
 
       // Yield cached response as single chunk
@@ -113,9 +108,6 @@ export async function* streamWithCache(
   // Store in cache async (never block)
   const fullResponse = chunks.join("");
   if (fullResponse.length >= MIN_CACHE_RESPONSE_LENGTH) {
-    const costUSD =
-      tokensUsed * COST_PER_INPUT_TOKEN * 0.3 +
-      tokensUsed * COST_PER_OUTPUT_TOKEN * 0.7;
     const now = Date.now();
     const entry: CacheEntry = {
       key,
@@ -124,7 +116,6 @@ export async function* streamWithCache(
       agentRole,
       response: fullResponse,
       tokensUsed,
-      costUSD,
       hitCount: 0,
       createdAt: now,
       lastHitAt: now,

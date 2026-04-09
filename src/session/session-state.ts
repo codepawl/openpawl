@@ -107,11 +107,10 @@ export interface SessionState {
   trackedFiles: string[];
   modifiedFiles: FileModification[];
 
-  // Cost & metrics
+  // Token metrics
   totalInputTokens: number;
   totalOutputTokens: number;
-  totalCostUSD: number;
-  providerBreakdown: Record<string, { tokens: number; cost: number }>;
+  providerBreakdown: Record<string, { tokens: number }>;
 
   // Compression
   compressionCheckpoint: number;
@@ -145,7 +144,8 @@ export interface SessionListItem {
   createdAt: string;
   status: SessionStatus;
   messageCount: number;
-  totalCostUSD: number;
+  workingDirectory: string;
+  preview: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -171,7 +171,6 @@ export function createEmptySession(workingDirectory: string): SessionState {
     modifiedFiles: [],
     totalInputTokens: 0,
     totalOutputTokens: 0,
-    totalCostUSD: 0,
     providerBreakdown: {},
     compressionCheckpoint: 0,
     compressedSummary: null,

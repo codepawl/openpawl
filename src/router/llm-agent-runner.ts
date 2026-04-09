@@ -25,8 +25,10 @@ export interface ToolCallDetails {
 export interface LLMAgentRunnerOptions {
   onToken?: (agentId: string, token: string) => void;
   onToolCall?: (agentId: string, toolName: string, status: string, details?: ToolCallDetails) => void;
-  /** Get tool schemas for an agent's tool list. */
+  /** Get tool schemas for an agent's tool list (text-based fallback). */
   getToolSchemas?: (toolNames: string[]) => ToolDef[];
+  /** Get native tool definitions for API function calling. */
+  getNativeTools?: (toolNames: string[]) => import("../providers/stream-types.js").NativeToolDefinition[];
   /** Execute a tool and return the result as a string. */
   executeTool?: (toolName: string, args: Record<string, unknown>) => Promise<string>;
   /** Doom-loop detector — prevents repeated identical tool calls. */
@@ -46,7 +48,7 @@ export interface LLMAgentRunnerOptions {
  */
 export function createLLMAgentRunner(opts: LLMAgentRunnerOptions = {}): AgentRunner {
   const {
-    onToken, onToolCall, getToolSchemas, executeTool,
+    onToken, onToolCall, getToolSchemas, getNativeTools, executeTool,
     doomLoopDetector, toolOutputHandler, contextTracker, onContextUpdate,
   } = opts;
   const injectionDetector = new InjectionDetector();
@@ -69,7 +71,8 @@ export function createLLMAgentRunner(opts: LLMAgentRunnerOptions = {}): AgentRun
 
       // Get tool schemas if available
       const toolDefs = (tools.length > 0 && getToolSchemas) ? getToolSchemas(tools) : [];
-      const hasTools = toolDefs.length > 0 && executeTool;
+      const nativeToolDefs = (tools.length > 0 && getNativeTools) ? getNativeTools(tools) : [];
+      const hasTools = (toolDefs.length > 0 || nativeToolDefs.length > 0) && executeTool;
 
       // Enhance system prompt with project context, tool info, and working directory
       let systemPrompt = context.systemPrompt;
@@ -102,6 +105,7 @@ export function createLLMAgentRunner(opts: LLMAgentRunnerOptions = {}): AgentRun
             userMessage: prompt,
             priorMessages,
             tools: toolDefs,
+            nativeTools: nativeToolDefs,
             handleTool: async (name, args) => {
               const execId = `tc_${++toolCallCounter}`;
               const inputSummary = formatInputSummary(name, args);
@@ -252,7 +256,6 @@ function makeResult(
     duration: 0,
     inputTokens: usage?.input ?? 0,
     outputTokens: usage?.output ?? 0,
-    costUSD: 0,
     error,
   };
 }

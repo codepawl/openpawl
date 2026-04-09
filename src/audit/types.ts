@@ -37,7 +37,6 @@ export interface AuditTrail {
   cachePerformance?: {
     hitRate: number;
     entriesUsed: number;
-    costSaved: number;
     timeSavedMs: number;
   };
   providerStats?: {
@@ -56,7 +55,6 @@ export interface AuditSummary {
   averageConfidence: number;
   totalTokensInput: number;
   totalTokensOutput: number;
-  totalCostUSD: number;
 }
 
 export interface DecisionEntry {
@@ -82,7 +80,6 @@ export interface CostEntry {
   tasks: number;
   tokensInput: number;
   tokensOutput: number;
-  costUSD: number;
 }
 
 export interface MemoryUsageEntry {
@@ -136,8 +133,6 @@ export interface MultiRunSummary {
   totalRuns: number;
   runs: AuditTrail[];
   confidenceTrend: number[];
-  costPerRun: number[];
   patternsPromoted: string[];
-  totalCostUSD: number;
   totalDurationMs: number;
 }

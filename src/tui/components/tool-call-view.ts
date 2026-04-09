@@ -120,6 +120,18 @@ export class ToolCallView {
   get executionId(): string { return this.state.executionId; }
   get status(): string { return this.state.status; }
 
+  /** Render a single compact line for baking into chat history. */
+  renderOneLiner(): string {
+    const icon = this.getIcon();
+    const iconColor = this.getIconColor();
+    const verb = this.getVerb();
+    const target = this.state.inputSummary.slice(0, 50);
+    const dur = this.state.duration && this.state.duration > 100
+      ? ` ${formatDuration(this.state.duration)}`
+      : "";
+    return `${iconColor(icon)} ${verb} ${target}${dur}`;
+  }
+
   private getIcon(): string {
     switch (this.state.status) {
       case "pending": return defaultTheme.symbols.pending;

@@ -59,6 +59,7 @@
     "@t3-oss/env-core": "^0.13.10",
     "better-sqlite3": "^12.8.0",
     "bootstrap-icons": "^1.13.1",
+    "cli-highlight": "^2.1.11",
     "damerau-levenshtein": "^1.0.8",
     "fastify": "^5.8.2",
     "fastify-plugin": "^5.1.0",

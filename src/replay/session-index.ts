@@ -20,7 +20,6 @@ export function createSession(sessionId: string, goal: string, teamRoles: string
     createdAt: Date.now(),
     completedAt: 0,
     totalRuns: 0,
-    totalCostUSD: 0,
     averageConfidence: 0,
     recordingPath: "",
     recordingSizeBytes: 0,
@@ -35,7 +34,6 @@ export async function finalizeSession(
   sessionId: string,
   stats: {
     totalRuns: number;
-    totalCostUSD: number;
     averageConfidence: number;
   },
 ): Promise<void> {
@@ -48,7 +46,6 @@ export async function finalizeSession(
   if (entry) {
     entry.completedAt = Date.now();
     entry.totalRuns = stats.totalRuns;
-    entry.totalCostUSD = stats.totalCostUSD;
     entry.averageConfidence = stats.averageConfidence;
     entry.recordingSizeBytes = getRecordingSize(sessionId);
     addSessionToIndex(entry);

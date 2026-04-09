@@ -123,15 +123,14 @@ export class SessionManager extends EventEmitter {
     }
     this.idleTimers.clear();
 
-    // Checkpoint all active sessions
-    for (const [id, session] of this.activeSessions) {
+    // Quick-save all dirty sessions in parallel (skip index update + checkpoint)
+    const saves: Promise<void>[] = [];
+    for (const [, session] of this.activeSessions) {
       if (session.isDirty()) {
-        session.markCheckpoint();
-        await this.store.save(session);
-        await this.store.saveCheckpoint(session);
-        this.emit("checkpoint:saved", id);
+        saves.push(this.store.quickSave(session).then(() => {}).catch(() => {}));
       }
     }
+    await Promise.allSettled(saves);
 
     this.activeSessions.clear();
   }
@@ -227,6 +226,10 @@ export class SessionManager extends EventEmitter {
     return ok(undefined);
   }
 
+  getStore(): import("./session-store.js").SessionStore {
+    return this.store;
+  }
+
   getActive(): Session | null {
     for (const session of this.activeSessions.values()) {
       if (session.status === "active" || session.status === "idle") {
@@ -242,6 +245,10 @@ export class SessionManager extends EventEmitter {
     sortBy?: "updatedAt" | "createdAt";
   }): Promise<Result<SessionListItem[], SessionError>> {
     return this.store.list(options);
+  }
+
+  async listByWorkspace(workspacePath: string): Promise<Result<SessionListItem[], SessionError>> {
+    return this.store.listByWorkspace(workspacePath);
   }
 
   async delete(sessionId: string): Promise<Result<void, SessionError>> {
@@ -322,13 +329,11 @@ export class SessionManager extends EventEmitter {
     if (this.shutdownHooked) return;
     this.shutdownHooked = true;
 
-    const handler = () => {
-      // Best-effort sync-ish shutdown — schedule async work
+    // SIGINT is handled by the TUI layer (app/index.ts cleanup function).
+    // Only hook SIGTERM as a fallback for non-interactive shutdown.
+    process.once("SIGTERM", () => {
       void this.shutdown();
-    };
-
-    process.once("SIGINT", handler);
-    process.once("SIGTERM", handler);
+    });
   }
 
   /**

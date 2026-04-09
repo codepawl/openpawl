@@ -10,6 +10,7 @@
 import { getGlobalProviderManager } from "../providers/provider-factory.js";
 import { resolveModelForAgent } from "../core/model-config.js";
 import { compressContext, estimateTokens } from "../context/compressor.js";
+import type { ChatMessage, NativeToolDefinition } from "../providers/stream-types.js";
 
 // ── Types ──────────────────────────────────────────────
 
@@ -110,14 +111,14 @@ export async function callLLM(
  */
 export async function callLLMWithMessages(
   messages: Message[],
-  options?: LLMCallOptions & { tools?: ToolDef[]; maxContextTokens?: number },
+  options?: LLMCallOptions & { tools?: ToolDef[]; nativeTools?: NativeToolDefinition[]; maxContextTokens?: number },
 ): Promise<LLMResponse> {
   // Compress context if exceeding 70% of context window
-  let messagesToSerialize = messages;
+  let workMessages = messages;
   const maxCtx = options?.maxContextTokens ?? 128_000;
-  if (estimateTokens(messages) > maxCtx * 0.7 && messages.length > 6) {
+  if (estimateTokens(workMessages) > maxCtx * 0.7 && workMessages.length > 6) {
     const result = await compressContext(
-      messages,
+      workMessages,
       maxCtx,
       6,
       0.7,
@@ -129,29 +130,80 @@ export async function callLLMWithMessages(
         return resp.text;
       },
     );
-    messagesToSerialize = result.messages;
+    workMessages = result.messages;
   }
 
-  const prompt = serializeMessages(messagesToSerialize);
-  const systemParts: string[] = [];
+  const mgr = await getGlobalProviderManager();
+  const model = options?.model ?? resolveModelForAgent("agent");
 
-  if (options?.systemPrompt) {
-    systemParts.push(options.systemPrompt);
+  // Convert internal Message[] to provider ChatMessage[]
+  const chatMessages: ChatMessage[] = workMessages.map((m) => ({
+    role: m.role,
+    content: m.content,
+    toolCalls: m.toolCalls?.map((tc) => ({
+      id: tc.id,
+      name: tc.name,
+      arguments: JSON.stringify(tc.input),
+    })),
+    toolCallId: m.toolCallId,
+  }));
+
+  // Stream with native messages + tools
+  const nativeToolCount = options?.nativeTools?.length ?? 0;
+  if (nativeToolCount > 0) {
+    try {
+      const fs = await import("node:fs");
+      fs.writeFileSync("/tmp/openpawl-tools-debug.json", JSON.stringify({
+        nativeToolCount,
+        toolNames: options!.nativeTools!.map(t => t.function.name),
+        messageCount: chatMessages.length,
+        messageRoles: chatMessages.map(m => m.role),
+      }, null, 2));
+    } catch { /* ignore */ }
   }
 
-  if (options?.tools && options.tools.length > 0) {
-    systemParts.push(formatToolsPrompt(options.tools));
+  const chunks: string[] = [];
+  let usage = { input: 0, output: 0 };
+  let nativeToolCalls: Array<{ id: string; name: string; arguments: string }> | undefined;
+
+  for await (const chunk of mgr.stream("", {
+    model: model || undefined,
+    temperature: options?.temperature,
+    systemPrompt: options?.systemPrompt,
+    signal: options?.signal,
+    messages: chatMessages,
+    tools: options?.nativeTools,
+  })) {
+    if (chunk.content) {
+      chunks.push(chunk.content);
+      options?.onChunk?.(chunk.content);
+    }
+    if (chunk.toolCalls) {
+      nativeToolCalls = chunk.toolCalls;
+    }
+    if (chunk.done && chunk.usage) {
+      usage = {
+        input: chunk.usage.promptTokens,
+        output: chunk.usage.completionTokens,
+      };
+    }
   }
 
-  const response = await callLLM(prompt, {
-    ...options,
-    systemPrompt: systemParts.join("\n\n"),
-  });
+  const text = chunks.join("");
 
-  // Parse tool calls from the response text
-  const toolCalls = parseToolCalls(response.text);
+  // Prefer native tool calls from provider, fallback to text parsing
+  let toolCalls: ToolCall[] = [];
+  if (nativeToolCalls?.length) {
+    toolCalls = nativeToolCalls.map((tc) => ({
+      id: tc.id,
+      name: tc.name,
+      input: JSON.parse(tc.arguments || "{}"),
+    }));
+  } else if (text) {
+    toolCalls = parseToolCalls(text);
+  }
 
-  return { ...response, toolCalls };
+  return { text, toolCalls, usage };
 }
 
 /**
@@ -164,6 +216,8 @@ export async function callLLMMultiTurn(opts: {
   systemPrompt?: string;
   userMessage: string;
   tools?: ToolDef[];
+  /** Native tool definitions (OpenAI function-calling format). Preferred over text-based tools. */
+  nativeTools?: NativeToolDefinition[];
   handleTool: (name: string, args: Record<string, unknown>) => Promise<string>;
   onChunk?: (text: string) => void;
   onToolCall?: (name: string, args: Record<string, unknown>) => void;
@@ -199,6 +253,7 @@ export async function callLLMMultiTurn(opts: {
       model: opts.model,
       systemPrompt: opts.systemPrompt,
       tools: opts.tools,
+      nativeTools: opts.nativeTools,
       onChunk: opts.onChunk,
       signal: opts.signal,
       temperature: opts.temperature,
@@ -248,47 +303,6 @@ export async function callLLMMultiTurn(opts: {
 }
 
 // ── Internal helpers ───────────────────────────────────
-
-/**
- * Serialize a messages array into a single prompt string.
- * Models understand this format from training on chat transcripts.
- */
-function serializeMessages(messages: Message[]): string {
-  return messages
-    .filter(m => m.role !== "system") // system is passed separately
-    .map(m => {
-      if (m.role === "tool") {
-        return `[Tool Result${m.toolCallId ? ` (${m.toolCallId})` : ""}]\n${m.content}`;
-      }
-      const prefix = m.role === "user" ? "User" : "Assistant";
-      return `${prefix}: ${m.content}`;
-    })
-    .join("\n\n");
-}
-
-/**
- * Format tool definitions into a system prompt section.
- */
-function formatToolsPrompt(tools: ToolDef[]): string {
-  const toolDescriptions = tools.map(t => {
-    const params = JSON.stringify(t.parameters, null, 2);
-    return `### ${t.name}\n${t.description}\nParameters:\n\`\`\`json\n${params}\n\`\`\``;
-  }).join("\n\n");
-
-  return `## Available Tools
-
-You have access to the following tools. To use a tool, respond with a tool_call block:
-
-\`\`\`tool_call
-{"name": "tool_name", "input": {"param": "value"}}
-\`\`\`
-
-You can make multiple tool calls in a single response. After each tool call, you will receive the result and can continue.
-
-When you are done and have no more tool calls to make, respond with your final answer as plain text (no tool_call blocks).
-
-${toolDescriptions}`;
-}
 
 /**
  * Parse tool_call blocks from model response text.

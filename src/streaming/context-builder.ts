@@ -6,12 +6,15 @@
 import { Result, ok, err } from "neverthrow";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { LLMToolSchema } from "../tools/types.js";
+import type { NativeToolDefinition } from "../providers/stream-types.js";
 import type { Session } from "../session/session.js";
 import type { LLMMessage, StreamError } from "./types.js";
 
 export interface BuiltContext {
   messages: LLMMessage[];
   toolSchemas: LLMToolSchema[];
+  /** Native tool definitions for API function calling. */
+  nativeTools: NativeToolDefinition[];
   estimatedTokens: number;
   compressionApplied: boolean;
 }
@@ -34,29 +37,11 @@ export class ContextBuilder {
       const maxTokens = options.maxContextTokens ?? 100_000;
 
       // 1. System message
-      let systemContent = options.agentSystemPrompt || `You are ${options.agentId}, an AI assistant.`;
+      const systemContent = options.agentSystemPrompt || `You are ${options.agentId}, an AI assistant.`;
 
-      // Append tool descriptions to system prompt
-      const toolSchemas = this.toolRegistry.exportForLLM(options.tools);
-      if (toolSchemas.length > 0) {
-        systemContent += "\n\n## Available Tools\n\n";
-        systemContent += "To use a tool, respond with a tool_call block:\n\n";
-        systemContent += "```tool_call\n{\"name\": \"tool_name\", \"input\": {\"param\": \"value\"}}\n```\n\n";
-        systemContent += "You can make multiple tool calls in a single response. ";
-        systemContent += "After each tool call, you will receive the result and can continue.\n\n";
-        systemContent += "When done, respond with your final answer as plain text.\n\n";
-
-        for (const schema of toolSchemas) {
-          systemContent += `### ${schema.name}\n${schema.description}\n`;
-          if (schema.parameters && typeof schema.parameters === "object") {
-            const props = (schema.parameters as Record<string, unknown>).properties;
-            if (props && typeof props === "object") {
-              systemContent += "Parameters: " + Object.keys(props as Record<string, unknown>).join(", ") + "\n";
-            }
-          }
-          systemContent += "\n";
-        }
-      }
+      // Tools are now passed via native API tool calling (not system prompt).
+      // Export native tool definitions for the provider.
+      const nativeTools = this.toolRegistry.exportForAPI(options.tools);
 
       messages.push({ role: "system", content: systemContent });
 
@@ -96,7 +81,12 @@ export class ContextBuilder {
 
       return ok({
         messages,
-        toolSchemas,
+        toolSchemas: nativeTools.map((t) => ({
+          name: t.function.name,
+          description: t.function.description,
+          parameters: t.function.parameters,
+        })),
+        nativeTools,
         estimatedTokens,
         compressionApplied: false,
       });

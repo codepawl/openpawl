@@ -1,5 +1,5 @@
 /**
- * Learning Curve chart — shows confidence, cost, and auto-approval trends across runs.
+ * Learning Curve chart — shows confidence and auto-approval trends across runs.
  * Uses lightweight SVG rendering (no external charting dependency required).
  */
 
@@ -11,11 +11,10 @@ export interface LearningCurveProps {
 export interface LearningCurvePoint {
   runIndex: number;
   averageConfidence: number;
-  totalCostUSD: number;
   autoApprovedPct: number;
 }
 
-type Metric = "confidence" | "cost" | "autoApproved";
+type Metric = "confidence" | "autoApproved";
 
 import { useState } from "react";
 
@@ -38,7 +37,6 @@ export function LearningCurve({ sessionId, runs }: LearningCurveProps) {
 
   const values = runs.map((r) => {
     if (metric === "confidence") return r.averageConfidence;
-    if (metric === "cost") return r.totalCostUSD;
     return r.autoApprovedPct;
   });
 
@@ -55,10 +53,10 @@ export function LearningCurve({ sessionId, runs }: LearningCurveProps) {
   }));
 
   const pathD = points.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
-  const lineColor = metric === "confidence" ? "#10b981" : metric === "cost" ? "#f59e0b" : "#6366f1";
+  const lineColor = metric === "confidence" ? "#10b981" : "#6366f1";
 
-  const label = metric === "confidence" ? "Avg Confidence" : metric === "cost" ? "Total Cost (USD)" : "Auto-Approved %";
-  const formatter = metric === "confidence" ? (v: number) => v.toFixed(2) : metric === "cost" ? (v: number) => `$${v.toFixed(3)}` : (v: number) => `${(v * 100).toFixed(0)}%`;
+  const label = metric === "confidence" ? "Avg Confidence" : "Auto-Approved %";
+  const formatter = metric === "confidence" ? (v: number) => v.toFixed(2) : (v: number) => `${(v * 100).toFixed(0)}%`;
 
   return (
     <div className="rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 p-4 space-y-3">
@@ -67,7 +65,7 @@ export function LearningCurve({ sessionId, runs }: LearningCurveProps) {
           Learning Curve — {sessionId}
         </h4>
         <div className="flex gap-1">
-          {(["confidence", "cost", "autoApproved"] as Metric[]).map((m) => (
+          {(["confidence", "autoApproved"] as Metric[]).map((m) => (
             <button
               key={m}
               type="button"
@@ -78,7 +76,7 @@ export function LearningCurve({ sessionId, runs }: LearningCurveProps) {
                   : "bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-400"
               }`}
             >
-              {m === "confidence" ? "Confidence" : m === "cost" ? "Cost" : "Auto-Approved"}
+              {m === "confidence" ? "Confidence" : "Auto-Approved"}
             </button>
           ))}
         </div>

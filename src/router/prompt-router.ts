@@ -145,12 +145,10 @@ export class PromptRouter extends EventEmitter {
           duration: 0,
           inputTokens: 0,
           outputTokens: 0,
-          costUSD: 0,
         }],
         totalDuration: 0,
         totalInputTokens: 0,
         totalOutputTokens: 0,
-        totalCostUSD: 0,
       });
     }
 
@@ -206,12 +204,10 @@ export class PromptRouter extends EventEmitter {
           duration: 0,
           inputTokens: 0,
           outputTokens: 0,
-          costUSD: 0,
         }],
         totalDuration: 0,
         totalInputTokens: 0,
         totalOutputTokens: 0,
-        totalCostUSD: 0,
       });
     }
 
@@ -293,10 +289,17 @@ export class PromptRouter extends EventEmitter {
 
   private async handleAgentsList(_sessionId: string): Promise<Result<string, RouterError>> {
     const agents = this.registry.getAll();
+    const termWidth = process.stdout.columns ?? 80;
+    const nameCol = 15;
+    const tierCol = 10;
+    const descCol = Math.max(20, termWidth - nameCol - tierCol - 6); // 6 = padding/margins
     const lines = ["Available agents:", ""];
     for (const a of agents) {
-      const tier = `[${a.modelTier}]`.padEnd(10);
-      lines.push(`  ${a.id.padEnd(14)} ${tier} ${a.description}`);
+      const tier = `[${a.modelTier}]`.padEnd(tierCol);
+      const desc = a.description.length > descCol
+        ? a.description.slice(0, descCol - 1) + "…"
+        : a.description;
+      lines.push(`  ${a.id.padEnd(nameCol)} ${tier} ${desc}`);
     }
     return ok(lines.join("\n"));
   }
@@ -304,7 +307,7 @@ export class PromptRouter extends EventEmitter {
   private async handleCost(_sessionId: string): Promise<Result<string, RouterError>> {
     const session = this.sessionManager.getActive();
     if (!session) return ok("No active session.");
-    const { input, output } = session.cost;
+    const { input, output } = session.tokens;
     const breakdown = session.getState().providerBreakdown;
     const total = input + output;
     const fmt = (n: number) => n < 1000 ? String(n) : n < 10_000 ? `${(n / 1000).toFixed(1)}k` : n < 1_000_000 ? `${Math.round(n / 1000)}k` : `${(n / 1_000_000).toFixed(1)}M`;

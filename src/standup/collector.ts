@@ -28,14 +28,12 @@ export async function collectStandupData(window: StandupTimeWindow): Promise<Sta
     date: new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" }),
     yesterday: {
       sessions: [],
-      totalCostUSD: 0,
       totalTasks: 0,
       teamLearnings: [],
     },
     blocked: [],
     suggested: [],
     streak: 0,
-    weekCostUSD: 0,
     globalPatternsCount: 0,
   };
 
@@ -73,7 +71,6 @@ export async function collectStandupData(window: StandupTimeWindow): Promise<Sta
         tasksCompleted,
         reworkCount,
         allApproved,
-        costUSD: session.totalCostUSD,
       });
 
       // Team learnings
@@ -88,13 +85,11 @@ export async function collectStandupData(window: StandupTimeWindow): Promise<Sta
         tasksCompleted: 0,
         reworkCount: 0,
         allApproved: true,
-        costUSD: session.totalCostUSD,
       });
     }
   }
 
   result.yesterday.sessions = sessionSummaries;
-  result.yesterday.totalCostUSD = sessionSummaries.reduce((sum, s) => sum + s.costUSD, 0);
   result.yesterday.totalTasks = sessionSummaries.reduce((sum, s) => sum + s.tasksCompleted, 0);
   // Deduplicate learnings
   const seen = new Set<string>();
@@ -239,17 +234,7 @@ export async function collectStandupData(window: StandupTimeWindow): Promise<Sta
     result.streak = 0;
   }
 
-  // 6. Week cost — sum totalCostUSD for sessions since Monday 00:00 local time
-  try {
-    const mondayMs = getMondayMidnight();
-    const allSessions = listSessions();
-    const weekSessions = allSessions.filter((s) => s.completedAt >= mondayMs);
-    result.weekCostUSD = weekSessions.reduce((sum, s) => sum + s.totalCostUSD, 0);
-  } catch {
-    result.weekCostUSD = 0;
-  }
-
-  // 7. Global patterns count
+  // 6. Global patterns count
   try {
     const { GlobalMemoryManager } = await import("../memory/global/store.js");
     const { VectorMemory } = await import("../core/knowledge-base.js");
@@ -298,7 +283,6 @@ export async function collectWeeklySummary(): Promise<WeeklySummary> {
     tasksCompleted: 0,
     autoApproved: 0,
     reworkCount: 0,
-    totalCostUSD: 0,
     avgConfidence: 0,
     prevWeekAvgConfidence: null,
     newGlobalPatterns: 0,
@@ -321,7 +305,6 @@ export async function collectWeeklySummary(): Promise<WeeklySummary> {
   );
 
   summary.sessionCount = weekSessions.length;
-  summary.totalCostUSD = weekSessions.reduce((sum, s) => sum + s.totalCostUSD, 0);
 
   // Average confidence from session index
   if (weekSessions.length > 0) {
@@ -345,7 +328,7 @@ export async function collectWeeklySummary(): Promise<WeeklySummary> {
   }
 
   // Per-day tracking for active days, best day, domains
-  const dayMap = new Map<string, { taskCount: number; costUSD: number; confidenceSum: number; confidenceCount: number }>();
+  const dayMap = new Map<string, { taskCount: number; confidenceSum: number; confidenceCount: number }>();
   const domainMap = new Map<string, number>();
   let totalAutoApproved = 0;
   let totalRework = 0;
@@ -380,9 +363,8 @@ export async function collectWeeklySummary(): Promise<WeeklySummary> {
 
       // Day tracking
       const dayLabel = new Date(session.completedAt).toISOString().slice(0, 10);
-      const existing = dayMap.get(dayLabel) ?? { taskCount: 0, costUSD: 0, confidenceSum: 0, confidenceCount: 0 };
+      const existing = dayMap.get(dayLabel) ?? { taskCount: 0, confidenceSum: 0, confidenceCount: 0 };
       existing.taskCount += sessionTaskCount;
-      existing.costUSD += session.totalCostUSD;
       existing.confidenceSum += session.averageConfidence;
       existing.confidenceCount += 1;
       dayMap.set(dayLabel, existing);
@@ -419,7 +401,6 @@ export async function collectWeeklySummary(): Promise<WeeklySummary> {
       bestDay = {
         dayLabel,
         taskCount: data.taskCount,
-        costUSD: data.costUSD,
         avgConfidence: avgConf,
       };
     }

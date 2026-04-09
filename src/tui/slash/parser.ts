@@ -29,8 +29,10 @@ export function parseInput(raw: string): ParsedInput {
     return { type: "shell", command: trimmed.slice(1).trim() };
   }
 
-  // Check for @file references
-  const fileMatch = trimmed.match(/@([\w./-]+)/);
+  // Check for @file references — only match paths containing '.' or '/'
+  // (e.g. @src/app.ts, @config.json). Bare words like @coder are left as
+  // plain messages so the router can handle agent mentions.
+  const fileMatch = trimmed.match(/@([\w./-]*[./][\w./-]*)/);
   if (fileMatch) {
     return {
       type: "file_ref",

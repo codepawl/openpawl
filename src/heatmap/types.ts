@@ -14,8 +14,6 @@ export interface AgentUtilization {
   maxDurationMs: number;
   minDurationMs: number;
   averageConfidence: number;
-  totalCostUSD: number;
-  costPerTask: number;
   tokensUsed: number;
   bottleneckScore: number;
   queueDepth: number;
@@ -90,6 +88,5 @@ export interface GlobalUtilizationEntry {
   utilizationPct: number;
   bottleneckScore: number;
   averageConfidence: number;
-  totalCostUSD: number;
   tasksHandled: number;
 }

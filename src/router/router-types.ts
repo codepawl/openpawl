@@ -107,7 +107,6 @@ export interface AgentResult {
   duration: number;
   inputTokens: number;
   outputTokens: number;
-  costUSD: number;
   error?: string;
 }
 
@@ -117,7 +116,6 @@ export interface DispatchResult {
   totalDuration: number;
   totalInputTokens: number;
   totalOutputTokens: number;
-  totalCostUSD: number;
 }
 
 // ─── Errors ──────────────────────────────────────────────────────────────────

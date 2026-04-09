@@ -46,40 +46,75 @@ export class AnthropicProvider implements StreamProvider {
 
   async *stream(prompt: string, options?: StreamOptions): AsyncGenerator<StreamChunk, void, undefined> {
     const client = this.getClient();
+
+    // Build messages: use native messages if provided, otherwise from prompt
+    const messages: Anthropic.MessageParam[] = options?.messages
+      ? options.messages
+          .filter((m) => m.role !== "system")
+          .map((m) => this.mapToAnthropicMessage(m))
+      : [{ role: "user" as const, content: prompt }];
+
     const params: Anthropic.MessageCreateParams = {
       model: options?.model ?? this.model,
       max_tokens: 4096,
-      messages: [{ role: "user", content: prompt }],
+      messages,
     };
+
+    // System prompt
     if (options?.systemPrompt) {
       if (this.promptCachingEnabled) {
-        // cache_control breakpoints — only for API key auth, not OAuth
         params.system = [
-          {
-            type: "text" as const,
-            text: options.systemPrompt,
-            cache_control: { type: "ephemeral" as const },
-          },
+          { type: "text" as const, text: options.systemPrompt, cache_control: { type: "ephemeral" as const } },
         ];
       } else {
-        params.system = [
-          {
-            type: "text" as const,
-            text: options.systemPrompt,
-          },
-        ];
+        params.system = [{ type: "text" as const, text: options.systemPrompt }];
       }
     }
 
-    logger.debug(`[anthropic] streaming with model=${params.model}`);
+    // Native tools (Anthropic format)
+    if (options?.tools?.length) {
+      params.tools = options.tools.map((t) => ({
+        name: t.function.name,
+        description: t.function.description,
+        input_schema: t.function.parameters as Anthropic.Tool.InputSchema,
+      }));
+    }
+
+    logger.debug(`[anthropic] streaming with model=${params.model}, tools=${options?.tools?.length ?? 0}`);
 
     try {
       const stream = client.messages.stream(params);
+      const pendingToolCalls: Array<{ id: string; name: string; arguments: string }> = [];
+      let currentToolInput = "";
+      let currentToolId = "";
+      let currentToolName = "";
+
       for await (const event of stream) {
-        if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
-          yield { content: event.delta.text, done: false };
+        if (event.type === "content_block_start") {
+          if (event.content_block.type === "tool_use") {
+            currentToolId = event.content_block.id;
+            currentToolName = event.content_block.name;
+            currentToolInput = "";
+          }
+        } else if (event.type === "content_block_delta") {
+          if (event.delta.type === "text_delta") {
+            yield { content: event.delta.text, done: false };
+          } else if (event.delta.type === "input_json_delta") {
+            currentToolInput += event.delta.partial_json;
+          }
+        } else if (event.type === "content_block_stop") {
+          if (currentToolId) {
+            pendingToolCalls.push({
+              id: currentToolId,
+              name: currentToolName,
+              arguments: currentToolInput,
+            });
+            currentToolId = "";
+            currentToolName = "";
+            currentToolInput = "";
+          }
         } else if (event.type === "message_stop") {
-          let usage: { promptTokens: number; completionTokens: number; cacheReadTokens?: number; cacheCreationTokens?: number } | undefined;
+          let usage: StreamChunk["usage"];
           try {
             const msg = await stream.finalMessage();
             if (msg?.usage) {
@@ -95,10 +130,11 @@ export class AnthropicProvider implements StreamProvider {
               if (cacheRead > 0) recordPromptCacheHit(cacheRead);
               if (cacheCreation > 0) recordPromptCacheCreation(cacheCreation);
             }
-          } catch {
-            // Usage stats unavailable
-          }
-          yield { content: "", done: true, usage };
+          } catch { /* usage stats unavailable */ }
+
+          const toolCalls = pendingToolCalls.length > 0 ? [...pendingToolCalls] : undefined;
+          const finishReason = toolCalls ? "tool_calls" : "stop";
+          yield { content: "", done: true, usage, toolCalls, finishReason };
           this.lastSuccessAt = Date.now();
         }
       }
@@ -114,6 +150,34 @@ export class AnthropicProvider implements StreamProvider {
         cause: err,
       });
     }
+  }
+
+  /** Map internal ChatMessage to Anthropic's message format. */
+  private mapToAnthropicMessage(m: import("./stream-types.js").ChatMessage): Anthropic.MessageParam {
+    if (m.role === "assistant" && m.toolCalls?.length) {
+      const content: Anthropic.ContentBlockParam[] = [];
+      if (m.content) content.push({ type: "text", text: m.content });
+      for (const tc of m.toolCalls) {
+        content.push({
+          type: "tool_use",
+          id: tc.id,
+          name: tc.name,
+          input: JSON.parse(tc.arguments || "{}"),
+        });
+      }
+      return { role: "assistant", content };
+    }
+    if (m.role === "tool") {
+      return {
+        role: "user",
+        content: [{
+          type: "tool_result",
+          tool_use_id: m.toolCallId ?? "",
+          content: m.content ?? "",
+        }],
+      };
+    }
+    return { role: m.role as "user" | "assistant", content: m.content ?? "" };
   }
 
   async healthCheck(): Promise<boolean> {

@@ -99,8 +99,6 @@ export async function diffSessions(sessionIdA: string, sessionIdB: string): Prom
     taskCountB,
     avgConfidenceA: a.averageConfidence,
     avgConfidenceB: b.averageConfidence,
-    costA: a.totalCostUSD,
-    costB: b.totalCostUSD,
     durationA: a.completedAt - a.createdAt,
     durationB: b.completedAt - b.createdAt,
     changedNodes,

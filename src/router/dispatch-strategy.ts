@@ -236,7 +236,6 @@ export class Dispatcher extends EventEmitter {
       duration: 0,
       inputTokens: 0,
       outputTokens: 0,
-      costUSD: 0,
     };
 
     return {
@@ -295,7 +294,6 @@ function makeFailedResult(agentId: string, error: string): AgentResult {
     duration: 0,
     inputTokens: 0,
     outputTokens: 0,
-    costUSD: 0,
     error,
   };
 }
@@ -304,21 +302,18 @@ function aggregateCosts(results: AgentResult[]): {
   totalDuration: number;
   totalInputTokens: number;
   totalOutputTokens: number;
-  totalCostUSD: number;
 } {
   let totalDuration = 0;
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
-  let totalCostUSD = 0;
 
   for (const r of results) {
     totalDuration += r.duration;
     totalInputTokens += r.inputTokens;
     totalOutputTokens += r.outputTokens;
-    totalCostUSD += r.costUSD;
   }
 
-  return { totalDuration, totalInputTokens, totalOutputTokens, totalCostUSD };
+  return { totalDuration, totalInputTokens, totalOutputTokens };
 }
 
 function emptyResult(strategy: DispatchResult["strategy"]): DispatchResult {
@@ -328,6 +323,5 @@ function emptyResult(strategy: DispatchResult["strategy"]): DispatchResult {
     totalDuration: 0,
     totalInputTokens: 0,
     totalOutputTokens: 0,
-    totalCostUSD: 0,
   };
 }

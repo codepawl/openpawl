@@ -26,7 +26,6 @@ export function computeRunDiff(from: RunSnapshot, to: RunSnapshot): RunDiff {
     const confidenceDelta = toTask.confidence - fromTask.confidence;
     const reworkCountDelta = toTask.reworkCount - fromTask.reworkCount;
     const durationDelta = toTask.durationMs - fromTask.durationMs;
-    const costDelta = toTask.costUSD - fromTask.costUSD;
 
     const agentChanged = fromTask.assignedTo !== toTask.assignedTo
       ? { from: fromTask.assignedTo, to: toTask.assignedTo }
@@ -41,8 +40,7 @@ export function computeRunDiff(from: RunSnapshot, to: RunSnapshot): RunDiff {
       reworkCountDelta !== 0 ||
       agentChanged !== undefined ||
       approvalChanged !== undefined ||
-      Math.abs(durationDelta) > 100 ||
-      Math.abs(costDelta) > 0.0001;
+      Math.abs(durationDelta) > 100;
 
     taskDiffs.push({
       taskId: toTask.taskId,
@@ -53,7 +51,6 @@ export function computeRunDiff(from: RunSnapshot, to: RunSnapshot): RunDiff {
       agentChanged,
       approvalChanged,
       durationDelta,
-      costDelta: Math.round(costDelta * 10000) / 10000,
     });
   }
 
@@ -101,7 +98,6 @@ function computeMetricDiffs(
 ): MetricDiff {
   return {
     averageConfidenceDelta: Math.round((to.averageConfidence - from.averageConfidence) * 100) / 100,
-    totalCostDelta: Math.round((to.totalCostUSD - from.totalCostUSD) * 10000) / 10000,
     totalDurationDelta: to.totalDurationMs - from.totalDurationMs,
     reworkCountDelta: to.totalReworks - from.totalReworks,
     autoApprovedDelta: to.autoApprovedCount - from.autoApprovedCount,
@@ -181,7 +177,6 @@ export function extractRunSnapshot(
       reworkCount: (t.retry_count as number) ?? 0,
       approvalStatus: routing || ((t.status as string) ?? ""),
       durationMs: (t.timebox_minutes as number) ?? 0,
-      costUSD: 0, // approximated from tokens if available
     };
   });
 
@@ -208,7 +203,6 @@ export function extractRunSnapshot(
     runIndex,
     tasks,
     averageConfidence: avgConfidence,
-    totalCostUSD: 0, // computed from events if needed
     totalDurationMs: completedAt - startedAt,
     totalReworks,
     autoApprovedCount: autoApproved,

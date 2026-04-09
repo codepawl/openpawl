@@ -17,7 +17,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { Result, ok, err } from "neverthrow";
-import type { SessionStatus, SessionError, SessionListItem } from "./session-state.js";
+import type { SessionStatus, SessionState, SessionError, SessionListItem } from "./session-state.js";
 import { shortId } from "./session-state.js";
 import { Session } from "./session.js";
 import { serialize, deserialize } from "./session-serializer.js";
@@ -43,6 +43,20 @@ export class SessionStore {
       const data = serialize(session);
       await this.atomicWrite(path.join(sessionDir, "state.json"), data);
       await this.updateIndex(session);
+      session.markClean();
+      return ok(undefined);
+    } catch (e) {
+      return err({ type: "io_failed", cause: String(e) });
+    }
+  }
+
+  /** Fast save for shutdown — writes state.json only, skips index update. */
+  async quickSave(session: Session): Promise<Result<void, SessionError>> {
+    try {
+      const sessionDir = this.sessionDir(session.id);
+      await mkdir(sessionDir, { recursive: true, mode: 0o700 });
+      const data = serialize(session);
+      await this.atomicWrite(path.join(sessionDir, "state.json"), data);
       session.markClean();
       return ok(undefined);
     } catch (e) {
@@ -113,6 +127,14 @@ export class SessionStore {
     } catch (e) {
       return err({ type: "io_failed", cause: String(e) });
     }
+  }
+
+  async listByWorkspace(workspacePath: string): Promise<Result<SessionListItem[], SessionError>> {
+    const result = await this.list({ sortBy: "updatedAt", sortOrder: "desc" });
+    if (result.isErr()) return result;
+    return ok(result.value.filter(
+      (item) => item.workingDirectory === workspacePath && item.status !== "archived",
+    ));
   }
 
   // ========================= CHECKPOINT ====================================
@@ -277,7 +299,8 @@ export class SessionStore {
       createdAt: state.createdAt,
       status: state.status,
       messageCount: state.messageCount,
-      totalCostUSD: state.totalCostUSD,
+      workingDirectory: state.workingDirectory,
+      preview: this.extractPreview(state),
     };
 
     const idx = items.findIndex((i) => i.id === entry.id);
@@ -288,6 +311,12 @@ export class SessionStore {
     }
 
     await this.writeIndex(items);
+  }
+
+  private extractPreview(state: SessionState): string {
+    const firstUser = state.messages.find((m) => m.role === "user");
+    if (!firstUser) return "";
+    return firstUser.content.replace(/\s+/g, " ").trim().slice(0, 80);
   }
 
   private async removeFromIndex(sessionId: string): Promise<void> {

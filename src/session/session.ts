@@ -45,11 +45,10 @@ export class Session {
     return this.state.status === "active" || this.state.status === "idle";
   }
 
-  get cost(): { input: number; output: number; usd: number } {
+  get tokens(): { input: number; output: number } {
     return {
       input: this.state.totalInputTokens,
       output: this.state.totalOutputTokens,
-      usd: 0,
     };
   }
 
@@ -66,6 +65,15 @@ export class Session {
   }
 
   // ========================= WRITE =========================================
+
+  /** Clear all messages and reset compression state. */
+  clearMessages(): void {
+    this.state.messages = [];
+    this.state.messageCount = 0;
+    this.state.compressedSummary = null;
+    this.state.compressionCheckpoint = 0;
+    this.touch();
+  }
 
   addMessage(
     msg: Omit<SessionMessage, "id" | "timestamp">,
@@ -156,7 +164,6 @@ export class Session {
     provider: string,
     input: number,
     output: number,
-    _costUSD: number,
   ): void {
     this.state.totalInputTokens += input;
     this.state.totalOutputTokens += output;
@@ -167,7 +174,6 @@ export class Session {
     } else {
       this.state.providerBreakdown[provider] = {
         tokens: input + output,
-        cost: 0,
       };
     }
     this.touch();

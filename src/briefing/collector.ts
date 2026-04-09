@@ -281,7 +281,6 @@ export async function collectBriefingData(): Promise<BriefingData> {
     standupData.suggested = generateSuggestions(standupData.blocked, standupData.yesterday.sessions);
     standupSummary = {
       sessionCount: standupData.yesterday.sessions.length,
-      totalCost: standupData.yesterday.totalCostUSD,
       topBlocked: standupData.blocked[0]?.description ?? null,
       topSuggestion: standupData.suggested[0]?.description ?? null,
     };
@@ -299,7 +298,6 @@ export async function collectBriefingData(): Promise<BriefingData> {
       if (stats.totalEntries > 0) {
         cacheStats = {
           hitRate: stats.hitRate,
-          totalSavingsUSD: stats.totalSavingsUSD,
         };
       }
     }
@@ -313,7 +311,6 @@ export async function collectBriefingData(): Promise<BriefingData> {
       goal: lastCompleted.goal,
       completedAt: lastCompleted.completedAt,
       daysAgo,
-      totalCostUSD: lastCompleted.totalCostUSD,
       tasksCompleted: completedTasks.length,
     },
     whatWasBuilt,

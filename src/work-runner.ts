@@ -1197,7 +1197,6 @@ export async function runWork(
     setActiveRecorder(null);
     finalizeSession(replaySessionId, {
       totalRuns: maxRuns,
-      totalCostUSD: 0,
       averageConfidence: 0,
     }).catch(() => {});
 

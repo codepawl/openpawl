@@ -122,33 +122,66 @@ export class OpenAICompatibleProvider implements StreamProvider {
       });
     }
 
-    const messages: OpenAI.ChatCompletionMessageParam[] = [];
-    if (options?.systemPrompt) {
-      messages.push({ role: "system", content: options.systemPrompt });
-    }
-    messages.push({ role: "user", content: prompt });
+    // Build messages: use native messages if provided, otherwise build from prompt
+    const messages: OpenAI.ChatCompletionMessageParam[] = options?.messages
+      ? options.messages.map((m) => mapToOpenAIMessage(m))
+      : buildSimpleMessages(prompt, options);
 
-    logger.debug(`[${this.name}] streaming with model=${model}`);
+    logger.debug(`[${this.name}] streaming with model=${model}, tools=${options?.tools?.length ?? 0}`);
 
     try {
-      const stream = await client.chat.completions.create(
-        {
-          model,
-          messages,
-          temperature: options?.temperature,
-          stream: true,
-          stream_options: { include_usage: true },
-        },
-        { signal: options?.signal },
-      );
+      const requestBody: OpenAI.ChatCompletionCreateParamsStreaming = {
+        model,
+        messages,
+        temperature: options?.temperature,
+        stream: true,
+        stream_options: { include_usage: true },
+      };
+
+      // Add native tools if provided
+      if (options?.tools?.length) {
+        requestBody.tools = options.tools.map((t) => ({
+          type: "function" as const,
+          function: t.function,
+        }));
+      }
+
+      const stream = await client.chat.completions.create(requestBody, { signal: options?.signal });
 
       let usage: { promptTokens: number; completionTokens: number } | undefined;
+      let finishReason: string | undefined;
+
+      // Accumulate tool calls across streaming chunks (arguments arrive incrementally)
+      const pendingToolCalls = new Map<number, { id: string; name: string; arguments: string }>();
 
       for await (const chunk of stream) {
-        const delta = chunk.choices[0]?.delta;
+        const choice = chunk.choices[0];
+        const delta = choice?.delta;
+
+        // Text content
         if (delta?.content) {
           yield { content: delta.content, done: false };
         }
+
+        // Native tool calls — accumulate across chunks
+        if (delta?.tool_calls) {
+          for (const tc of delta.tool_calls) {
+            if (!pendingToolCalls.has(tc.index)) {
+              pendingToolCalls.set(tc.index, { id: tc.id ?? "", name: "", arguments: "" });
+            }
+            const pending = pendingToolCalls.get(tc.index)!;
+            if (tc.id) pending.id = tc.id;
+            if (tc.function?.name) pending.name = tc.function.name;
+            if (tc.function?.arguments) pending.arguments += tc.function.arguments;
+          }
+        }
+
+        // Track finish reason
+        if (choice?.finish_reason) {
+          finishReason = choice.finish_reason;
+        }
+
+        // Usage stats
         if (chunk.usage) {
           usage = {
             promptTokens: chunk.usage.prompt_tokens,
@@ -157,7 +190,12 @@ export class OpenAICompatibleProvider implements StreamProvider {
         }
       }
 
-      yield { content: "", done: true, usage };
+      // Emit final chunk with completed tool calls
+      const completedToolCalls = pendingToolCalls.size > 0
+        ? [...pendingToolCalls.values()]
+        : undefined;
+
+      yield { content: "", done: true, usage, toolCalls: completedToolCalls, finishReason };
       this.lastSuccessAt = Date.now();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -206,4 +244,44 @@ export class OpenAICompatibleProvider implements StreamProvider {
   setAvailable(available: boolean): void {
     this.available = available;
   }
+}
+
+// ── Message mapping helpers ──────────────────────────────
+
+import type { ChatMessage } from "./stream-types.js";
+
+/** Build simple messages from a prompt string (legacy path). */
+function buildSimpleMessages(prompt: string, options?: StreamOptions): OpenAI.ChatCompletionMessageParam[] {
+  const messages: OpenAI.ChatCompletionMessageParam[] = [];
+  if (options?.systemPrompt) {
+    messages.push({ role: "system", content: options.systemPrompt });
+  }
+  messages.push({ role: "user", content: prompt });
+  return messages;
+}
+
+/** Map internal ChatMessage to OpenAI's message format. */
+function mapToOpenAIMessage(m: ChatMessage): OpenAI.ChatCompletionMessageParam {
+  if (m.role === "assistant" && m.toolCalls?.length) {
+    return {
+      role: "assistant",
+      content: m.content ?? null,
+      tool_calls: m.toolCalls.map((tc) => ({
+        id: tc.id,
+        type: "function" as const,
+        function: { name: tc.name, arguments: tc.arguments },
+      })),
+    };
+  }
+  if (m.role === "tool") {
+    return {
+      role: "tool",
+      tool_call_id: m.toolCallId ?? "",
+      content: m.content ?? "",
+    };
+  }
+  if (m.role === "system") {
+    return { role: "system", content: m.content ?? "" };
+  }
+  return { role: m.role as "user" | "assistant", content: m.content ?? "" };
 }

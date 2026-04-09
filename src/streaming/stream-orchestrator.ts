@@ -15,7 +15,7 @@ import type { AgentRunner } from "./agent-runner.js";
 import type { AgentRegistry } from "../router/agent-registry.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { SessionManager } from "../session/session-manager.js";
-import type { CostTracker } from "./cost-tracker.js";
+import type { TokenTracker } from "./cost-tracker.js";
 import { StreamAbortManager } from "./abort-controller.js";
 import type { RouteDecision, AgentAssignment } from "../router/router-types.js";
 import type { ToolPermissionConfig } from "../tools/types.js";
@@ -28,7 +28,7 @@ export class StreamOrchestrator extends EventEmitter {
     private agentRegistry: AgentRegistry,
     private toolRegistry: ToolRegistry,
     private sessionManager: SessionManager,
-    private costTracker: CostTracker,
+    private tokenTracker: TokenTracker,
   ) {
     super();
 
@@ -71,13 +71,11 @@ export class StreamOrchestrator extends EventEmitter {
           return err({ type: "serialization_error", cause: `Unknown strategy: ${decision.strategy}` });
       }
 
-      const totalCost = this.costTracker.getSessionCost(sessionId);
       const event: StreamCompleteEvent = {
         type: "stream:complete",
         sessionId,
         agentResults: results,
         totalDuration: Date.now() - startTime,
-        totalCostUSD: totalCost.totalCostUSD,
         timestamp: Date.now(),
       };
 
@@ -152,8 +150,7 @@ export class StreamOrchestrator extends EventEmitter {
           toolCalls: [],
           inputTokens: 0,
           outputTokens: 0,
-          costUSD: 0,
-          duration: 0,
+                    duration: 0,
           error: String(e),
         })),
     );
@@ -196,8 +193,7 @@ export class StreamOrchestrator extends EventEmitter {
       toolCalls: [],
       inputTokens: 0,
       outputTokens: 0,
-      costUSD: 0,
-      duration: 0,
+            duration: 0,
     }];
   }
 
@@ -219,8 +215,7 @@ export class StreamOrchestrator extends EventEmitter {
         toolCalls: [],
         inputTokens: 0,
         outputTokens: 0,
-        costUSD: 0,
-        duration: 0,
+                duration: 0,
         error: `Agent "${assignment.agentId}" not found`,
       };
     }
@@ -243,8 +238,7 @@ export class StreamOrchestrator extends EventEmitter {
         toolCalls: [],
         inputTokens: 0,
         outputTokens: 0,
-        costUSD: 0,
-        duration: 0,
+                duration: 0,
         error: "No active session",
       };
     }
@@ -277,8 +271,7 @@ export class StreamOrchestrator extends EventEmitter {
       toolCalls: [],
       inputTokens: 0,
       outputTokens: 0,
-      costUSD: 0,
-      duration: 0,
+            duration: 0,
       error: result.error.type,
     };
   }

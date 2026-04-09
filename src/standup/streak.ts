@@ -15,14 +15,14 @@ export class StreakTracker {
     } catch {
       // Table doesn't exist yet — create it
       this.table = await db.createTable("activity_streak", [
-        { date: "1970-01-01", sessionCount: 0, totalCostUSD: 0, recordedAt: 0, vector: [0] },
+        { date: "1970-01-01", sessionCount: 0, recordedAt: 0, vector: [0] },
       ]);
       // Remove the seed row
       await this.table.delete('date = "1970-01-01"');
     }
   }
 
-  async recordDay(date: string, sessionCount: number, costUSD: number): Promise<void> {
+  async recordDay(date: string, sessionCount: number): Promise<void> {
     if (!this.table) return;
     // Upsert: delete existing then add
     try {
@@ -31,7 +31,7 @@ export class StreakTracker {
       // May not exist
     }
     await this.table.add([
-      { date, sessionCount, totalCostUSD: costUSD, recordedAt: Date.now(), vector: [0] },
+      { date, sessionCount, recordedAt: Date.now(), vector: [0] },
     ]);
   }
 
@@ -84,7 +84,6 @@ export class StreakTracker {
       .map((r) => ({
         date: r.date as string,
         sessionCount: r.sessionCount as number,
-        totalCostUSD: r.totalCostUSD as number,
         recordedAt: r.recordedAt as number,
       }));
   }

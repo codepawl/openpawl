@@ -68,7 +68,6 @@ export function renderStandup(data: StandupData): string {
   // Footer
   const footer: string[] = [];
   if (data.streak > 0) footer.push(`🔥 ${data.streak}-day streak`);
-  footer.push(`💰 $${data.weekCostUSD.toFixed(2)} this week`);
   if (data.globalPatternsCount > 0) footer.push(`🧠 ${data.globalPatternsCount} global patterns`);
   lines.push(color(pc.dim, footer.join("  •  ")));
 
@@ -86,7 +85,6 @@ export function renderWeeklySummary(summary: WeeklySummary): string {
   lines.push(color(pc.bold, "Activity:"));
   lines.push(`  Sessions: ${summary.sessionCount}  •  Active days: ${summary.activeDays}/7`);
   lines.push(`  Tasks: ${summary.tasksCompleted} completed (${summary.autoApproved} auto-approved, ${summary.reworkCount} rework)`);
-  lines.push(`  Cost: $${summary.totalCostUSD.toFixed(2)}`);
 
   const confStr = (summary.avgConfidence * 100).toFixed(0);
   let confDelta = "";
@@ -106,7 +104,7 @@ export function renderWeeklySummary(summary: WeeklySummary): string {
 
   if (summary.bestDay) {
     lines.push(color(pc.bold, "Best day:"));
-    lines.push(color(pc.green, `  → ${summary.bestDay.dayLabel}: ${summary.bestDay.taskCount} tasks, $${summary.bestDay.costUSD.toFixed(2)}, ${(summary.bestDay.avgConfidence * 100).toFixed(0)}% confidence`));
+    lines.push(color(pc.green, `  → ${summary.bestDay.dayLabel}: ${summary.bestDay.taskCount} tasks, ${(summary.bestDay.avgConfidence * 100).toFixed(0)}% confidence`));
   }
 
   lines.push(color(pc.dim, SEPARATOR));
@@ -133,11 +131,11 @@ export function exportMarkdown(data: StandupData): string {
   if (data.yesterday.sessions.length === 0) {
     lines.push("No sessions yesterday — fresh start today.");
   } else {
-    lines.push(`**${data.yesterday.totalTasks} tasks** across ${data.yesterday.sessions.length} session(s) — $${data.yesterday.totalCostUSD.toFixed(2)}`);
+    lines.push(`**${data.yesterday.totalTasks} tasks** across ${data.yesterday.sessions.length} session(s)`);
     lines.push("");
     for (const s of data.yesterday.sessions) {
       const rework = s.reworkCount > 0 ? ` (${s.reworkCount} rework)` : "";
-      lines.push(`- **${s.goal}** — ${s.tasksCompleted} tasks${rework} — $${s.costUSD.toFixed(2)}`);
+      lines.push(`- **${s.goal}** — ${s.tasksCompleted} tasks${rework}`);
     }
     if (data.yesterday.teamLearnings.length > 0) {
       lines.push("");
@@ -184,7 +182,6 @@ export function exportMarkdown(data: StandupData): string {
   lines.push("");
   const footerParts: string[] = [];
   if (data.streak > 0) footerParts.push(`${data.streak}-day streak`);
-  footerParts.push(`$${data.weekCostUSD.toFixed(2)} this week`);
   if (data.globalPatternsCount > 0) footerParts.push(`${data.globalPatternsCount} global patterns`);
   lines.push(footerParts.join(" | "));
   lines.push("");

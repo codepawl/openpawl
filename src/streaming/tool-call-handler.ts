@@ -152,7 +152,7 @@ export class ToolCallHandler {
 
       if (execResult.isOk()) {
         const output = execResult.value;
-        let summaryForContext = output.summary;
+        let summaryForContext = output.fullOutput ?? output.summary;
 
         // Summarize large tool outputs
         if (this.toolOutputHandler && summaryForContext.length > 4000) {

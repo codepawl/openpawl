@@ -1,13 +1,17 @@
 /**
  * Markdown renderer — converts markdown text to ANSI-styled terminal lines.
- * Supports a useful subset: headers, bold, italic, inline code, code blocks,
- * bullet lists, blockquotes, links, and horizontal rules.
+ * Supports: headers, bold, italic, inline code, code blocks with syntax
+ * highlighting, bullet/numbered lists, blockquotes, links, horizontal rules.
  */
 import type { Component } from "../core/component.js";
-import { bold, italic } from "../core/ansi.js";
+import { bold, italic, dim, bgRgb } from "../core/ansi.js";
 import { wrapText } from "../utils/wrap.js";
 import { visibleWidth } from "../utils/text-width.js";
 import { defaultTheme, ctp } from "../themes/default.js";
+import { highlight } from "cli-highlight";
+
+// Code block background — Catppuccin mantle (#181825)
+const bgCodeBlock = bgRgb(0x18, 0x18, 0x25);
 
 export class MarkdownComponent implements Component {
   readonly id: string;
@@ -33,6 +37,7 @@ export function renderMarkdown(md: string, width: number): string[] {
   const result: string[] = [];
   let inCodeBlock = false;
   let codeBlockLang = "";
+  let codeBlockLines: string[] = [];
 
   for (const line of lines) {
     // Code block toggle
@@ -40,34 +45,34 @@ export function renderMarkdown(md: string, width: number): string[] {
       if (!inCodeBlock) {
         inCodeBlock = true;
         codeBlockLang = line.trimStart().slice(3).trim();
-        const label = codeBlockLang || "code";
-        result.push(ctp.surface1("┌─ ") + ctp.overlay1(label) + " " + ctp.surface1("─".repeat(Math.max(0, width - 5 - label.length))));
+        codeBlockLines = [];
+        // Blank line before code block for spacing
+        ensureBlankLine(result);
       } else {
+        // Closing fence — emit highlighted code block
+        emitCodeBlock(result, codeBlockLines, codeBlockLang, width);
         inCodeBlock = false;
         codeBlockLang = "";
-        result.push(ctp.surface1("└" + "─".repeat(width - 1)));
+        codeBlockLines = [];
+        // Blank line after code block
+        result.push("");
       }
       continue;
     }
 
-    // Inside code block — no inline processing, render with border
-    // Wrap long lines to fit within the bordered box (width - 2 for "│ " prefix)
+    // Inside code block — collect lines
     if (inCodeBlock) {
-      const codeWidth = width - 2;
-      if (visibleWidth(line) > codeWidth) {
-        const wrapped = wrapText(line, codeWidth);
-        for (const wl of wrapped) {
-          result.push(ctp.surface1("│ ") + ctp.text(wl));
-        }
-      } else {
-        result.push(ctp.surface1("│ ") + ctp.text(line));
-      }
+      codeBlockLines.push(line);
       continue;
     }
 
-    // Horizontal rule
+    // Horizontal rule — dim centered line
     if (/^[-*_]{3,}\s*$/.test(line.trim())) {
-      result.push(ctp.surface1("─".repeat(width)));
+      const ruleWidth = Math.round(width * 0.6);
+      const pad = Math.floor((width - ruleWidth) / 2);
+      ensureBlankLine(result);
+      result.push(" ".repeat(pad) + ctp.overlay0("─".repeat(ruleWidth)));
+      result.push("");
       continue;
     }
 
@@ -75,23 +80,25 @@ export function renderMarkdown(md: string, width: number): string[] {
     const headerMatch = line.match(/^(#{1,6})\s+(.+)/);
     if (headerMatch) {
       const level = headerMatch[1]!.length;
-      const text = headerMatch[2]!;
-      const styled = level <= 2
-        ? defaultTheme.markdown.heading(text)
-        : bold(text);
-      result.push("");
-      result.push(styled);
-      if (level === 1) result.push(ctp.surface1("═".repeat(Math.min(width, text.length + 4))));
-      else if (level === 2) result.push(ctp.surface1("─".repeat(Math.min(width, text.length + 4))));
+      const text = processInline(headerMatch[2]!);
+      // Blank line before heading (unless first line)
+      ensureBlankLine(result);
+      if (level === 1) {
+        result.push(bold(ctp.mauve(text)));
+      } else if (level === 2) {
+        result.push(bold(ctp.sapphire(text)));
+      } else {
+        result.push(bold(ctp.subtext1(text)));
+      }
       continue;
     }
 
     // Blockquote
     if (line.startsWith("> ") || line === ">") {
       const content = line.slice(2);
-      const wrapped = wrapText(processInline(content), width - 2);
+      const wrapped = wrapText(processInline(content), width - 4);
       for (const wl of wrapped) {
-        result.push(defaultTheme.markdown.blockquote(wl));
+        result.push("  " + ctp.surface2("│") + " " + ctp.subtext0(wl));
       }
       continue;
     }
@@ -101,22 +108,25 @@ export function renderMarkdown(md: string, width: number): string[] {
     if (bulletMatch) {
       const indent = bulletMatch[1]!;
       const text = bulletMatch[2]!;
-      const wrapped = wrapText(processInline(text), width - indent.length - 2);
+      const bulletIndent = indent + "  ";
+      const wrapped = wrapText(processInline(text), width - bulletIndent.length - 2);
       wrapped.forEach((wl, i) => {
-        const prefix = i === 0 ? indent + ctp.blue("• ") : indent + "  ";
+        const prefix = i === 0 ? bulletIndent + ctp.overlay0("• ") : bulletIndent + "  ";
         result.push(prefix + wl);
       });
       continue;
     }
 
     // Numbered list
-    const numMatch = line.match(/^(\s*)\d+\.\s+(.+)/);
+    const numMatch = line.match(/^(\s*)(\d+)\.\s+(.+)/);
     if (numMatch) {
       const indent = numMatch[1]!;
-      const text = numMatch[2]!;
-      const wrapped = wrapText(processInline(text), width - indent.length - 3);
+      const num = numMatch[2]!;
+      const text = numMatch[3]!;
+      const numPrefix = indent + "  ";
+      const wrapped = wrapText(processInline(text), width - numPrefix.length - num.length - 2);
       wrapped.forEach((wl, i) => {
-        const prefix = i === 0 ? indent + line.match(/\d+/)![0] + ". " : indent + "   ";
+        const prefix = i === 0 ? numPrefix + ctp.overlay0(num + ".") + " " : numPrefix + " ".repeat(num.length + 2);
         result.push(prefix + wl);
       });
       continue;
@@ -128,33 +138,82 @@ export function renderMarkdown(md: string, width: number): string[] {
       continue;
     }
 
-    // Regular paragraph — process inline styles and wrap
+    // Regular paragraph
     const processed = processInline(line);
     result.push(...wrapText(processed, width));
   }
 
-  // Close unclosed code block
+  // Close unclosed code block (streaming)
   if (inCodeBlock) {
-    result.push(ctp.surface1("└" + "─".repeat(width - 1)));
+    emitCodeBlock(result, codeBlockLines, codeBlockLang, width);
   }
 
   return result;
+}
+
+/** Ensure the last line in result is blank (avoid double-spacing). */
+function ensureBlankLine(result: string[]): void {
+  if (result.length > 0 && result[result.length - 1] !== "") {
+    result.push("");
+  }
+}
+
+/** Emit a code block with background color and optional syntax highlighting. */
+function emitCodeBlock(result: string[], lines: string[], lang: string, width: number): void {
+  const codeWidth = width - 4; // 2 padding each side
+  const highlighted = highlightCodeBlock(lines, lang);
+
+  // Language label line (dim, right side)
+  if (lang) {
+    const labelPad = Math.max(0, width - lang.length - 2);
+    result.push(bgCodeBlock(" ".repeat(labelPad) + dim(ctp.overlay1(lang)) + "  "));
+  } else {
+    result.push(bgCodeBlock(" ".repeat(width)));
+  }
+
+  // Code lines with background
+  for (const hl of highlighted) {
+    if (visibleWidth(hl) > codeWidth) {
+      for (const wl of wrapText(hl, codeWidth)) {
+        const pad = Math.max(0, width - visibleWidth(wl) - 4);
+        result.push(bgCodeBlock("  " + wl + " ".repeat(pad) + "  "));
+      }
+    } else {
+      const pad = Math.max(0, width - visibleWidth(hl) - 4);
+      result.push(bgCodeBlock("  " + hl + " ".repeat(pad) + "  "));
+    }
+  }
+
+  // Bottom padding line
+  result.push(bgCodeBlock(" ".repeat(width)));
+}
+
+/** Syntax-highlight a code block. Only highlights if a language tag is present. */
+function highlightCodeBlock(lines: string[], lang: string): string[] {
+  if (!lang) return lines;
+  try {
+    const code = lines.join("\n");
+    const highlighted = highlight(code, { language: lang, ignoreIllegals: true });
+    return highlighted.split("\n");
+  } catch {
+    return lines;
+  }
 }
 
 /** Process inline markdown: bold, italic, code, links. */
 function processInline(text: string): string {
   let result = text;
 
-  // Inline code: `code`
+  // Inline code: `code` — warm accent color, no syntax highlighting
   result = result.replace(/`([^`]+)`/g, (_match, code: string) => {
-    return defaultTheme.markdown.code(` ${code} `);
+    return ctp.rosewater(code);
   });
 
   // Bold+italic: ***text***
   result = result.replace(/\*\*\*(.+?)\*\*\*/g, (_match, t: string) => bold(italic(t)));
 
   // Bold: **text**
-  result = result.replace(/\*\*(.+?)\*\*/g, (_match, t: string) => bold(t));
+  result = result.replace(/\*\*(.+?)\*\*/g, (_match, t: string) => bold(ctp.subtext1(t)));
 
   // Italic: *text*
   result = result.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, (_match, t: string) => italic(t));

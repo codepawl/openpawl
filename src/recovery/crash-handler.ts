@@ -30,10 +30,11 @@ export class CrashHandler {
       this.handleShutdown(signal);
     };
 
+    // SIGINT is handled by the TUI (intercepts \x03 from stdin in raw mode).
+    // Only handle SIGTERM and crashes here.
     const handlers: Array<{ event: string; handler: (...args: unknown[]) => void }> = [
       { event: "uncaughtException", handler: crashHandler("uncaughtException") },
       { event: "unhandledRejection", handler: crashHandler("unhandledRejection") },
-      { event: "SIGINT", handler: shutdownHandler("SIGINT") },
       { event: "SIGTERM", handler: shutdownHandler("SIGTERM") },
     ];
 

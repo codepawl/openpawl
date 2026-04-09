@@ -118,7 +118,6 @@ async function runGlobalHeatmap(since: string, _metric: HeatmapMetric): Promise<
   const agentMap = new Map<string, {
     role: string;
     totalUtil: number;
-    totalCost: number;
     totalConf: number;
     totalTasks: number;
     count: number;
@@ -128,10 +127,9 @@ async function runGlobalHeatmap(since: string, _metric: HeatmapMetric): Promise<
   for (const entry of entries) {
     const agg = agentMap.get(entry.agentRole) ?? {
       role: entry.agentRole,
-      totalUtil: 0, totalCost: 0, totalConf: 0, totalTasks: 0, count: 0, maxBottleneck: 0,
+      totalUtil: 0, totalConf: 0, totalTasks: 0, count: 0, maxBottleneck: 0,
     };
     agg.totalUtil += entry.utilizationPct;
-    agg.totalCost += entry.totalCostUSD;
     agg.totalConf += entry.averageConfidence;
     agg.totalTasks += entry.tasksHandled;
     agg.count++;
@@ -146,7 +144,6 @@ async function runGlobalHeatmap(since: string, _metric: HeatmapMetric): Promise<
     pc.bold("Sessions".padEnd(10)) +
     pc.bold("Avg Util".padEnd(10)) +
     pc.bold("Avg Conf".padEnd(10)) +
-    pc.bold("Total Cost".padEnd(12)) +
     pc.bold("Tasks".padEnd(8)),
   );
   logger.plain("─".repeat(70));
@@ -162,7 +159,6 @@ async function runGlobalHeatmap(since: string, _metric: HeatmapMetric): Promise<
       String(agg.count).padEnd(10) +
       `${Math.round(avgUtil * 100)}%`.padEnd(10) +
       avgConf.toFixed(2).padEnd(10) +
-      `$${agg.totalCost.toFixed(4)}`.padEnd(12) +
       String(agg.totalTasks).padEnd(8);
 
     logger.plain(isBottleneck ? pc.red(line + " ← bottleneck") : line);

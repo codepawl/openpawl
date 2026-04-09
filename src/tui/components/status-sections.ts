@@ -29,24 +29,14 @@ export function renderModelSection(state: StatusBarState): StatusSection {
   };
 }
 
-export function renderCostSection(state: StatusBarState): StatusSection {
-  const total = state.totalInputTokens + state.totalOutputTokens;
-  if (total === 0) return { content: "", minWidth: 0, priority: 2 };
-  const display = `tokens: ${formatTokens(total)}`;
-  return {
-    content: defaultTheme.dim(display),
-    minWidth: 10,
-    priority: 2,
-  };
-}
-
 export function renderTokenSection(state: StatusBarState): StatusSection {
   const total = state.totalInputTokens + state.totalOutputTokens;
-  const display = `${formatTokens(total)} tokens`;
+  if (total === 0) return { content: "", minWidth: 0, priority: 2 };
+  const display = formatTokens(total);
   return {
     content: defaultTheme.dim(display),
     minWidth: 8,
-    priority: 4,
+    priority: 2,
   };
 }
 
@@ -125,9 +115,8 @@ export function renderHintsSection(state: StatusBarState): StatusSection {
 export function composeStatusBar(state: StatusBarState, terminalWidth: number): string {
   const sections = [
     renderModelSection(state),
-    renderCostSection(state),
-    renderAgentSection(state),
     renderTokenSection(state),
+    renderAgentSection(state),
     renderContextSection(state),
     renderSessionSection(state),
     renderHintsSection(state),

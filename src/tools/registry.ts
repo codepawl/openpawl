@@ -137,6 +137,18 @@ export class ToolRegistry extends EventEmitter {
     }
     return schemas;
   }
+
+  /** Export tools in OpenAI native function-calling format. */
+  exportForAPI(toolNames: Iterable<string>): import("../providers/stream-types.js").NativeToolDefinition[] {
+    return this.exportForLLM(toolNames).map((s) => ({
+      type: "function" as const,
+      function: {
+        name: s.name,
+        description: s.description,
+        parameters: s.parameters,
+      },
+    }));
+  }
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

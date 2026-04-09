@@ -54,11 +54,14 @@ export class SessionRecovery {
       session.resolveToolConfirmation(conf.executionId, false);
     }
 
-    // Add recovery system message
-    session.addMessage({
-      role: "system",
-      content: "[Session recovered from unexpected shutdown]",
-    });
+    // Add recovery system message (only if not already present)
+    const lastMsg = state.messages[state.messages.length - 1];
+    if (!(lastMsg?.role === "system" && lastMsg.content === "[Session recovered]")) {
+      session.addMessage({
+        role: "system",
+        content: "[Session recovered]",
+      });
+    }
 
     session.setStatus("active");
     session.markCheckpoint();

@@ -67,16 +67,16 @@ async function listSessions(
     return;
   }
 
-  logger.plain("ID            Title                          Updated          Cost     Status");
+  logger.plain("ID            Title                          Updated          Msgs  Status");
   logger.plain("─".repeat(85));
 
   for (const item of items) {
     const id = item.id.padEnd(14);
     const title = item.title.slice(0, 30).padEnd(31);
     const updated = formatRelative(item.updatedAt).padEnd(17);
-    const cost = `$${item.totalCostUSD.toFixed(2)}`.padEnd(9);
+    const msgs = String(item.messageCount).padEnd(6);
     const status = item.status;
-    logger.plain(`${id}${title}${updated}${cost}${status}`);
+    logger.plain(`${id}${title}${updated}${msgs}${status}`);
   }
 }
 

@@ -21,17 +21,8 @@ export function buildIdentityPrefix(agentName: string, model?: string, provider?
       ? `powered by ${model} via ${provider}`
       : `powered by ${model}`
     : "";
-  return `You are ${agentName} in OpenPawl.${poweredBy ? ` (${poweredBy})` : ""}
-
-## Communication rules (non-negotiable)
-- Be terse. Minimum words. No filler, no preamble.
-- Never use emojis.
-- Never end with "Would you like me to...", "Let me know if...", or suggestion bullets. Stop when done.
-- Never repeat the user's question back to them.
-- Never announce what you're about to do. Just do it.
-- Show tool output first. Add commentary only if it adds value beyond what the output already shows.
-- When showing code or file contents, let the content speak for itself. Do not describe what the user can see.
-- If the answer is one word, say one word.`;
+  return `RULES: No emojis. No bullet suggestions. No "Would you like..." questions. Be terse. Stop when done.
+You are ${agentName} in OpenPawl.${poweredBy ? ` (${poweredBy})` : ""}`;
 }
 
 const BUILT_IN_AGENTS: AgentDefinition[] = [
@@ -40,7 +31,7 @@ const BUILT_IN_AGENTS: AgentDefinition[] = [
     name: "Coder",
     description: "Writes, modifies, and implements code. Expert at translating requirements into working code.",
     capabilities: ["code_write", "code_edit", "code_debug", "file_ops"],
-    defaultTools: ["file_read", "file_write", "file_edit", "execute_code", "shell_exec"],
+    defaultTools: ["file_read", "file_list", "file_write", "file_edit", "shell_exec", "git_ops"],
     modelTier: "primary",
     systemPrompt: "Write and modify code. Use tools to read files before editing. Output working code, not explanations about code.",
     canCollaborate: true,
@@ -55,7 +46,7 @@ const BUILT_IN_AGENTS: AgentDefinition[] = [
     name: "Code Reviewer",
     description: "Reviews code for quality, bugs, security issues, and best practices.",
     capabilities: ["code_review", "code_explain"],
-    defaultTools: ["file_read"],
+    defaultTools: ["file_read", "file_list"],
     modelTier: "primary",
     systemPrompt: "Review code. Read the actual files before commenting. Report issues with file:line references. Skip praise.",
     canCollaborate: true,
@@ -69,7 +60,7 @@ const BUILT_IN_AGENTS: AgentDefinition[] = [
     name: "Planner",
     description: "Creates execution plans, architecture designs, and task breakdowns for complex goals.",
     capabilities: ["plan", "code_explain"],
-    defaultTools: ["file_read", "web_search"],
+    defaultTools: ["file_read", "file_list", "web_search"],
     modelTier: "primary",
     systemPrompt: "Break goals into concrete steps. Each step: what to do, which files, expected outcome. No philosophy.",
     canCollaborate: true,
@@ -83,7 +74,7 @@ const BUILT_IN_AGENTS: AgentDefinition[] = [
     name: "Tester",
     description: "Writes and runs tests. Validates implementations against requirements.",
     capabilities: ["test_write", "test_run", "code_debug"],
-    defaultTools: ["file_read", "file_write", "execute_code", "shell_exec"],
+    defaultTools: ["file_read", "file_list", "file_write", "shell_exec"],
     modelTier: "fast",
     systemPrompt: "Write and run tests. Read the source first to understand what to test. Show test output, not test philosophy.",
     canCollaborate: true,
@@ -97,7 +88,7 @@ const BUILT_IN_AGENTS: AgentDefinition[] = [
     name: "Debugger",
     description: "Investigates and fixes bugs. Reads error messages, traces issues, proposes fixes.",
     capabilities: ["code_debug", "code_edit", "test_run"],
-    defaultTools: ["file_read", "file_write", "file_edit", "execute_code", "shell_exec"],
+    defaultTools: ["file_read", "file_list", "file_write", "file_edit", "shell_exec", "git_ops"],
     modelTier: "primary",
     systemPrompt: "Debug by reading the actual error and source code. Trace the root cause. Fix it or explain exactly what's wrong.",
     canCollaborate: true,
@@ -111,7 +102,7 @@ const BUILT_IN_AGENTS: AgentDefinition[] = [
     name: "Researcher",
     description: "Searches the web, reads documentation, gathers information to answer questions.",
     capabilities: ["research", "code_explain"],
-    defaultTools: ["web_search", "web_fetch", "file_read"],
+    defaultTools: ["file_read", "file_list", "web_search", "web_fetch"],
     modelTier: "fast",
     systemPrompt: "Search and fetch information. Return facts, not summaries of your search process.",
     canCollaborate: true,
@@ -125,7 +116,7 @@ const BUILT_IN_AGENTS: AgentDefinition[] = [
     name: "Assistant",
     description: "General-purpose assistant for conversation, explanations, and simple tasks.",
     capabilities: ["conversation", "code_explain", "file_ops"],
-    defaultTools: ["file_read"],
+    defaultTools: ["file_read", "file_list", "shell_exec"],
     modelTier: "fast",
     systemPrompt: "Answer directly. If a tool would help, use it. If not, give the shortest correct answer.",
     canCollaborate: false,

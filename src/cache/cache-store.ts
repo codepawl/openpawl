@@ -132,7 +132,6 @@ export class ResponseCacheStore {
     const result: CacheStats = {
       totalEntries: 0,
       totalHits: 0,
-      totalSavingsUSD: 0,
       totalSavedMs: 0,
       hitRate: 0,
       oldestEntry: 0,
@@ -150,7 +149,6 @@ export class ResponseCacheStore {
           if (Date.now() > entry.expiresAt) continue; // Skip expired
           result.totalEntries++;
           result.totalHits += entry.hitCount;
-          result.totalSavingsUSD += entry.costUSD * entry.hitCount;
           // Estimate ~3s saved per cache hit
           result.totalSavedMs += entry.hitCount * 3000;
           if (result.oldestEntry === 0 || entry.createdAt < result.oldestEntry) {

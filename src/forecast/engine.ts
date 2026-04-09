@@ -8,7 +8,6 @@ import type {
   SimilarRun,
   ForecastMethod,
   ConfidenceLevel,
-  ModelPricing,
 } from "./types.js";
 import type { PreviewTask } from "../graph/preview/types.js";
 import { forecastHistorical } from "./methods/historical.js";
@@ -27,7 +26,6 @@ export interface ForecastInput {
   similarRuns?: SimilarRun[];
   profiles?: AgentProfileData[];
   learningCurve?: LearningCurveData;
-  pricingOverrides?: Record<string, ModelPricing>;
 }
 
 /**
@@ -42,7 +40,6 @@ export function generateForecast(input: ForecastInput): CostForecast {
   const {
     sessionId, goal, tasks, model, runs = 1,
     similarRuns = [], profiles = [], learningCurve,
-    pricingOverrides,
   } = input;
 
   let method: ForecastMethod;
@@ -58,7 +55,7 @@ export function generateForecast(input: ForecastInput): CostForecast {
   let phaseForecasts = [];
 
   // Try historical first
-  const historicalResult = forecastHistorical(tasks, similarRuns, sessionId, model, pricingOverrides);
+  const historicalResult = forecastHistorical(tasks, similarRuns, sessionId, model);
   if (historicalResult) {
     method = "historical";
     confidenceLevel = "high";
@@ -73,7 +70,7 @@ export function generateForecast(input: ForecastInput): CostForecast {
     phaseForecasts = historicalResult.phaseForecasts;
   } else {
     // Try profile-based
-    const profileResult = forecastProfileBased(tasks, profiles, model, pricingOverrides);
+    const profileResult = forecastProfileBased(tasks, profiles, model);
     if (profileResult) {
       method = "profile_based";
       confidenceLevel = "medium";
@@ -88,7 +85,7 @@ export function generateForecast(input: ForecastInput): CostForecast {
       method = "heuristic";
       confidenceLevel = "low";
       confidenceReason = "no similar past runs or profile data found";
-      const heuristicResult = forecastHeuristic(tasks, model, pricingOverrides);
+      const heuristicResult = forecastHeuristic(tasks, model);
       estimatedMinUSD = heuristicResult.estimatedMinUSD;
       estimatedMaxUSD = heuristicResult.estimatedMaxUSD;
       estimatedMidUSD = heuristicResult.estimatedMidUSD;
@@ -115,7 +112,7 @@ export function generateForecast(input: ForecastInput): CostForecast {
     estimatedCostUSD: (f.estimatedMinUSD + f.estimatedMaxUSD) / 2,
     averageConfidence: 0.8, // Will be overridden with actual profile data if available
   }));
-  const modelSuggestions = suggestModelSwaps(agentCostData, pricingOverrides);
+  const modelSuggestions = suggestModelSwaps(agentCostData);
 
   return {
     sessionId,

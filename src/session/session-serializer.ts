@@ -19,7 +19,7 @@ export function serialize(session: Session): string {
     version: CURRENT_VERSION,
     state: session.toJSON(),
   };
-  return JSON.stringify(payload, null, 2);
+  return JSON.stringify(payload);
 }
 
 export function deserialize(raw: string): Result<SessionState, SessionError> {
@@ -86,7 +86,6 @@ export function deserialize(raw: string): Result<SessionState, SessionError> {
     modifiedFiles: [],
     totalInputTokens: 0,
     totalOutputTokens: 0,
-    totalCostUSD: 0,
     providerBreakdown: {},
     compressionCheckpoint: 0,
     compressedSummary: null,

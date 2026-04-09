@@ -101,7 +101,6 @@ export function renderOverallTrendMarkdown(chain: DiffChain): string {
   sections.push(`## Overall Trend (${chain.totalRuns} runs)`);
   sections.push("");
   sections.push(`- Confidence: ${trendLabel(trend.confidenceTrend)} ${trendArrow(trend.confidenceTrend)}`);
-  sections.push(`- Tokens: ${trendLabel(trend.costTrend)} ${trendArrow(trend.costTrend)}`);
   sections.push(`- Learning efficiency: ${trend.learningEfficiency.toFixed(3)} per run`);
 
   if (trend.plateauDetected && trend.plateauMessage) {
@@ -131,7 +130,7 @@ export function renderLearningProgression(chain: DiffChain): string {
   }
 
   const trend = chain.overallTrend;
-  sections.push(`**Overall:** Confidence ${trendLabel(trend.confidenceTrend)}, Tokens ${trendLabel(trend.costTrend)}`);
+  sections.push(`**Overall:** Confidence ${trendLabel(trend.confidenceTrend)}`);
 
   if (trend.plateauDetected && trend.plateauMessage) {
     sections.push("");
