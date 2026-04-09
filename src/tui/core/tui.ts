@@ -146,8 +146,8 @@ export class TUI {
   private performResize(): void {
     // Hide cursor during resize to prevent flicker
     this.terminal.write(hideCursor);
-    // Clear screen — old content at old dimensions is invalid
-    this.terminal.write("\x1b[2J\x1b[H");
+    // Move cursor home — the full redraw will overwrite every line
+    this.terminal.write("\x1b[H");
     // Invalidate renderer cache so next render is a full redraw
     this.renderer.reset();
     // Full re-render at new dimensions
@@ -605,13 +605,14 @@ export class TUI {
 
     // Clipboard copy — check editor selection first, then messages selection
     if (action === "editor.clipboard.copy") {
-      const editor = this.focusedComponent as Component & { hasSelection?: () => boolean; getSelectedText?: () => string | null };
+      const editor = this.focusedComponent as Component & { hasSelection?: () => boolean; getSelectedText?: () => string | null; clearSelection?: () => void };
       if (editor?.hasSelection?.()) {
         const text = editor.getSelectedText?.();
         if (text?.trim()) {
           void this.copyManager.copyToClipboard(text);
           this.onFlashMessage?.("Copied!");
         }
+        editor.clearSelection?.();
         this.requestRender();
         return true;
       }

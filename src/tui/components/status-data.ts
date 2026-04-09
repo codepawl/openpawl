@@ -14,8 +14,7 @@ export interface StatusBarState {
   modelDisplay: string;
   totalInputTokens: number;
   totalOutputTokens: number;
-  totalCostUSD: number;
-  costDisplay: string;
+  tokenDisplay: string;
   activeAgents: AgentStatus[];
   lastAgentId: string | null;
   isStreaming: boolean;
@@ -50,8 +49,7 @@ const DEFAULT_STATE: StatusBarState = {
   modelDisplay: "",
   totalInputTokens: 0,
   totalOutputTokens: 0,
-  totalCostUSD: 0,
-  costDisplay: "",
+  tokenDisplay: "",
   activeAgents: [],
   lastAgentId: null,
   isStreaming: false,
@@ -107,12 +105,11 @@ export class StatusDataStore extends EventEmitter {
     this.notifyChange();
   }
 
-  handleCostUpdate(input: number, output: number, _costUSD: number): void {
+  handleTokenUpdate(input: number, output: number): void {
     this.state.totalInputTokens = input;
     this.state.totalOutputTokens = output;
-    this.state.totalCostUSD = 0;
     const total = input + output;
-    this.state.costDisplay = total > 0 ? `tokens: ${formatTokens(total)}` : "";
+    this.state.tokenDisplay = total > 0 ? formatTokens(total) : "";
     this.notifyChange();
   }
 
@@ -237,14 +234,9 @@ function formatModelDisplay(model: string, provider: string): string {
   return provider ? `${short} via ${provider}` : short;
 }
 
-/** @deprecated Dollar cost display removed. Use formatTokens instead. */
-export function formatCost(_usd: number): string {
-  return "";
-}
-
 export function formatTokens(count: number): string {
-  if (count < 1000) return String(count);
-  if (count < 10_000) return `${(count / 1000).toFixed(1)}k`;
-  if (count < 1_000_000) return `${Math.round(count / 1000)}k`;
-  return `${(count / 1_000_000).toFixed(1)}M`;
+  if (count < 1000) return `${count} tok`;
+  if (count < 10_000) return `${(count / 1000).toFixed(1)}k tok`;
+  if (count < 1_000_000) return `${Math.round(count / 1000)}k tok`;
+  return `${(count / 1_000_000).toFixed(1)}M tok`;
 }

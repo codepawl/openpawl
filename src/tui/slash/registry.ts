@@ -7,6 +7,8 @@ import { Trie } from "../autocomplete/trie.js";
 export interface CommandContext {
   /** Add a message to the messages component. */
   addMessage: (role: string, content: string) => void;
+  /** Clear all messages from the TUI display. */
+  clearMessages: () => void;
   /** Request the TUI to re-render. */
   requestRender: () => void;
   /** Access to the TUI stop function. */

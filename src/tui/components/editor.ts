@@ -5,7 +5,7 @@
 import type { Component } from "../core/component.js";
 import type { KeyEvent } from "../core/input.js";
 import type { LayoutConfig } from "../layout/responsive.js";
-import { visibleWidth } from "../utils/text-width.js";
+import { visibleWidth, charWidth } from "../utils/text-width.js";
 import { truncate } from "../utils/truncate.js";
 import { TextWrapper, type WrappedLine } from "../text/text-wrapper.js";
 import { defaultTheme, ctp } from "../themes/default.js";
@@ -120,11 +120,8 @@ export class EditorComponent implements Component {
     const hasAbove = this.inputScrollOffset > 0;
     const hasBelow = this.inputScrollOffset + visibleCount < totalVisual;
 
-    // Separator line
-    const sepColor = this.focused ? this.borderColor : defaultTheme.dim;
-    const sepIndicator = hasAbove ? ` ▲ ${this.inputScrollOffset}` : "";
-    const sepLen = Math.max(0, width - visibleWidth(sepIndicator));
-    result.push(sepColor("─".repeat(sepLen)) + (sepIndicator ? ctp.overlay0(sepIndicator) : ""));
+    // Scroll indicator (shown on divider line above, if scrolled)
+    // No separator line — the DividerComponent above handles it.
 
     // Content lines
     if (isEmpty && !this.focused && this.attachedFiles.length === 0) {
@@ -565,7 +562,7 @@ export class EditorComponent implements Component {
   }
 
   /** Clear selection state. */
-  private clearSelection(): void {
+  clearSelection(): void {
     this.selStart = null;
     this.selEnd = null;
   }
@@ -607,7 +604,7 @@ export class EditorComponent implements Component {
         result += char;
       }
 
-      logicalCol++;
+      logicalCol += charWidth(cp) || 1;
       i += charLen;
     }
     return result;
@@ -629,7 +626,7 @@ export class EditorComponent implements Component {
       : 0;
     // Layout: margin(1) + prompt/indent(2) + fileTags + visualCol
     return {
-      row: acLines + 1 + visibleRow + 1, // +1 separator, +1 for 1-based
+      row: acLines + visibleRow + 1, // +1 for 1-based (no separator line)
       col: visualCol + 4 + fileTagsWidth, // margin(1) + prompt(2) + space after prompt is in prefix
     };
   }

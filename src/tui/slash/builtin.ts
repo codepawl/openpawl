@@ -35,7 +35,8 @@ export function createBuiltinCommands(
       name: "clear",
       description: "Clear the message history",
       async execute(_args: string, ctx: CommandContext) {
-        ctx.addMessage("system", "Messages cleared.");
+        ctx.clearMessages();
+        ctx.requestRender();
       },
     },
     {
