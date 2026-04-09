@@ -7,6 +7,7 @@
  *   - PromptRouter (src/router/) for intent classification + agent dispatch
  */
 
+import { VERSION } from "../version.js";
 import { createLayout } from "./layout.js";
 import {
   CommandRegistry,
@@ -728,22 +729,13 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
   };
 
   // Welcome message
-  let versionStr = "0.0.1";
-  try {
-    const { createRequire } = await import("node:module");
-    const require = createRequire(import.meta.url);
-    const pkg = require("../../package.json") as { version: string };
-    versionStr = pkg.version;
-  } catch {
-    // Use default version
-  }
 
   /** Build the welcome banner content, freshly computed for current terminal width. */
   const buildWelcomeContent = (): string => {
     const termWidth = process.stdout.columns ?? 80;
     const lines: string[] = [];
 
-    const title = `OpenPawl v${versionStr}`;
+    const title = `OpenPawl v${VERSION}`;
     const titlePad = Math.max(0, Math.floor((termWidth - title.length) / 2));
     lines.push("");
     lines.push(" ".repeat(titlePad) + bold(ctp.mauve(title)));

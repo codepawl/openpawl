@@ -11,8 +11,8 @@
  * Other commands: web (start/stop/status), check, onboard, config, lessons, run
  */
 
-import { createRequire } from "node:module";
 import pc from "picocolors";
+import { VERSION } from "./version.js";
 import { intro, outro } from "@clack/prompts";
 import { logger } from "./core/logger.js";
 import { COMMANDS, findClosestCommand, findClosestSubcommand } from "./cli/fuzzy-matcher.js";
@@ -119,14 +119,14 @@ async function main(): Promise<void> {
         return;
     }
 
-    // -c / --continue → resume last TUI session
+    // -c / --continue → launch TUI (user resumes via /sessions)
     if (args.includes("-c") || args.includes("--continue")) {
         if (!process.stdin.isTTY) {
             logger.error("Cannot resume TUI session in non-interactive mode.");
             process.exit(1);
         }
         const { launchTUI } = await import("./app/index.js");
-        await launchTUI({ resume: true });
+        await launchTUI();
         return;
     }
 
@@ -137,9 +137,7 @@ async function main(): Promise<void> {
         return;
     }
     if (args[0] === "--version" || args[0] === "-V") {
-        const require = createRequire(import.meta.url);
-        const { version } = require("../package.json") as { version: string };
-        console.log(version);
+        console.log(VERSION);
         return;
     }
     const rawCmd = args[0] ?? "";

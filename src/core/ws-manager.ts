@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import WebSocket from "ws";
 import { logger } from "./logger.js";
+import { VERSION } from "../version.js";
 import {
   loadOrCreateDeviceIdentity,
   signDevicePayload,
@@ -320,7 +321,7 @@ export class WebSocketManager {
           maxProtocol: 3,
           client: {
             id: clientId,
-            version: opts.clientVersion ?? "0.0.1",
+            version: opts.clientVersion ?? VERSION,
             platform,
             deviceFamily,
             mode: clientMode,

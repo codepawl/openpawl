@@ -8,6 +8,7 @@
 import type { StreamChunk, StreamOptions } from "./stream-types.js";
 import type { StreamProvider } from "./provider.js";
 import { ProviderError } from "./types.js";
+import { VERSION } from "../version.js";
 import { logger } from "../core/logger.js";
 
 const COPILOT_TOKEN_URL = "https://api.github.com/copilot_internal/v2/token";
@@ -64,7 +65,7 @@ export class CopilotProvider implements StreamProvider {
       headers: {
         Authorization: `token ${this.githubToken}`,
         Accept: "application/json",
-        "User-Agent": "OpenPawl/1.0",
+        "User-Agent": `OpenPawl/${VERSION}`,
       },
       signal: AbortSignal.timeout(10_000),
     });
