@@ -816,7 +816,7 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
     { text: "\u25cb not configured", color: ctp.red },
     { text: "\u25c6 DEF", color: ctp.mauve },
     { text: "idle", color: ctp.overlay0 },
-    { text: "$0.00", color: ctp.overlay0 },
+    { text: "", color: ctp.overlay0 },
   ]);
   layout.statusBar.setRightText(ctp.overlay0("/help"));
 

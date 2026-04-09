@@ -165,9 +165,8 @@ export class MessagesComponent implements Component {
       case "system": {
         const content = msg.content || "";
         if (content.includes("\x1b[")) {
-          // Already styled (e.g., panel output from /help) — pass through
-          const wrapped = wrapText(content, maxBubbleWidth);
-          return wrapped.map((line) => "  " + line);
+          // Already styled (e.g., panel output, welcome screen) — pass through as-is
+          return content.split("\n").map((line) => "  " + line);
         }
         const colorFn = detectSystemColor(content);
         const mdLines = renderMarkdown(content, maxBubbleWidth - 2);
