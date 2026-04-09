@@ -7,13 +7,13 @@ import { bold } from "../core/ansi.js";
 // ─── Agent colors ───────────────────────────────────────────────────────────
 
 const AGENT_COLOR_MAP: Record<string, (s: string) => string> = {
-  coder: ctp.lavender,
+  coder: ctp.teal,
   reviewer: ctp.peach,
-  planner: ctp.blue,
-  tester: ctp.green,
+  planner: ctp.sapphire,
+  tester: ctp.mauve,
   debugger: ctp.red,
-  researcher: ctp.yellow,
-  assistant: ctp.mauve,
+  researcher: ctp.sky,
+  assistant: ctp.lavender,
 };
 
 export function getAgentColor(agentId: string): (s: string) => string {
