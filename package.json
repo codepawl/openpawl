@@ -38,6 +38,7 @@
     "build": "tsup && bun run --cwd src/web/client build",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
+    "test:e2e": "bun test tests/e2e/",
     "test:coverage": "bun test --coverage",
     "test:watch": "bun test --watch",
     "lint": "eslint src/",
