@@ -1821,52 +1821,6 @@ async function initSessionRouter(
     ctx.router?.emit("dispatch:agent:tool", ctx.chatSession?.id ?? "", agentId, toolName, status, details);
   };
 
-  // ── Wire TokenTracker — real-time token usage tracking ──────────
-  try {
-    const { TokenTracker } = await import("../streaming/cost-tracker.js");
-    const { getActiveProviderState: getActiveState } = await import("../providers/active-state.js");
-    const tokenTracker = new TokenTracker();
-
-    // Update tokens when agent completes
-    ctx.router.on("dispatch:agent:done", (sessionId: string, agentId: string, result: { inputTokens?: number; outputTokens?: number }) => {
-      const state = getActiveState();
-      tokenTracker.recordUsage(sessionId, agentId, state.provider || "unknown", state.model || "unknown", result.inputTokens ?? 0, result.outputTokens ?? 0);
-    });
-
-    // Status bar reads from token tracker
-    tokenTracker.on("tokens:update", (event: { totalInputTokens: number; totalOutputTokens: number }) => {
-      const total = event.totalInputTokens + event.totalOutputTokens;
-      const display = total > 0 ? formatTokenCount(total) : "";
-      layout.statusBar.updateSegment(4, display, ctp.overlay0);
-      layout.tui.requestRender();
-    });
-
-    // Wire /cost command to token tracker (shows token usage)
-    registry.register({
-      name: "cost",
-      aliases: ["tokens"],
-      description: "Show session token usage",
-      async execute(_args, msgCtx) {
-        const sessionId = ctx.chatSession?.id ?? "";
-        const summary = tokenTracker.getSessionTokens(sessionId);
-        const total = summary.totalInputTokens + summary.totalOutputTokens;
-        const lines = [
-          `Session tokens: ${formatTokenCount(total)}`,
-          `  Prompt:     ${summary.totalInputTokens.toLocaleString()}`,
-          `  Completion: ${summary.totalOutputTokens.toLocaleString()}`,
-        ];
-        if (Object.keys(summary.byAgent).length > 0) {
-          lines.push("", "  By agent:");
-          for (const [agent, data] of Object.entries(summary.byAgent)) {
-            lines.push(`    ${agent}: ${formatTokenCount(data.tokens)}`);
-          }
-        }
-        msgCtx.addMessage("system", lines.join("\n"));
-      },
-    });
-  } catch {
-    // TokenTracker not available
-  }
 
   // ── Wire LatencyTracker — TTFT + tokens/sec metrics ────────────
   try {
@@ -1938,6 +1892,17 @@ async function initSessionRouter(
   });
   ctx.cleanupSession = wireSessionEvents(ctx.sessionMgr, layout);
 
+  // Register /sprint command
+  {
+    const { createSprintCommand } = await import("./commands/sprint.js");
+    registry.register(createSprintCommand({
+      agents: ctx.router.getRegistry(),
+      toolRegistry: toolRegistry ?? undefined,
+      toolExecutor: toolExecutor ?? undefined,
+      layout,
+    }));
+  }
+
   // Register router-powered commands
   if (ctx.chatSession) {
     registerRouterCommands(registry, ctx.router, ctx.chatSession, layout);
@@ -1995,13 +1960,6 @@ function registerRouterCommands(
 export async function runPrintMode(prompt: string): Promise<void> {
   const parsed = parseInput(prompt);
 
-  if (parsed.type === "command" && parsed.name === "work") {
-    // Reuse existing CLI work command
-    const { runWork } = await import("../work-runner.js");
-    await runWork({ goal: parsed.args.trim(), noWeb: true, args: [] });
-    return;
-  }
-
   if (parsed.type === "command" && parsed.name === "status") {
     const { getGlobalProviderManager } = await import("../providers/provider-factory.js");
     const pm = await getGlobalProviderManager();
@@ -2012,14 +1970,6 @@ export async function runPrintMode(prompt: string): Promise<void> {
     return;
   }
 
-  // Default: treat as a work goal
-  if (prompt.trim()) {
-    const { runWork } = await import("../work-runner.js");
-    await runWork({ goal: prompt.trim(), noWeb: true, args: [] });
-    return;
-  }
-
   console.log("Usage: openpawl -p <prompt>");
-  console.log('  openpawl -p "/work build auth"');
-  console.log('  openpawl -p "build auth"');
+  console.log('  openpawl -p "/status"');
 }

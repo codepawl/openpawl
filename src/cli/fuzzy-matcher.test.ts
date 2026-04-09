@@ -35,9 +35,9 @@ describe("findClosestCommand", () => {
         expect(result.confidence).not.toBe("none");
     });
 
-    it('suggests "work" for "wrk" (distance 1)', () => {
-        const result = findClosestCommand("wrk");
-        expect(result.suggestion).toBe("work");
+    it('suggests "drift" for "drif" (distance 1)', () => {
+        const result = findClosestCommand("drif");
+        expect(result.suggestion).toBe("drift");
         expect(result.confidence).toBe("high");
     });
 

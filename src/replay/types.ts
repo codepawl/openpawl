@@ -2,7 +2,15 @@
  * Types for session recording, replay, and patching.
  */
 
-import type { ConfidenceScore, RoutingDecision } from "../graph/confidence/types.js";
+/** Confidence score from a completed task. */
+export interface ConfidenceScore {
+  score: number;
+  reasoning: string;
+  flags: string[];
+}
+
+/** Routing decision based on confidence thresholds. */
+export type RoutingDecision = "auto_approved" | "qa_review" | "rework" | "escalated";
 
 /** A single recorded event from graph execution. */
 export interface RecordingEvent {

@@ -5,8 +5,10 @@
  */
 
 import { randomUUID } from "node:crypto";
-import type { GraphState } from "../core/graph-state.js";
 import type { RecordingEvent, BroadcastEvent } from "./types.js";
+
+/** Lightweight alias for graph state — the recorder only serializes fields. */
+type GraphState = Record<string, unknown>;
 import { appendRecordingEvent, appendBroadcastEvent } from "./storage.js";
 
 export class SessionRecorder {

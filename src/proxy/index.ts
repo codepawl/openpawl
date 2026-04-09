@@ -1,4 +1,3 @@
-export { proxyPlugin } from "./plugin.js";
 export { ProxyService, createProxyService } from "./ProxyService.js";
 export type {
   ProxyStreamQuery,

@@ -7,7 +7,15 @@ import type {
   WebhookApprovalConfig,
   ApprovalWebhookPayload,
 } from "./types.js";
-import type { PartialApprovalTask } from "../agents/partial-approval.js";
+
+/** Inline type — was from the deleted agents/partial-approval module. */
+interface PartialApprovalTask {
+  task_id: string;
+  description: string;
+  assigned_to: string;
+  confidence_score: number;
+  rework_count: number;
+}
 
 export interface DeliveryResult {
   ok: boolean;

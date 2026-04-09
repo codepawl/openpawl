@@ -71,20 +71,6 @@ export const CLI_COMMANDS: CommandDef[] = [
 
   // Daily Workflow
   {
-    name: "work",
-    description: "Start a sprint toward a goal",
-    category: "daily",
-    handler: { module: "./work-runner.js", fn: "runWork" },
-    customDispatch: true,
-    options: [
-      { flag: "--goal, -g <text>", description: "Set the goal directly" },
-      { flag: "--no-web", description: "Disable dashboard auto-start" },
-    ],
-    examples: [
-      'openpawl work --goal "Build a CLI"',
-    ],
-  },
-  {
     name: "standup",
     description: "See what was done, blocked, and next",
     category: "daily",
@@ -247,13 +233,6 @@ export const CLI_COMMANDS: CommandDef[] = [
     handler: { module: "./commands/profile.js", fn: "runProfileCommand" },
   },
   {
-    name: "web",
-    description: "Start web dashboard",
-    category: "utilities",
-    handler: { module: "./web/server.js", fn: "runWeb" },
-    customDispatch: true,
-  },
-  {
     name: "clean",
     description: "Remove session data",
     category: "utilities",
@@ -335,14 +314,11 @@ export function generateHelp(): string {
   lines.push(section("OPTIONS"));
   lines.push("  " + cmd(pad("--help, -h")) + desc("Show this help"));
   lines.push("  " + cmd(pad("--version")) + desc("Show version"));
-  lines.push("  " + cmd(pad("--no-web")) + desc("Disable dashboard"));
-  lines.push("  " + cmd(pad("--no-interactive")) + desc("Skip post-session menu"));
-  lines.push("  " + cmd(pad("--no-stream")) + desc("Hide streaming LLM output"));
   lines.push("  " + cmd(pad("--mock-llm")) + desc("Use mock responses (testing)"));
   lines.push("");
   lines.push(section("EXAMPLES"));
   lines.push("  " + exCmd("openpawl setup") + "                          " + desc("Get started"));
-  lines.push("  " + exCmd('openpawl work --goal "Build a CLI"') + "      " + desc("Run with a goal"));
+  lines.push("  " + exCmd("openpawl chat") + "                           " + desc("Start a conversation"));
   lines.push("  " + exCmd("openpawl check") + "                          " + desc("Verify setup"));
   lines.push("");
   lines.push(desc("Run openpawl <command> --help for details on any command."));

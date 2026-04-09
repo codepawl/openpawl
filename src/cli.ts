@@ -1,55 +1,16 @@
 #!/usr/bin/env node
 /**
  * OpenPawl CLI entry point.
- *
- * 4-Pillar Architecture:
- *   Pillar 1 — `openpawl setup` / `openpawl init`  : Dedicated setup phase
- *   Pillar 2 — `openpawl work`                     : Zero-config execution
- *   Pillar 3 — Smart error recovery (inside work)  : Structured diagnostics
- *   Pillar 4 — Web Dashboard auto-start on `work`  : Background dashboard
- *
- * Other commands: web (start/stop/status), check, onboard, config, lessons, run
  */
 
 import pc from "picocolors";
 import { VERSION } from "./version.js";
-import { intro, outro } from "@clack/prompts";
+
 import { logger } from "./core/logger.js";
 import { COMMANDS, findClosestCommand, findClosestSubcommand } from "./cli/fuzzy-matcher.js";
 import { handleUnknownCommand, handleUnknownSubcommand } from "./cli/unknown-command.js";
 import { findCommand, generateHelp, generateCommandHelp, getAllCommandNames } from "./cli/command-registry.js";
 
-function parseGoalArg(args: string[]): { goal?: string; rest: string[] } {
-    let goal: string | undefined;
-    const rest: string[] = [];
-
-    for (let i = 0; i < args.length; i++) {
-        const a = args[i] ?? "";
-        if (a === "--goal" || a === "-g") {
-            const v = args[i + 1];
-            if (v != null) {
-                goal = v.startsWith("@") ? v.slice(1) : v;
-                i++;
-            }
-            continue;
-        }
-        if (a.startsWith("--goal=")) {
-            const value = a.slice("--goal=".length);
-            goal = value.startsWith("@") ? value.slice(1) : value;
-            continue;
-        }
-        rest.push(a);
-    }
-
-    const trimmed = goal?.trim();
-    return { goal: trimmed ? trimmed : undefined, rest };
-}
-
-// 4-Pillar Architecture (internal design):
-//   Pillar 1 — setup/init: Guided setup wizard
-//   Pillar 2 — work: Zero-config execution
-//   Pillar 3 — (auto, work): Smart connection error recovery
-//   Pillar 4 — (auto, work): Web Dashboard auto-start
 
 function printHelp(): void {
     console.log(generateHelp());
@@ -175,138 +136,6 @@ async function main(): Promise<void> {
         const { runSetup } = await import("./onboard/setup-flow.js");
         const existing = readGlobalConfig();
         await runSetup({ prefill: existing ?? undefined });
-
-    // -------------------------------------------------------------------------
-    // Pillar 2 + 3 + 4: openpawl work — zero-config, auto-web, smart recovery
-    // -------------------------------------------------------------------------
-    } else if (cmd === "work") {
-        const commandArgs = args.slice(1);
-        // Pillar 4: --no-web flag
-        const hasNoWebFlag = commandArgs.includes("--no-web");
-        // Strip legacy --web / --no-dashboard flags (kept for compat, no longer meaningful)
-        const workArgs = commandArgs.filter(
-            (a) => a !== "--web" && a !== "--no-dashboard",
-        );
-        const parsed = parseGoalArg(workArgs);
-        const canRenderSpinner = Boolean(
-            process.stdout.isTTY && process.stderr.isTTY,
-        );
-
-        if (canRenderSpinner) {
-            const { isMockLlmEnabled } = await import("./core/mock-llm.js");
-            const mockLabel = isMockLlmEnabled() ? " [mock mode]" : "";
-            intro(`OpenPawl Work Session${mockLabel}`);
-        }
-
-        const { runWork } = await import("./work-runner.js");
-        // Pillar 2: pass noWeb flag so work-runner never prompts for infrastructure
-        await runWork({
-            args: parsed.rest,
-            goal: parsed.goal,
-            openDashboard: !hasNoWebFlag,
-            noWeb: hasNoWebFlag,
-        });
-
-    } else if (cmd === "web") {
-        const subCmd = args[1];
-        const hasDaemonFlag = args.includes("--daemon");
-
-        if (subCmd === "start" || hasDaemonFlag) {
-            const { isDashboardRunning } = await import("./work-runner/dashboard-setup.js");
-            const { start, status: daemonStatus } = await import("./daemon/manager.js");
-            const { readGlobalConfigWithDefaults } = await import("./core/global-config.js");
-            const port = readGlobalConfigWithDefaults().dashboardPort ?? 9001;
-
-            // Check if already running
-            const running = await isDashboardRunning(port);
-            if (running) {
-                logger.success(`Dashboard already running at http://localhost:${port}`);
-                return;
-            }
-
-            const result = start({ web: true, gateway: false, webPort: port });
-            if (result.error) {
-                logger.error(result.error);
-                process.exit(1);
-            }
-            const actualPort = daemonStatus().webPort ?? port;
-            logger.success(`Dashboard running at http://localhost:${actualPort}`);
-            return;
-        }
-
-        if (subCmd === "stop") {
-            const { stop } = await import("./daemon/manager.js");
-            stop();
-            logger.success("Dashboard stopped.");
-            return;
-        }
-
-        if (subCmd === "status") {
-            const { status } = await import("./daemon/manager.js");
-            const { isDashboardRunning } = await import("./work-runner/dashboard-setup.js");
-            const result = status();
-            if (result.web === "running" && result.webPort) {
-                const healthy = await isDashboardRunning(result.webPort);
-                if (healthy) {
-                    logger.plain(`Running at http://localhost:${result.webPort} (PID from daemon state)`);
-                } else {
-                    logger.plain(`Daemon state says running on port ${result.webPort} but health check failed`);
-                }
-            } else {
-                logger.plain("Not running — start with: openpawl web start");
-            }
-            return;
-        }
-
-        if (subCmd === "open") {
-            const { isDashboardRunning } = await import("./work-runner/dashboard-setup.js");
-            const { readGlobalConfigWithDefaults } = await import("./core/global-config.js");
-            const port = readGlobalConfigWithDefaults().dashboardPort ?? 9001;
-
-            // Start if not running
-            let running = await isDashboardRunning(port);
-            if (!running) {
-                const { start } = await import("./daemon/manager.js");
-                const result = start({ web: true, gateway: false, webPort: port });
-                if (result.error) {
-                    logger.error(result.error);
-                    process.exit(1);
-                }
-                // Wait for it to come up
-                for (let i = 0; i < 10; i++) {
-                    await new Promise((r) => setTimeout(r, 500));
-                    running = await isDashboardRunning(port);
-                    if (running) break;
-                }
-                if (running) {
-                    logger.success(`Dashboard started at http://localhost:${port}`);
-                } else {
-                    logger.warn(`Dashboard may still be starting at http://localhost:${port}`);
-                }
-            }
-
-            try {
-                const { default: open } = await import("open");
-                await open(`http://localhost:${port}`);
-                logger.success(`Opened http://localhost:${port} in browser`);
-            } catch {
-                logger.plain(`Open http://localhost:${port} in your browser`);
-            }
-            return;
-        }
-
-        // Default: foreground
-        const canRenderSpinner = Boolean(
-            process.stdout.isTTY && process.stderr.isTTY,
-        );
-        if (canRenderSpinner) {
-            intro("OpenPawl Web Server");
-        }
-        const { runWeb } = await import("./web/server.js");
-        await runWeb(args.slice(1));
-        if (canRenderSpinner) {
-            outro("Web server ready.");
-        }
 
     } else if (cmd === "check") {
         const { runCheck } = await import("./check.js");

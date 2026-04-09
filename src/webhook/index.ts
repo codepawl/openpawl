@@ -13,4 +13,3 @@ export { createTokenManager, computeHmacSignature } from "./tokens.js";
 export type { TokenManager } from "./tokens.js";
 export { deliverWebhook, deliverApprovalRequest, deliverTimeoutNotification } from "./delivery.js";
 export { formatSlackApprovalBatch } from "./slack.js";
-export { createWebhookApprovalProvider } from "./provider.js";

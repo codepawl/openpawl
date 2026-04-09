@@ -16,8 +16,7 @@ export const COMMANDS: readonly string[] = [
 export const SUBCOMMANDS: Record<string, string[]> = {
     config: ["get", "set", "unset"],
     model: ["list", "get", "set", "reset"],
-    web: ["start", "stop", "status"],
-    logs: ["gateway", "web", "work"],
+    logs: ["gateway"],
     lessons: ["promote", "demote"],
     memory: ["health", "rebuild", "prune", "export", "import"],
     profile: ["list", "show", "reset"],
