@@ -43,4 +43,23 @@ describe("parseTasks", () => {
     expect(tasks[0]!.description).toBe("**Design** the schema");
     expect(tasks[1]!.description).toBe("Implement the **routes**");
   });
+
+  it("parses JSON with dependsOn field", () => {
+    const input = `[{"description": "Setup project", "dependsOn": []}, {"description": "Create DB", "dependsOn": [1]}, {"description": "Add auth", "dependsOn": [1, 2]}]`;
+
+    const tasks = parseTasks(input);
+    expect(tasks).toHaveLength(3);
+    expect(tasks[0]!.dependsOn).toBeUndefined();
+    expect(tasks[1]!.dependsOn).toEqual([1]);
+    expect(tasks[2]!.dependsOn).toEqual([1, 2]);
+  });
+
+  it("handles JSON without dependsOn gracefully", () => {
+    const input = `[{"description": "Task A"}, {"description": "Task B"}]`;
+
+    const tasks = parseTasks(input);
+    expect(tasks).toHaveLength(2);
+    expect(tasks[0]!.dependsOn).toBeUndefined();
+    expect(tasks[1]!.dependsOn).toBeUndefined();
+  });
 });

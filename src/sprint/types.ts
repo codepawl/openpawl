@@ -5,10 +5,14 @@
 export interface SprintTask {
   id: string;
   description: string;
-  status: "pending" | "in_progress" | "completed" | "failed";
+  status: "pending" | "in_progress" | "completed" | "failed" | "incomplete";
   assignedAgent?: string;
   result?: string;
   error?: string;
+  /** Tool names called during this task's execution. */
+  toolsCalled?: string[];
+  /** 1-based task indices that must complete before this task can start. */
+  dependsOn?: number[];
 }
 
 export type SprintPhase = "planning" | "executing" | "paused" | "done" | "stopped";
@@ -56,6 +60,7 @@ export interface SprintEventMap {
   };
   "sprint:done": { result: SprintResult };
   "sprint:error": { error: Error; task?: SprintTask };
+  "sprint:warning": { warning: string; type: string; taskIndex?: number };
   "sprint:paused": undefined;
   "sprint:resumed": undefined;
 }

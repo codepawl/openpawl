@@ -31,11 +31,18 @@ function tryParseJsonTasks(jsonStr: string): SprintTask[] {
     if (!Array.isArray(arr)) return [];
     return arr
       .filter((item: unknown) => typeof item === "object" && item !== null && "description" in item)
-      .map((item: Record<"description", unknown>, i: number) => ({
-        id: `task-${i + 1}`,
-        description: String(item["description"]),
-        status: "pending" as const,
-      }));
+      .map((item: Record<string, unknown>, i: number) => {
+        const task: SprintTask = {
+          id: `task-${i + 1}`,
+          description: String(item["description"]),
+          status: "pending" as const,
+        };
+        if (Array.isArray(item["dependsOn"])) {
+          const deps = (item["dependsOn"] as unknown[]).filter((n): n is number => typeof n === "number");
+          if (deps.length > 0) task.dependsOn = deps;
+        }
+        return task;
+      });
   } catch {
     return [];
   }

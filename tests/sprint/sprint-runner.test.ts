@@ -29,8 +29,9 @@ describe("SprintRunner", () => {
     (runner as any).runAgent = vi.fn(async (): Promise<string> => {
       callCount++;
       if (callCount === 1) {
-        // Planner response
-        return "1. Design the schema\n2. Implement the API\n3. Write tests";
+        // Planner response — use descriptions that don't trigger write-validation
+        // (no "create", "build", "implement", "write", "add" keywords)
+        return "1. Design the schema\n2. Review the API structure\n3. Run the test suite";
       }
       return "Completed task successfully.";
     });
@@ -55,6 +56,25 @@ describe("SprintRunner", () => {
       "task:start", "task:complete",
       "done",
     ]);
+  });
+
+  it("marks write tasks as incomplete when agent only reads", async () => {
+    const runner = new SprintRunner(mockRegistry());
+    let callCount = 0;
+    (runner as any).runAgent = vi.fn(async (): Promise<string> => {
+      callCount++;
+      if (callCount === 1) {
+        return "1. Create the user model";
+      }
+      // Agent responds but never calls file_write/file_edit
+      return "I reviewed the codebase.";
+    });
+
+    const result = await runner.run("Build user system");
+
+    expect(result.tasks[0]!.status).toBe("incomplete");
+    expect(result.tasks[0]!.error).toContain("file creation/modification");
+    expect(result.completedTasks).toBe(0);
   });
 
   it("handles task failure gracefully", async () => {
@@ -93,6 +113,50 @@ describe("SprintRunner", () => {
     // Should have completed 1 task, then stopped
     expect(result.completedTasks).toBe(1);
     expect(result.tasks.filter(t => t.status === "pending").length).toBeGreaterThan(0);
+  });
+
+  it("emits warnings for plans without setup or test tasks", async () => {
+    const runner = new SprintRunner(mockRegistry());
+    let callCount = 0;
+    (runner as any).runAgent = vi.fn(async (): Promise<string> => {
+      callCount++;
+      if (callCount === 1) {
+        // No setup task, no test task
+        return '1. Design the database schema\n2. Review the API structure';
+      }
+      return "Done.";
+    });
+
+    const warnings: string[] = [];
+    runner.on("sprint:warning", ({ warning }: { warning: string }) => {
+      warnings.push(warning);
+    });
+
+    await runner.run("Build a REST API");
+
+    expect(warnings.some(w => w.includes("setup"))).toBe(true);
+    expect(warnings.some(w => w.includes("testing") || w.includes("test"))).toBe(true);
+  });
+
+  it("emits over-engineering warning when plan includes unrequested features", async () => {
+    const runner = new SprintRunner(mockRegistry());
+    let callCount = 0;
+    (runner as any).runAgent = vi.fn(async (): Promise<string> => {
+      callCount++;
+      if (callCount === 1) {
+        return '1. Setup the project\n2. Add Stripe payment integration\n3. Write tests';
+      }
+      return "Done.";
+    });
+
+    const warnings: string[] = [];
+    runner.on("sprint:warning", ({ warning }: { warning: string }) => {
+      warnings.push(warning);
+    });
+
+    await runner.run("Build a coffee shop website");
+
+    expect(warnings.some(w => w.includes("Stripe"))).toBe(true);
   });
 
   it("assigns agents based on task description keywords", () => {
