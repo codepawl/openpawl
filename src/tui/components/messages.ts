@@ -100,10 +100,7 @@ export class MessagesComponent implements Component {
       this.lastRenderWidth = width;
     }
 
-    // Determine where to insert live tool call views:
-    // Before the last message (the streaming response), not after all messages.
     const hasLiveTools = this.toolCallOrder.length > 0;
-    const toolInsertBefore = hasLiveTools ? this.messages.length - 1 : -1;
 
     for (let i = 0; i < this.messages.length; i++) {
       const msg = this.messages[i]!;
@@ -113,25 +110,17 @@ export class MessagesComponent implements Component {
         allLines.push(separator({ width: Math.min(30, maxBubbleWidth - 4), padding: 2 }));
       }
 
-      // Insert live tool call views before the last (streaming) message — with tree connectors
-      if (i === toolInsertBefore) {
-        const toolIds = [...this.toolCallOrder];
-        const connector = ctp.overlay0("├─");
-        const vertLine = ctp.overlay0("│");
-        for (const tid of toolIds) {
-          const view = this.activeToolCalls.get(tid);
-          if (view) {
-            const rendered = view.render(bubblePct > 0 ? maxBubbleWidth : width);
-            for (let r = 0; r < rendered.length; r++) {
-              const prefix = r === 0 ? "  " + connector + " " : "  " + vertLine + "  ";
-              allLines.push(prefix + rendered[r]!.trimStart());
-            }
-          }
-        }
-        allLines.push("  " + vertLine);
-      }
-
       this.messageBoundaries.push(allLines.length);
+
+      // Last agent message with live tool calls: render badge + tools + content as unified tree
+      const isLastMsg = i === this.messages.length - 1;
+      const isAgent = msg.role === "agent" || msg.role === "assistant";
+      if (isLastMsg && isAgent && hasLiveTools) {
+        const outputLines = this.renderAgentWithLiveTools(msg, width, maxBubbleWidth);
+        allLines.push(...outputLines);
+        allLines.push("");
+        continue;
+      }
 
       // Check render cache
       const hash = this.contentHash(msg.content);
@@ -267,6 +256,39 @@ export class MessagesComponent implements Component {
         return wrapped.map((line) => "  " + colorFn(line));
       }
     }
+  }
+
+  /** Render the last agent message with live tool call views embedded in tree structure. */
+  private renderAgentWithLiveTools(msg: ChatMessage, _width: number, maxBubbleWidth: number): string[] {
+    const nameLabel = msg.agentName ?? (msg.role.charAt(0).toUpperCase() + msg.role.slice(1));
+    const lines: string[] = [];
+    const BRANCH = ctp.overlay0("├─");
+    const VERT   = ctp.overlay0("│");
+
+    // Badge (root of tree)
+    lines.push("  " + agentBadge(nameLabel));
+
+    // Live tool call views with tree connectors
+    for (const tid of this.toolCallOrder) {
+      const view = this.activeToolCalls.get(tid);
+      if (view) {
+        const rendered = view.render(maxBubbleWidth);
+        for (let r = 0; r < rendered.length; r++) {
+          const prefix = r === 0 ? "  " + BRANCH + " " : "  " + VERT + "  ";
+          lines.push(prefix + rendered[r]!.trimStart());
+        }
+      }
+    }
+
+    // Content (thinking text or streaming response) — inside tree
+    const content = (msg.content || "").replace(/^\n+/, "");
+    if (content) {
+      lines.push("  " + VERT);
+      const md = renderMarkdown(content, maxBubbleWidth - 4);
+      for (const ml of md) lines.push("    " + ml);
+    }
+
+    return lines;
   }
 
   /** Fast content hash for cache invalidation. */
