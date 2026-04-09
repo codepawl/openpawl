@@ -218,57 +218,6 @@ Pure TypeScript / Node.js. No Python.
 
 ---
 
-## Docker
-
-### Quick start
-
-```bash
-cp .env.example .env
-# Add your API key to .env
-
-docker compose up -d
-open http://localhost:8000
-```
-
-### Run a work session
-
-```bash
-# Interactive (with dashboard)
-docker compose up -d
-docker compose exec openpawl node dist/cli.js work --goal "your goal"
-
-# Headless
-docker compose run --rm openpawl \
-  node dist/cli.js work --goal "Build a rate limiter" --no-web
-
-# With a template
-docker compose run --rm openpawl \
-  node dist/cli.js work --template indie-hacker --goal "Build auth system" --no-web
-```
-
-### Persistent data
-
-All data (memory, sessions, decisions, patterns) is stored in the `openpawl-data` Docker volume.
-
-```bash
-# Backup
-docker run --rm -v openpawl_openpawl-data:/data -v $(pwd):/backup \
-  alpine tar czf /backup/openpawl-backup.tar.gz /data
-
-# Restore
-docker run --rm -v openpawl_openpawl-data:/data -v $(pwd):/backup \
-  alpine tar xzf /backup/openpawl-backup.tar.gz -C /
-```
-
-### Development mode
-
-```bash
-# Uses docker-compose.override.yml automatically (mock LLM, no API calls)
-docker compose up
-```
-
----
-
 ## Development
 
 ```bash

@@ -20,7 +20,7 @@ Any deviation requires approval from the Tech Lead.
 
 - **Databases:** SQLite (development), PostgreSQL (production)
 
-- **Tools:** Vitest (unit tests), Playwright (UI smoke/e2e), ESLint, Prettier (lint/format), pnpm or npm (package manager), Docker (optional local containers), GitHub Actions (CI), Stripe (test mode) or a mock payment adapter
+- **Tools:** Vitest (unit tests), Playwright (UI smoke/e2e), ESLint, Prettier (lint/format), pnpm or npm (package manager), GitHub Actions (CI), Stripe (test mode) or a mock payment adapter
 
 ---
 
@@ -39,7 +39,6 @@ package.json
 pnpm-lock.yaml (or package-lock.json)
 tsconfig.json
 /.github/workflows/ci.yml
-/Dockerfile (optional)
 /README.md
 /RELEASE.md
 /DOCS/PLANNING.md
