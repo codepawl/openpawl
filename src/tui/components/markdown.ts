@@ -68,12 +68,9 @@ export function renderMarkdown(md: string, width: number): string[] {
       continue;
     }
 
-    // Horizontal rule — dim centered line
+    // Horizontal rule — just extra spacing (headings provide enough structure)
     if (/^[-*_]{3,}\s*$/.test(line.trim())) {
-      const ruleWidth = Math.round(width * 0.6);
-      const pad = Math.floor((width - ruleWidth) / 2);
       ensureBlankLine(result);
-      result.push(" ".repeat(pad) + ctp.overlay0("─".repeat(ruleWidth)));
       result.push("");
       continue;
     }
