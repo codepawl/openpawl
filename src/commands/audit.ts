@@ -130,9 +130,7 @@ async function runExport(args: string[]): Promise<void> {
       totalRuns: session.totalRuns,
       runs: audits,
       confidenceTrend: audits.map((a) => a.summary.averageConfidence),
-      costPerRun: audits.map((a) => a.summary.totalCostUSD),
       patternsPromoted: [],
-      totalCostUSD: audits.reduce((sum, a) => sum + a.summary.totalCostUSD, 0),
       totalDurationMs: session.completedAt - session.createdAt,
     };
 

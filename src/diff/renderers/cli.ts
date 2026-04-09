@@ -98,7 +98,7 @@ export function renderOverallTrend(chain: DiffChain): string {
   lines.push(`Confidence:    ${confValues} ${trendArrows(trend.confidenceTrend)}`);
 
   const tokenValues = buildTrendValues(chain, "tokens");
-  lines.push(`Tokens:        ${tokenValues} ${trendArrows(trend.costTrend)}`);
+  lines.push(`Tokens:        ${tokenValues}`);
 
   lines.push(`Learning efficiency: ${trend.learningEfficiency.toFixed(3)} per run`);
 
@@ -125,7 +125,7 @@ function buildTrendValues(chain: DiffChain, metric: "confidence" | "cost" | "tok
   }
 
   const arrows = chain.runDiffs.map((d) => {
-    const delta = d.metricDiffs.totalCostDelta;
+    const delta = d.metricDiffs.totalTokenDelta ?? 0;
     return delta < 0 ? "↓" : delta > 0 ? "↑" : "→";
   });
   return arrows.join(" ");

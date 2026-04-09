@@ -12,7 +12,7 @@ export type StreamEvent =
   | ToolCallDoneEvent
   | AgentDoneEvent
   | AgentErrorEvent
-  | CostUpdateEvent
+  | TokenUpdateEvent
   | StreamCompleteEvent;
 
 export interface AgentStartEvent {
@@ -73,7 +73,6 @@ export interface AgentDoneEvent {
   toolCallCount: number;
   inputTokens: number;
   outputTokens: number;
-  costUSD: number;
   duration: number;
   timestamp: number;
 }
@@ -87,12 +86,11 @@ export interface AgentErrorEvent {
   timestamp: number;
 }
 
-export interface CostUpdateEvent {
-  type: "cost:update";
+export interface TokenUpdateEvent {
+  type: "tokens:update";
   sessionId: string;
   totalInputTokens: number;
   totalOutputTokens: number;
-  totalCostUSD: number;
   timestamp: number;
 }
 
@@ -101,7 +99,6 @@ export interface StreamCompleteEvent {
   sessionId: string;
   agentResults: AgentRunResult[];
   totalDuration: number;
-  totalCostUSD: number;
   timestamp: number;
 }
 
@@ -114,7 +111,6 @@ export interface AgentRunResult {
   toolCalls: ToolCallRecord[];
   inputTokens: number;
   outputTokens: number;
-  costUSD: number;
   duration: number;
   error?: string;
 }
@@ -154,12 +150,11 @@ export type StreamError =
   | { type: "no_provider_available"; message: string }
   | { type: "serialization_error"; cause: string };
 
-// ─── Cost Summary ────────────────────────────────────────────────────────────
+// ─── Token Summary ──────────────────────────────────────────────────────────
 
-export interface CostSummary {
+export interface TokenSummary {
   totalInputTokens: number;
   totalOutputTokens: number;
-  totalCostUSD: number;
-  byProvider: Record<string, { tokens: number; costUSD: number }>;
-  byAgent: Record<string, { tokens: number; costUSD: number }>;
+  byProvider: Record<string, { tokens: number }>;
+  byAgent: Record<string, { tokens: number }>;
 }

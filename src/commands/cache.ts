@@ -54,7 +54,6 @@ export async function runCacheCommand(args: string[]): Promise<void> {
     logger.plain(`  Hit rate:     ${stats.totalEntries > 0 ? Math.round(stats.hitRate * 100) : 0}%`);
     logger.plain(`  Total hits:   ${stats.totalHits}`);
     logger.plain(`  Time saved:   ${formatDuration(stats.totalSavedMs)}`);
-    logger.plain(`  Cost saved:   $${stats.totalSavingsUSD.toFixed(2)}`);
     logger.plain(`  Oldest entry: ${formatTimeAgo(stats.oldestEntry)}`);
     logger.plain(sep);
     return;

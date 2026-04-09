@@ -3,9 +3,8 @@
  * Medium confidence method when profiles have >= 5 samples per task type.
  */
 
-import type { AgentForecast, PhaseForecast, ModelPricing } from "../types.js";
+import type { AgentForecast, PhaseForecast } from "../types.js";
 import type { PreviewTask } from "../../graph/preview/types.js";
-import { getModelPricing, computeTokenCost } from "../pricing.js";
 
 export interface ProfileTaskTypeScore {
   taskType: string;
@@ -43,7 +42,6 @@ const TASK_TYPE_TOKENS: Record<string, number> = {
 };
 
 const MIN_SAMPLES_PER_TYPE = 5;
-const INPUT_OUTPUT_RATIO = 3;
 
 /**
  * Forecast using agent profile data.
@@ -53,7 +51,6 @@ export function forecastProfileBased(
   tasks: PreviewTask[],
   profiles: AgentProfileData[],
   model: string,
-  pricingOverrides?: Record<string, ModelPricing>,
 ): ProfileBasedResult | null {
   if (profiles.length === 0) return null;
 
@@ -62,8 +59,6 @@ export function forecastProfileBased(
     p.taskTypeScores.some((ts) => ts.totalTasksCompleted >= MIN_SAMPLES_PER_TYPE),
   );
   if (!hasEnoughData) return null;
-
-  const pricing = getModelPricing(model, pricingOverrides);
 
   // Group tasks by agent
   const agentTasks = new Map<string, PreviewTask[]>();
@@ -75,8 +70,6 @@ export function forecastProfileBased(
   }
 
   const agentForecasts: AgentForecast[] = [];
-  let totalMin = 0;
-  let totalMax = 0;
 
   for (const [agent, agentTaskList] of agentTasks) {
     const profile = profiles.find((p) => p.agentRole === agent);
@@ -102,46 +95,34 @@ export function forecastProfileBased(
     // Add rework token estimate
     estimatedTokens += Math.round(estimatedReworks * 2000);
 
-    const outputTokens = Math.round(estimatedTokens / INPUT_OUTPUT_RATIO);
-    const inputTokens = estimatedTokens - outputTokens;
-    const baseCost = computeTokenCost(inputTokens, outputTokens, pricing);
-
-    // Profile-based: ±20% variance
-    const minCost = baseCost * 0.8;
-    const maxCost = baseCost * 1.2;
-
     agentForecasts.push({
       agentRole: agent,
       estimatedTasks: agentTaskList.length,
       estimatedTokens,
-      estimatedMinUSD: round(minCost),
-      estimatedMaxUSD: round(maxCost),
+      estimatedMinUSD: 0,
+      estimatedMaxUSD: 0,
       model,
-      costPerToken: pricing.inputPer1M / 1_000_000,
+      costPerToken: 0,
     });
-
-    totalMin += minCost;
-    totalMax += maxCost;
   }
 
-  const totalMid = (totalMin + totalMax) / 2;
-  const phaseForecasts = buildPhaseForecasts(totalMid, tasks.length);
+  const phaseForecasts = buildPhaseForecasts(0, tasks.length);
 
   return {
-    estimatedMinUSD: round(totalMin),
-    estimatedMaxUSD: round(totalMax),
-    estimatedMidUSD: round(totalMid),
+    estimatedMinUSD: 0,
+    estimatedMaxUSD: 0,
+    estimatedMidUSD: 0,
     agentForecasts,
     phaseForecasts,
   };
 }
 
-function buildPhaseForecasts(totalCost: number, taskCount: number): PhaseForecast[] {
+function buildPhaseForecasts(_totalCost: number, taskCount: number): PhaseForecast[] {
   return [
-    { phase: "planning", estimatedMinUSD: round(totalCost * 0.03), estimatedMaxUSD: round(totalCost * 0.06), estimatedTasks: 1 },
-    { phase: "execution", estimatedMinUSD: round(totalCost * 0.65), estimatedMaxUSD: round(totalCost * 0.80), estimatedTasks: taskCount },
-    { phase: "review", estimatedMinUSD: round(totalCost * 0.05), estimatedMaxUSD: round(totalCost * 0.15), estimatedTasks: Math.ceil(taskCount * 0.5) },
-    { phase: "rework", estimatedMinUSD: round(totalCost * 0.02), estimatedMaxUSD: round(totalCost * 0.10), estimatedTasks: Math.max(1, Math.round(taskCount / 5)) },
+    { phase: "planning", estimatedMinUSD: 0, estimatedMaxUSD: 0, estimatedTasks: 1 },
+    { phase: "execution", estimatedMinUSD: 0, estimatedMaxUSD: 0, estimatedTasks: taskCount },
+    { phase: "review", estimatedMinUSD: 0, estimatedMaxUSD: 0, estimatedTasks: Math.ceil(taskCount * 0.5) },
+    { phase: "rework", estimatedMinUSD: 0, estimatedMaxUSD: 0, estimatedTasks: Math.max(1, Math.round(taskCount / 5)) },
   ];
 }
 
@@ -161,8 +142,4 @@ function classifyTaskType(description: string): string {
     if (kws.some((kw) => lower.includes(kw))) return type;
   }
   return "general";
-}
-
-function round(v: number): number {
-  return Math.round(v * 10000) / 10000;
 }

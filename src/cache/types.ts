@@ -10,7 +10,6 @@ export interface CacheEntry {
   response: string;
   confidence?: number;
   tokensUsed: number;
-  costUSD: number;
   hitCount: number;
   createdAt: number;
   lastHitAt: number;
@@ -20,7 +19,6 @@ export interface CacheEntry {
 export interface CacheStats {
   totalEntries: number;
   totalHits: number;
-  totalSavingsUSD: number;
   totalSavedMs: number;
   hitRate: number;
   oldestEntry: number;
@@ -31,12 +29,8 @@ export interface SessionCacheStats {
   hits: number;
   misses: number;
   savedMs: number;
-  savedUSD: number;
 }
 
-/** Per-token cost estimate (matches audit/builder.ts) */
-export const COST_PER_INPUT_TOKEN = 0.000003;
-export const COST_PER_OUTPUT_TOKEN = 0.000015;
 
 /** TTL by agent role (milliseconds) */
 export const CACHE_TTL: Record<string, number> = {

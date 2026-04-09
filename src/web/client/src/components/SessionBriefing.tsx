@@ -6,7 +6,6 @@ interface BriefingData {
     sessionId: string;
     goal: string;
     daysAgo: number;
-    totalCostUSD: number;
     tasksCompleted: number;
   } | null;
   whatWasBuilt: string[];

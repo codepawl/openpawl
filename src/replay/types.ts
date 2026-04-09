@@ -39,7 +39,6 @@ export interface SessionIndexEntry {
   createdAt: number;
   completedAt: number;
   totalRuns: number;
-  totalCostUSD: number;
   averageConfidence: number;
   recordingPath: string;
   recordingSizeBytes: number;
@@ -84,8 +83,6 @@ export interface SessionDiff {
   taskCountB: number;
   avgConfidenceA: number;
   avgConfidenceB: number;
-  costA: number;
-  costB: number;
   durationA: number;
   durationB: number;
   changedNodes: NodeDiff[];

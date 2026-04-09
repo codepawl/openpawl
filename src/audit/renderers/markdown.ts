@@ -235,7 +235,6 @@ function renderCachePerformance(audit: AuditTrail): string {
     "",
     `- Hit rate: ${Math.round(c.hitRate * 100)}%`,
     `- Entries used: ${c.entriesUsed}`,
-    `- Cost saved: $${c.costSaved.toFixed(2)}`,
     `- Time saved: ${timeSaved}`,
   ].join("\n");
 }
@@ -262,7 +261,7 @@ export function renderMultiRunSummary(summary: MultiRunSummary): string {
     `**Session:** ${summary.sessionId}`,
     `**Total Runs:** ${summary.totalRuns}`,
     `**Total Duration:** ${formatDuration(summary.totalDurationMs)}`,
-    `**Total Cost:** $${summary.totalCostUSD.toFixed(2)}`,
+    `**Total Tokens:** ${((summary.runs.reduce((s, r) => s + r.summary.totalTokensInput + r.summary.totalTokensOutput, 0)) / 1000).toFixed(1)}k`,
     "",
     "---",
     "",
@@ -275,11 +274,6 @@ export function renderMultiRunSummary(summary: MultiRunSummary): string {
     const conf = summary.confidenceTrend[i];
     const bar = "█".repeat(Math.round(conf * 20));
     lines.push(`Run ${i + 1}: ${bar} ${conf.toFixed(2)}`);
-  }
-
-  lines.push("", "## Cost Per Run", "");
-  for (let i = 0; i < summary.costPerRun.length; i++) {
-    lines.push(`- Run ${i + 1}: $${summary.costPerRun[i].toFixed(3)}`);
   }
 
   if (summary.patternsPromoted.length > 0) {

@@ -19,9 +19,6 @@ import type { RecordingEvent } from "../replay/types.js";
 import { getRoleName } from "../core/bot-definitions.js";
 import type { BotDefinition } from "../core/bot-definitions.js";
 
-// Dollar cost estimation removed — these are kept as zero for type compat
-const COST_PER_INPUT_TOKEN = 0;
-const COST_PER_OUTPUT_TOKEN = 0;
 
 export async function buildAuditTrail(
   sessionId: string,
@@ -131,7 +128,6 @@ export async function buildAuditTrail(
       cachePerformance = {
         hitRate: cStats.hits / total,
         entriesUsed: cStats.hits,
-        costSaved: cStats.savedUSD,
         timeSavedMs: cStats.savedMs,
       };
     }
@@ -196,7 +192,6 @@ function buildSummary(
     averageConfidence: avgConfidence,
     totalTokensInput: totalInput,
     totalTokensOutput: totalOutput,
-    totalCostUSD: totalInput * COST_PER_INPUT_TOKEN + totalOutput * COST_PER_OUTPUT_TOKEN,
   };
 }
 
@@ -326,7 +321,6 @@ function buildCostBreakdown(
       tasks,
       tokensInput: 0,
       tokensOutput: 0,
-      costUSD: 0,
     });
   }
 
@@ -341,11 +335,6 @@ function buildCostBreakdown(
         break;
       }
     }
-  }
-
-  // Calculate costs
-  for (const entry of agentMap.values()) {
-    entry.costUSD = entry.tokensInput * COST_PER_INPUT_TOKEN + entry.tokensOutput * COST_PER_OUTPUT_TOKEN;
   }
 
   return Array.from(agentMap.values()).filter((e) => e.tasks > 0);

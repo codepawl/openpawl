@@ -123,22 +123,20 @@ function runList(limit?: number): void {
     pad("ID", 24),
     pad("Goal", 35),
     pad("Date", 12),
-    pad("Cost", 8),
     pad("Runs", 5),
     "Tag",
   ].join("");
 
   logger.plain(pc.bold(header));
-  logger.plain("─".repeat(95));
+  logger.plain("─".repeat(85));
 
   for (const s of sessions) {
     const id = pad(s.sessionId.slice(0, 22), 24);
     const goal = pad(s.goal.slice(0, 33), 35);
     const date = pad(new Date(s.createdAt).toLocaleDateString(), 12);
-    const cost = pad(`$${s.totalCostUSD.toFixed(2)}`, 8);
     const runs = pad(String(s.totalRuns), 5);
     const tag = s.tag ? pc.cyan(s.tag) : "";
-    logger.plain(`${id}${goal}${date}${cost}${runs}${tag}`);
+    logger.plain(`${id}${goal}${date}${runs}${tag}`);
   }
 }
 
@@ -216,7 +214,6 @@ function printDiff(diff: SessionDiff): void {
   logger.plain(`Team:        ${diff.teamSame ? "same" : `${diff.teamA.join(",")} vs ${diff.teamB.join(",")}`}`);
   logger.plain(`Tasks:       ${diff.taskCountA} vs ${diff.taskCountB}${diff.taskCountA !== diff.taskCountB ? ` (${formatDelta(diff.taskCountB - diff.taskCountA)} tasks)` : ""}`);
   logger.plain(`Avg conf:    ${diff.avgConfidenceA.toFixed(2)} vs ${diff.avgConfidenceB.toFixed(2)}${formatDelta(diff.avgConfidenceB - diff.avgConfidenceA, true)}`);
-  logger.plain(`Cost:        $${diff.costA.toFixed(2)} vs $${diff.costB.toFixed(2)}${formatDelta(diff.costB - diff.costA, false, "$")}`);
   logger.plain(`Duration:    ${formatMs(diff.durationA)} vs ${formatMs(diff.durationB)}`);
 
   if (diff.changedNodes.length > 0) {

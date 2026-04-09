@@ -7,7 +7,6 @@ export interface LastSessionInfo {
   goal: string;
   completedAt: number;
   daysAgo: number;
-  totalCostUSD: number;
   tasksCompleted: number;
 }
 
@@ -59,8 +58,8 @@ export interface BriefingData {
   asyncThinkResults?: AsyncThinkBriefing[];
   contextFileFound?: boolean;
   vibeScore?: { overall: number; delta: number | null; direction: string };
-  standupSummary?: { sessionCount: number; totalCost: number; topBlocked: string | null; topSuggestion: string | null };
-  cacheStats?: { hitRate: number; totalSavingsUSD: number };
+  standupSummary?: { sessionCount: number; topBlocked: string | null; topSuggestion: string | null };
+  cacheStats?: { hitRate: number };
 }
 
 export interface InterRunSummary {

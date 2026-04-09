@@ -24,7 +24,6 @@ export function buildDiffChain(
       runDiffs: [],
       overallTrend: {
         confidenceTrend: "stable",
-        costTrend: "stable",
         learningEfficiency: 0,
         plateauDetected: false,
       },
@@ -60,7 +59,6 @@ export function buildPairDiff(from: RunSnapshot, to: RunSnapshot): DiffChain {
     runDiffs: [diff],
     overallTrend: {
       confidenceTrend: classifyTrend(to.averageConfidence - from.averageConfidence),
-      costTrend: classifyCostTrend(to.totalCostUSD - from.totalCostUSD),
       learningEfficiency: to.averageConfidence - from.averageConfidence,
       plateauDetected: false,
     },
@@ -76,7 +74,6 @@ function computeOverallTrend(
   const last = snapshots[snapshots.length - 1];
 
   const totalConfDelta = last.averageConfidence - first.averageConfidence;
-  const totalCostDelta = last.totalCostUSD - first.totalCostUSD;
   const numRuns = snapshots.length;
 
   const learningEfficiency = numRuns > 1 ? totalConfDelta / (numRuns - 1) : 0;
@@ -110,7 +107,6 @@ function computeOverallTrend(
 
   return {
     confidenceTrend: classifyTrend(totalConfDelta),
-    costTrend: classifyCostTrend(totalCostDelta),
     learningEfficiency: Math.round(learningEfficiency * 1000) / 1000,
     plateauDetected,
     plateauMessage,
@@ -123,9 +119,3 @@ function classifyTrend(delta: number): Trend {
   return "stable";
 }
 
-/** For cost, lower is better — so negative delta = improving. */
-function classifyCostTrend(delta: number): Trend {
-  if (delta < -0.001) return "improving";
-  if (delta > 0.001) return "degrading";
-  return "stable";
-}

@@ -7,7 +7,6 @@ interface SessionEntry {
   createdAt: number;
   completedAt: number;
   totalRuns: number;
-  totalCostUSD: number;
   averageConfidence: number;
   teamComposition: string[];
   tag?: string;
@@ -123,8 +122,6 @@ export function ReplayPanel() {
 
           <div className="flex flex-wrap gap-1 text-xs text-stone-400">
             <span>{new Date(s.createdAt).toLocaleString()}</span>
-            <span>|</span>
-            <span>${s.totalCostUSD.toFixed(2)}</span>
             <span>|</span>
             <span>conf: {(s.averageConfidence * 100).toFixed(0)}%</span>
           </div>

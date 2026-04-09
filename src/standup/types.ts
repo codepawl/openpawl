@@ -6,14 +6,12 @@ export interface StandupData {
   date: string;
   yesterday: {
     sessions: SessionSummary[];
-    totalCostUSD: number;
     totalTasks: number;
     teamLearnings: string[];
   };
   blocked: BlockedItem[];
   suggested: SuggestionItem[];
   streak: number;
-  weekCostUSD: number;
   globalPatternsCount: number;
 }
 
@@ -23,7 +21,6 @@ export interface SessionSummary {
   tasksCompleted: number;
   reworkCount: number;
   allApproved: boolean;
-  costUSD: number;
 }
 
 export interface BlockedItem {
@@ -37,13 +34,11 @@ export interface SuggestionItem {
   type: "execute_rfc" | "resolve_escalation" | "follow_up" | "agent_health";
   description: string;
   reasoning: string;
-  estimatedCost?: number;
 }
 
 export interface StreakEntry {
   date: string;
   sessionCount: number;
-  totalCostUSD: number;
   recordedAt: number;
 }
 
@@ -54,13 +49,12 @@ export interface WeeklySummary {
   tasksCompleted: number;
   autoApproved: number;
   reworkCount: number;
-  totalCostUSD: number;
   avgConfidence: number;
   prevWeekAvgConfidence: number | null;
   newGlobalPatterns: number;
   newSessionPatterns: number;
   topDomains: { domain: string; taskCount: number }[];
-  bestDay: { dayLabel: string; taskCount: number; costUSD: number; avgConfidence: number } | null;
+  bestDay: { dayLabel: string; taskCount: number; avgConfidence: number } | null;
   streak: number;
 }
 

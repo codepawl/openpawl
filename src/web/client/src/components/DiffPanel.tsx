@@ -36,7 +36,6 @@ export interface TaskDiffData {
 
 export interface OverallTrendData {
   confidenceTrend: "improving" | "stable" | "degrading";
-  costTrend: "improving" | "stable" | "degrading";
   learningEfficiency: number;
   plateauDetected: boolean;
   plateauMessage?: string;
@@ -126,9 +125,8 @@ export function DiffPanel({ totalRuns, runDiffs, overallTrend }: DiffPanelProps)
       )}
 
       {/* Metrics Bar */}
-      <div className="grid grid-cols-5 gap-2">
+      <div className="grid grid-cols-4 gap-2">
         <MetricCard label="Confidence" delta={currentDiff.metricDiffs.averageConfidenceDelta} format={(v) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}`} />
-        <MetricCard label="Cost" delta={currentDiff.metricDiffs.totalCostDelta} format={(v) => `${v >= 0 ? "+" : "-"}$${Math.abs(v).toFixed(4)}`} lowerIsBetter />
         <MetricCard label="Duration" delta={currentDiff.metricDiffs.totalDurationDelta} format={(v) => `${v >= 0 ? "+" : ""}${Math.round(v / 1000)}s`} lowerIsBetter />
         <MetricCard label="Reworks" delta={currentDiff.metricDiffs.reworkCountDelta} format={(v) => `${v >= 0 ? "+" : ""}${v}`} lowerIsBetter />
         <MetricCard label="Auto-approved" delta={currentDiff.metricDiffs.autoApprovedDelta} format={(v) => `${v >= 0 ? "+" : ""}${v}`} />
@@ -194,12 +192,6 @@ export function DiffPanel({ totalRuns, runDiffs, overallTrend }: DiffPanelProps)
               <span className="text-xs text-stone-500 dark:text-stone-400">Confidence: </span>
               <span className={`text-sm font-medium ${trendColor(overallTrend.confidenceTrend)}`}>
                 {overallTrend.confidenceTrend} {trendArrow(overallTrend.confidenceTrend)}
-              </span>
-            </div>
-            <div>
-              <span className="text-xs text-stone-500 dark:text-stone-400">Cost: </span>
-              <span className={`text-sm font-medium ${trendColor(overallTrend.costTrend)}`}>
-                {overallTrend.costTrend} {trendArrow(overallTrend.costTrend)}
               </span>
             </div>
             <div>

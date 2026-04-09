@@ -13,12 +13,10 @@ export interface TaskDiff {
   agentChanged?: { from: string; to: string };
   approvalChanged?: { from: string; to: string };
   durationDelta?: number;
-  costDelta?: number;
 }
 
 export interface MetricDiff {
   averageConfidenceDelta: number;
-  totalCostDelta: number;
   totalTokenDelta?: number;
   totalDurationDelta: number;
   reworkCountDelta: number;
@@ -62,7 +60,6 @@ export type Trend = "improving" | "stable" | "degrading";
 
 export interface OverallTrend {
   confidenceTrend: Trend;
-  costTrend: Trend;
   learningEfficiency: number;
   plateauDetected: boolean;
   plateauMessage?: string;
@@ -100,7 +97,6 @@ export interface TaskSnapshot {
   reworkCount: number;
   approvalStatus: string;
   durationMs: number;
-  costUSD: number;
 }
 
 /** Normalized run snapshot for diffing. */
@@ -109,7 +105,6 @@ export interface RunSnapshot {
   runIndex: number;
   tasks: TaskSnapshot[];
   averageConfidence: number;
-  totalCostUSD: number;
   totalDurationMs: number;
   totalReworks: number;
   autoApprovedCount: number;

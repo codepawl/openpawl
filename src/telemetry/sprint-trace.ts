@@ -32,7 +32,6 @@ export class SprintTrace {
   end(output: {
     success: boolean;
     tasksCompleted: number;
-    totalCostUSD?: number;
     totalTokens?: number;
     durationMs: number;
   }) {

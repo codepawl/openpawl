@@ -178,9 +178,8 @@ function buildCell(
       displayValue = formatDuration(breakdown.avgDurationMs);
       break;
     case "cost": {
-      const taskCost = utilization.costPerTask * breakdown.count;
-      value = utilization.totalCostUSD > 0 ? taskCost / utilization.totalCostUSD : 0;
-      displayValue = `$${taskCost.toFixed(4)}`;
+      value = 0;
+      displayValue = "—";
       break;
     }
     case "confidence":
@@ -205,7 +204,7 @@ function buildCellFromUtilization(
     case "duration":
       return { agentRole, columnId, value: u.utilizationPct, displayValue: formatDuration(u.averageDurationMs), metric };
     case "cost":
-      return { agentRole, columnId, value: Math.min(u.totalCostUSD * 10, 1), displayValue: `$${u.totalCostUSD.toFixed(4)}`, metric };
+      return { agentRole, columnId, value: 0, displayValue: "—", metric };
     case "confidence":
       return { agentRole, columnId, value: u.averageConfidence, displayValue: u.averageConfidence.toFixed(2), metric };
     default:

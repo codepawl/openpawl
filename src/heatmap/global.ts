@@ -48,7 +48,6 @@ export function recordUtilization(utilizations: AgentUtilization[]): void {
         utilizationPct: u.utilizationPct,
         bottleneckScore: u.bottleneckScore,
         averageConfidence: u.averageConfidence,
-        totalCostUSD: u.totalCostUSD,
         tasksHandled: u.tasksHandled,
       };
 

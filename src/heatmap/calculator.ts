@@ -6,9 +6,6 @@
 import type { RecordingEvent } from "../replay/types.js";
 import type { AgentUtilization, TaskTypeBreakdown } from "./types.js";
 
-// Per-token cost estimate (matches audit builder)
-const COST_PER_INPUT_TOKEN = 0.000003;
-
 /** Task type keywords for classification (lightweight, no LLM). */
 const TASK_TYPE_KEYWORDS: Record<string, string[]> = {
   audit: ["audit", "review", "inspect", "check", "verify"],
@@ -87,9 +84,8 @@ export function calculateUtilization(
       ? confidences.reduce((sum, c) => sum + c, 0) / confidences.length
       : 0;
 
-    // Tokens & cost
+    // Tokens
     const tokens = exits.reduce((sum, e) => sum + (e.agentOutput?.tokensUsed ?? 0), 0);
-    const cost = tokens * COST_PER_INPUT_TOKEN;
 
     const utilizationPct = totalWallMs > 0 ? totalActiveMs / totalWallMs : 0;
 
@@ -147,8 +143,6 @@ export function calculateUtilization(
       maxDurationMs: maxDuration,
       minDurationMs: minDuration,
       averageConfidence: Math.round(avgConfidence * 100) / 100,
-      totalCostUSD: Math.round(cost * 100000) / 100000,
-      costPerTask: tasksHandled > 0 ? Math.round((cost / tasksHandled) * 100000) / 100000 : 0,
       tokensUsed: tokens,
       bottleneckScore: Math.round(bottleneckScore * 100) / 100,
       queueDepth,

@@ -12,14 +12,14 @@ export type {
   ToolCallDoneEvent,
   AgentDoneEvent,
   AgentErrorEvent,
-  CostUpdateEvent,
+  TokenUpdateEvent,
   StreamCompleteEvent,
   AgentRunResult,
   ToolCallRecord,
   LLMMessage,
   LLMToolCall,
   StreamError,
-  CostSummary,
+  TokenSummary,
 } from "./types.js";
 
 // Context
@@ -37,8 +37,8 @@ export type { LLMStreamProvider } from "./agent-runner.js";
 // Orchestrator
 export { StreamOrchestrator } from "./stream-orchestrator.js";
 
-// Cost tracking
-export { CostTracker, calculateCost } from "./cost-tracker.js";
+// Token tracking
+export { TokenTracker } from "./cost-tracker.js";
 
 // Abort management
 export { StreamAbortManager } from "./abort-controller.js";
