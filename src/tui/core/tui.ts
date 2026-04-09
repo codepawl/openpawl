@@ -254,6 +254,9 @@ export class TUI {
   /** Clear interactive view, restore normal messages. */
   clearInteractiveView(): void {
     this.interactiveLines = null;
+    // Full repaint — the diff renderer's cache has the interactive view's
+    // lines, which would cause stale regions if only diffed.
+    this.renderer.reset();
     this.requestRender();
   }
 

@@ -16,7 +16,7 @@ import { createSetupCommand } from "./setup.js";
 import { createDebateCommand } from "./debate.js";
 import { createResearchCommand } from "./research.js";
 import { createDevCommand } from "./dev.js";
-export { createPlanCommand, createExecuteCommand, type PlanCommandDeps } from "./plan.js";
+export { createPlanCommand, type PlanCommandDeps } from "./plan.js";
 
 export function registerAllCommands(
   registry: CommandRegistry,

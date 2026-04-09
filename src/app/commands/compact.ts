@@ -47,6 +47,7 @@ export function createCompactCommand(deps: CompactCommandDeps): SlashCommand {
         callLLM: deps.callLLM,
         keepLastExchanges: level === "emergency" ? 5 : 10,
         emergencyKeepLast: 5,
+        force: forceEmergency,
       });
 
       const afterSnapshot = deps.contextTracker.snapshot(messages);

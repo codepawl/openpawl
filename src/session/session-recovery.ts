@@ -35,8 +35,7 @@ export class SessionRecovery {
    * Recover a single crashed session.
    * 1. Load state.json (falls back to checkpoint.json)
    * 2. Cancel pending tool confirmations
-   * 3. Add system recovery message
-   * 4. Save recovered state
+   * 3. Save recovered state
    */
   async recover(sessionId: string): Promise<Result<Session, SessionError>> {
     // Load from store (already tries checkpoint fallback)
@@ -52,15 +51,6 @@ export class SessionRecovery {
     const state = session.getState();
     for (const conf of [...state.pendingConfirmations]) {
       session.resolveToolConfirmation(conf.executionId, false);
-    }
-
-    // Add recovery system message (only if not already present)
-    const lastMsg = state.messages[state.messages.length - 1];
-    if (!(lastMsg?.role === "system" && lastMsg.content === "[Session recovered]")) {
-      session.addMessage({
-        role: "system",
-        content: "[Session recovered]",
-      });
     }
 
     session.setStatus("active");

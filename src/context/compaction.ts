@@ -25,6 +25,8 @@ export interface CompactionOptions {
   keepLastExchanges?: number;
   /** Number of verbatim exchanges to keep for emergency. Default: 5. */
   emergencyKeepLast?: number;
+  /** Force compaction even when context is low or few messages exist. */
+  force?: boolean;
 }
 
 const SUMMARIZATION_PROMPT = `Summarize this conversation history into a concise context document.
@@ -38,6 +40,9 @@ Conversation:
  * Run the appropriate compaction strategy for the given context level.
  * Mutates the messages array in-place.
  *
+ * When `force` is set, compaction runs regardless of message count —
+ * keepLast is reduced to fit the actual conversation size.
+ *
  * Returns null if no compaction was applied (normal/warning levels).
  */
 export async function compact(
@@ -45,18 +50,20 @@ export async function compact(
   level: ContextLevel,
   options?: CompactionOptions,
 ): Promise<CompactionResult | null> {
-  if (level === "normal" || level === "warning") return null;
+  if (!options?.force && (level === "normal" || level === "warning")) return null;
 
   const beforeTokens = estimateMessageTokens(messages);
 
   let result: CompactionResult;
 
+  const force = options?.force;
+
   switch (level) {
     case "high":
-      result = maskToolResults(messages, options?.keepLastExchanges ?? 10);
+      result = maskToolResults(messages, options?.keepLastExchanges ?? 10, force);
       break;
     case "critical":
-      result = pruneMessages(messages, options?.keepLastExchanges ?? 10);
+      result = pruneMessages(messages, options?.keepLastExchanges ?? 10, force);
       break;
     case "emergency":
       result = await llmSummarize(messages, options);
@@ -80,8 +87,9 @@ export async function compact(
 function maskToolResults(
   messages: CompactableMessage[],
   keepLast: number,
+  force?: boolean,
 ): CompactionResult {
-  const cutoff = findExchangeCutoff(messages, keepLast);
+  const cutoff = findExchangeCutoff(messages, keepLast, force);
   let affected = 0;
 
   for (let i = 0; i < cutoff; i++) {
@@ -105,8 +113,9 @@ function maskToolResults(
 function pruneMessages(
   messages: CompactableMessage[],
   keepLast: number,
+  force?: boolean,
 ): CompactionResult {
-  const cutoff = findExchangeCutoff(messages, keepLast);
+  const cutoff = findExchangeCutoff(messages, keepLast, force);
   let affected = 0;
 
   // Work backwards to avoid index shifting
@@ -151,10 +160,10 @@ async function llmSummarize(
 
   if (!options?.callLLM) {
     // Fallback to pruning if no LLM available
-    return pruneMessages(messages, keepLast);
+    return pruneMessages(messages, keepLast, options?.force);
   }
 
-  const cutoff = findExchangeCutoff(messages, keepLast);
+  const cutoff = findExchangeCutoff(messages, keepLast, options?.force);
   const toSummarize = messages.slice(0, cutoff);
 
   // Build a compact representation for summarization
@@ -187,8 +196,16 @@ async function llmSummarize(
 /**
  * Find the message index that marks the start of the last N user/assistant exchanges.
  * An "exchange" is a user message followed by an assistant response.
+ *
+ * When `force` is true and fewer than `keepLast` exchanges exist,
+ * keeps the minimum of available exchanges minus 1 (at least 1 exchange
+ * must exist to compact anything before it).
  */
-function findExchangeCutoff(messages: CompactableMessage[], keepLast: number): number {
+function findExchangeCutoff(
+  messages: CompactableMessage[],
+  keepLast: number,
+  force?: boolean,
+): number {
   let exchanges = 0;
 
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -198,6 +215,17 @@ function findExchangeCutoff(messages: CompactableMessage[], keepLast: number): n
     }
   }
 
-  // Fewer than keepLast exchanges — don't compact anything
+  // Fewer than keepLast exchanges — if forced, keep all but the oldest exchange
+  if (force && exchanges > 1) {
+    // Find the second user message from the end — keep from there onward
+    let count = 0;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i]!.role === "user") {
+        count++;
+        if (count >= exchanges - 1) return i;
+      }
+    }
+  }
+
   return 0;
 }
