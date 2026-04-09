@@ -15,7 +15,6 @@ import {
   type Terminal,
 } from "../tui/index.js";
 import { registerAllCommands } from "./commands/index.js";
-import { SessionManager as TuiSessionManager } from "./session.js";
 import { createAutocompleteProvider } from "./autocomplete.js";
 import { resolveFileRef } from "./file-ref.js";
 import { executeShell } from "./shell.js";
@@ -23,6 +22,7 @@ import { type ConfigState, detectConfig, showConfigWarning } from "./config-chec
 import { setLoggerMuted, logger, isDebugMode } from "../core/logger.js";
 import { defaultTheme, ctp } from "../tui/themes/default.js";
 import { bold } from "../tui/core/ansi.js";
+import { visibleWidth } from "../tui/utils/text-width.js";
 import { findClosest } from "../utils/fuzzy.js";
 import { ModeSystem, type OperatingMode } from "../tui/keybindings/mode-system.js";
 import { LeaderKeyHandler } from "../tui/keybindings/leader-key.js";
@@ -43,10 +43,10 @@ import type { PromptRouter } from "../router/prompt-router.js";
 // ---------------------------------------------------------------------------
 
 function formatTokenCount(count: number): string {
-  if (count < 1000) return String(count);
-  if (count < 10_000) return `${(count / 1000).toFixed(1)}k`;
-  if (count < 1_000_000) return `${Math.round(count / 1000)}k`;
-  return `${(count / 1_000_000).toFixed(1)}M`;
+  if (count < 1000) return `${count} tok`;
+  if (count < 10_000) return `${(count / 1000).toFixed(1)}k tok`;
+  if (count < 1_000_000) return `${Math.round(count / 1000)}k tok`;
+  return `${(count / 1_000_000).toFixed(1)}M tok`;
 }
 
 // ---------------------------------------------------------------------------
@@ -217,6 +217,8 @@ function wireRouterEvents(
     thinking.stop();
     thinkingMsgAdded = false;
     stopToolSpinner();
+    // Bake completed tool calls into chat history, then clear the live views
+    layout.messages.bakeToolCalls();
     layout.statusBar.updateSegment(3, "idle", ctp.overlay0);
     layout.tui.requestRender();
   };
@@ -263,9 +265,9 @@ function wireSessionEvents(
   sessionMgr: SessionManager,
   layout: AppLayout,
 ): () => void {
-  const onCostUpdated = (_sessionId: string, cost: { input?: number; output?: number }) => {
-    const total = (cost.input ?? 0) + (cost.output ?? 0);
-    const display = total > 0 ? `tokens: ${formatTokenCount(total)}` : "";
+  const onTokensUpdated = (_sessionId: string, tokens: { input?: number; output?: number }) => {
+    const total = (tokens.input ?? 0) + (tokens.output ?? 0);
+    const display = total > 0 ? formatTokenCount(total) : "";
     layout.statusBar.updateSegment(4, display, ctp.overlay0);
     layout.tui.requestRender();
   };
@@ -275,11 +277,11 @@ function wireSessionEvents(
     layout.tui.requestRender();
   };
 
-  sessionMgr.on("cost:updated", onCostUpdated);
+  sessionMgr.on("cost:updated", onTokensUpdated);
   sessionMgr.on("message:added", onMessageAdded);
 
   return () => {
-    sessionMgr.off("cost:updated", onCostUpdated);
+    sessionMgr.off("cost:updated", onTokensUpdated);
     sessionMgr.off("message:added", onMessageAdded);
   };
 }
@@ -350,9 +352,9 @@ async function handleWithRouter(
   layout.statusBar.updateSegment(3, "idle", ctp.overlay0);
 
   // Update token display
-  const cost = session.cost;
-  const totalTokens = (cost.input ?? 0) + (cost.output ?? 0);
-  layout.statusBar.updateSegment(4, totalTokens > 0 ? `tokens: ${formatTokenCount(totalTokens)}` : "", ctp.overlay0);
+  const tokenInfo = session.tokens;
+  const totalTokens = (tokenInfo.input ?? 0) + (tokenInfo.output ?? 0);
+  layout.statusBar.updateSegment(4, totalTokens > 0 ? formatTokenCount(totalTokens) : "", ctp.overlay0);
   layout.tui.requestRender();
 }
 
@@ -372,9 +374,10 @@ async function handleChatFallback(
     const { callLLM } = await import("../engine/llm.js");
     layout.messages.addMessage({ role: "assistant", content: "", timestamp: new Date() });
 
+    const { buildIdentityPrefix } = await import("../router/agent-registry.js");
     await callLLM(text, {
-      systemPrompt: "You are OpenPawl, a helpful AI assistant running in a terminal. " +
-        "Respond naturally and concisely. Use markdown formatting when helpful.",
+      systemPrompt: buildIdentityPrefix("Assistant") +
+        "\n\nYou are running in a terminal. Use markdown formatting when helpful.",
       onChunk: (chunk: string) => {
         layout.messages.appendToLast(chunk);
         layout.tui.requestRender();
@@ -430,7 +433,6 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
 
   const layout = createLayout(opts?.terminal);
   const registry = new CommandRegistry();
-  const tuiSession = new TuiSessionManager(opts?.sessionsDir);
 
   // ── Shared mutable refs for async-initialized session/router ────────
   // These are populated by initSessionRouter() after the TUI starts.
@@ -453,7 +455,7 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
   }
 
   // Register app commands (/status, /settings, /model, /mode, /cost, etc.)
-  registerAllCommands(registry, tuiSession);
+  registerAllCommands(registry);
   if (isDebugMode()) {
     logger.debug(`registry has ${registry.getAll().map((c: { name: string }) => c.name).join(", ")}`);
   }
@@ -476,15 +478,21 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
           content,
           timestamp: new Date(),
         });
-        tuiSession.append({ role, content });
-        if (ctx.chatSession) {
-          ctx.chatSession.addMessage({ role: role as "user" | "assistant" | "system" | "tool", content });
+        if (ctx.chatSession && role !== "error") {
+          ctx.chatSession.addMessage({
+            role: role as "user" | "assistant" | "system" | "tool",
+            content,
+            metadata: role === "system" ? { transient: true } : undefined,
+          });
         }
         layout.tui.requestRender();
       },
+      clearMessages: () => {
+        layout.messages.clear();
+        ctx.chatSession?.clearMessages();
+      },
       requestRender: () => layout.tui.requestRender(),
       exit: () => {
-        tuiSession.close();
         layout.tui.stop();
       },
       tui: layout.tui,
@@ -577,6 +585,12 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
           msgCtx.addMessage("user", text);
         }
 
+        // Auto-name session from first user message
+        if (ctx.chatSession?.getState().title === "New session") {
+          const name = text.replace(/\s+/g, " ").trim().slice(0, 60);
+          if (name) ctx.chatSession.setTitle(name);
+        }
+
         // Guard: don't attempt LLM calls when no provider is configured
         if (!ctx.configState?.hasProvider) {
           msgCtx.addMessage("system", "\u26a0 No provider configured. Run /setup to set up your AI provider.");
@@ -627,21 +641,43 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
     lines.push(ctp.overlay0(" ".repeat(tagPad) + tagline));
     lines.push("");
 
-    const ruleWidth = Math.min(60, termWidth - 4);
-    lines.push(ctp.surface1("\u2500".repeat(ruleWidth)));
-    lines.push("");
-    if (termWidth >= 70) {
-      lines.push(`  ${ctp.blue("/help")}       Show commands       ${ctp.blue("@coder")}     Route to Coder`);
-      lines.push(`  ${ctp.blue("/settings")}   Configure provider  ${ctp.blue("@reviewer")}  Route to Reviewer`);
-      lines.push(`  ${ctp.blue("/agents")}     List agents         ${ctp.blue("@planner")}   Route to Planner`);
-      lines.push(`  ${ctp.peach("!command")}    Run shell command   ${ctp.blue("@tester")}    Route to Tester`);
-      lines.push(`  ${ctp.blue("@file")}       Reference a file    ${ctp.blue("@debugger")}  Route to Debugger`);
+    const ruleWidth = Math.min(termWidth - 4, termWidth);
+
+    const leftItems: [string, string][] = [
+      [ctp.blue("/help"), "Show commands"],
+      [ctp.blue("/settings"), "Configure provider"],
+      [ctp.blue("/agents"), "List agents"],
+      [ctp.peach("!command"), "Run shell command"],
+      [ctp.blue("@file"), "Reference a file"],
+    ];
+    const rightItems: [string, string][] = [
+      [ctp.blue("@coder"), "Coder"],
+      [ctp.blue("@reviewer"), "Reviewer"],
+      [ctp.blue("@planner"), "Planner"],
+      [ctp.blue("@tester"), "Tester"],
+      [ctp.blue("@debugger"), "Debugger"],
+    ];
+
+    if (termWidth >= 80) {
+      // Two-column layout: each column gets half the width with a small gap
+      const colWidth = Math.floor((termWidth - 6) / 2); // 2 indent + 2 gap + 2 margin
+      for (let r = 0; r < leftItems.length; r++) {
+        const [lCmd, lDesc] = leftItems[r]!;
+        const [rCmd, rDesc] = rightItems[r]!;
+        const lText = `  ${lCmd}  ${ctp.subtext0(lDesc)}`;
+        const lVisible = visibleWidth(lText);
+        const gap = " ".repeat(Math.max(2, colWidth - lVisible + 2));
+        lines.push(`${lText}${gap}${rCmd}  ${ctp.subtext0(rDesc)}`);
+      }
     } else {
-      lines.push(`  ${ctp.blue("/help")}       Show commands`);
-      lines.push(`  ${ctp.blue("/settings")}   Configure provider`);
-      lines.push(`  ${ctp.blue("/agents")}     List agents`);
-      lines.push(`  ${ctp.peach("!command")}    Run shell command`);
-      lines.push(`  ${ctp.blue("@file")}       Reference a file`);
+      // Single-column: stack commands then agents
+      for (const [cmd, desc] of leftItems) {
+        lines.push(`  ${cmd}  ${ctp.subtext0(desc)}`);
+      }
+      lines.push("");
+      for (const [cmd, desc] of rightItems) {
+        lines.push(`  ${cmd}  ${ctp.subtext0(desc)}`);
+      }
     }
     lines.push("");
     lines.push(ctp.surface1("\u2500".repeat(ruleWidth)));
@@ -775,6 +811,11 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
   const makeLeaderCtx = () => ({
     addMessage: (r: string, c: string) => {
       layout.messages.addMessage({ role: r as "system", content: c, timestamp: new Date() });
+      layout.tui.requestRender();
+    },
+    clearMessages: () => {
+      layout.messages.clear();
+      ctx.chatSession?.clearMessages();
       layout.tui.requestRender();
     },
     requestRender: () => layout.tui.requestRender(),
@@ -1117,7 +1158,6 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
   try {
     const { CrashHandler } = await import("../recovery/crash-handler.js");
     const crashHandler = new CrashHandler(async () => {
-      tuiSession.close();
       if (ctx.sessionMgr) await ctx.sessionMgr.shutdown();
       layout.tui.stop();
     });
@@ -1138,18 +1178,22 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
     layout.tui.stop();
     setLoggerMuted(false);
 
-    // Force exit after 500ms no matter what
-    const forceExit = setTimeout(() => process.exit(0), 200);
+    // Force exit after 2s no matter what
+    const forceExit = setTimeout(() => process.exit(0), 2000);
     forceExit.unref();
 
-    // Best-effort cleanup in parallel (500ms budget)
+    // Save sessions FIRST so index.json has correct updatedAt
+    // (must complete before other cleanup to avoid wrong-session-on-resume)
+    try {
+      await ctx.sessionMgr?.shutdown();
+    } catch { /* best-effort */ }
+
+    // Remaining cleanup in parallel
     try {
       await Promise.allSettled([
         Promise.resolve(ctx.cleanupRouter?.()),
         Promise.resolve(ctx.cleanupSession?.()),
-        Promise.resolve(tuiSession.close()),
         ctx.router?.shutdown().catch(() => {}),
-        ctx.sessionMgr?.shutdown().catch(() => {}),
         ctx.toolOutputHandler?.cleanup().catch(() => {}),
       ]);
     } catch { /* ignore */ }
@@ -1183,6 +1227,178 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
       origExit?.();
       resolve();
     };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Session helpers
+// ---------------------------------------------------------------------------
+
+function replaySessionHistory(session: Session | null, layout: AppLayout): void {
+  if (!session) return;
+  const history = session.buildContextMessages();
+
+  // Annotate orphaned user messages (session ended before response)
+  const lastNonTool = history.filter(m => m.role !== "tool").at(-1);
+  if (lastNonTool?.role === "user") {
+    history.push({
+      id: "orphan-marker",
+      role: "system",
+      content: "[Unanswered — session ended before response]",
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  for (const msg of history) {
+    if (msg.role === "tool") continue;
+    if (msg.metadata?.transient) continue;
+    layout.messages.addMessage({
+      role: msg.role === "assistant" ? "agent" : msg.role,
+      content: msg.content.replace(/^\n+/, ""),
+      agentName: msg.agentId ? agentDisplayName(msg.agentId) : undefined,
+      timestamp: new Date(msg.timestamp),
+    });
+  }
+}
+
+async function showSessionPicker(
+  sessions: import("../session/session-state.js").SessionListItem[],
+  sessionMgr: SessionManager,
+  layout: AppLayout,
+): Promise<Session | null> {
+  const { SessionPickerView } = await import("./interactive/session-picker-view.js");
+
+  return new Promise<Session | null>((resolve) => {
+    const view = new SessionPickerView(layout.tui, sessions, async (result) => {
+      switch (result.action) {
+        case "resume": {
+          const r = await sessionMgr.resume(result.sessionId!);
+          resolve(r.isOk() ? r.value : null);
+          break;
+        }
+        case "new": {
+          const r = await sessionMgr.create(process.cwd());
+          resolve(r.isOk() ? r.value : null);
+          break;
+        }
+        case "delete": {
+          await sessionMgr.delete(result.sessionId!);
+          // After delete, re-list and pick again or create new
+          const listResult = await sessionMgr.listByWorkspace(process.cwd());
+          const remaining = listResult.isOk() ? listResult.value : [];
+          if (remaining.length === 0) {
+            const r = await sessionMgr.create(process.cwd());
+            resolve(r.isOk() ? r.value : null);
+          } else if (remaining.length === 1) {
+            const r = await sessionMgr.resume(remaining[0]!.id);
+            resolve(r.isOk() ? r.value : null);
+          } else {
+            // Show picker again with updated list
+            resolve(await showSessionPicker(remaining, sessionMgr, layout));
+          }
+          break;
+        }
+        case "cancel": {
+          // Resume most recent or create new
+          if (sessions.length > 0) {
+            const r = await sessionMgr.resume(sessions[0]!.id);
+            resolve(r.isOk() ? r.value : null);
+          } else {
+            const r = await sessionMgr.create(process.cwd());
+            resolve(r.isOk() ? r.value : null);
+          }
+          break;
+        }
+      }
+    }, () => {});
+    view.activate();
+  });
+}
+
+function registerSessionCommands(
+  registry: import("../tui/index.js").CommandRegistry,
+  ctx: { sessionMgr: SessionManager | null; chatSession: Session | null },
+  layout: AppLayout,
+): void {
+  registry.register({
+    name: "sessions",
+    aliases: ["session"],
+    description: "Session management (list, new, rename, info, switch)",
+    async execute(args, msgCtx) {
+      const sub = args.trim().split(/\s+/)[0] || "";
+      const subArg = args.trim().slice(sub.length).trim();
+
+      if (sub === "new") {
+        // Save current, create new
+        if (ctx.chatSession?.isDirty() && ctx.sessionMgr) {
+          await ctx.sessionMgr.getStore().quickSave(ctx.chatSession);
+        }
+        if (ctx.sessionMgr) {
+          const r = await ctx.sessionMgr.create(process.cwd());
+          if (r.isOk()) {
+            ctx.chatSession = r.value;
+            layout.messages.clear();
+            layout.tui.requestRender();
+            msgCtx.addMessage("system", "New session created.");
+          }
+        }
+        return;
+      }
+
+      if (sub === "rename" && subArg) {
+        if (ctx.chatSession) {
+          ctx.chatSession.setTitle(subArg.slice(0, 60));
+          msgCtx.addMessage("system", `Session renamed to: ${subArg.slice(0, 60)}`);
+        }
+        return;
+      }
+
+      if (sub === "info") {
+        if (ctx.chatSession) {
+          const state = ctx.chatSession.getState();
+          const lines = [
+            `**Session:** ${state.id}`,
+            `**Title:** ${state.title}`,
+            `**Messages:** ${state.messageCount}`,
+            `**Tokens:** ${formatTokenCount(state.totalInputTokens + state.totalOutputTokens)}`,
+            `**Created:** ${state.createdAt}`,
+            `**Updated:** ${state.updatedAt}`,
+            `**Workspace:** ${state.workingDirectory}`,
+          ];
+          msgCtx.addMessage("system", lines.join("\n"));
+        }
+        return;
+      }
+
+      if (sub === "delete" && subArg) {
+        if (ctx.sessionMgr) {
+          if (ctx.chatSession?.id === subArg) {
+            msgCtx.addMessage("error", "Cannot delete the active session. Switch first.");
+            return;
+          }
+          await ctx.sessionMgr.delete(subArg);
+          msgCtx.addMessage("system", `Session ${subArg} deleted.`);
+        }
+        return;
+      }
+
+      // Default: show picker (for /sessions, /session list, /session switch, /session)
+      if (!ctx.sessionMgr) return;
+      const listResult = await ctx.sessionMgr.listByWorkspace(process.cwd());
+      const sessions = listResult.isOk() ? listResult.value : [];
+      if (sessions.length === 0) {
+        msgCtx.addMessage("system", "No other sessions for this workspace.");
+        return;
+      }
+
+      const picked = await showSessionPicker(sessions, ctx.sessionMgr, layout);
+      if (picked && picked.id !== ctx.chatSession?.id) {
+        ctx.chatSession = picked;
+        layout.messages.clear();
+        replaySessionHistory(picked, layout);
+        layout.tui.requestRender();
+      }
+    },
   });
 }
 
@@ -1407,38 +1623,39 @@ async function initSessionRouter(
     ctx.router?.emit("dispatch:agent:tool", ctx.chatSession?.id ?? "", agentId, toolName, status, details);
   };
 
-  // ── Wire CostTracker — real-time token/cost tracking ──────────
+  // ── Wire TokenTracker — real-time token usage tracking ──────────
   try {
-    const { CostTracker } = await import("../streaming/cost-tracker.js");
+    const { TokenTracker } = await import("../streaming/cost-tracker.js");
     const { getActiveProviderState: getActiveState } = await import("../providers/active-state.js");
-    const costTracker = new CostTracker();
+    const tokenTracker = new TokenTracker();
 
-    // Update cost when agent completes
+    // Update tokens when agent completes
     ctx.router.on("dispatch:agent:done", (sessionId: string, agentId: string, result: { inputTokens?: number; outputTokens?: number }) => {
       const state = getActiveState();
-      costTracker.recordUsage(sessionId, agentId, state.provider || "unknown", state.model || "unknown", result.inputTokens ?? 0, result.outputTokens ?? 0);
+      tokenTracker.recordUsage(sessionId, agentId, state.provider || "unknown", state.model || "unknown", result.inputTokens ?? 0, result.outputTokens ?? 0);
     });
 
-    // Status bar reads from cost tracker
-    costTracker.on("cost:update", (event: { totalInputTokens: number; totalOutputTokens: number }) => {
+    // Status bar reads from token tracker
+    tokenTracker.on("tokens:update", (event: { totalInputTokens: number; totalOutputTokens: number }) => {
       const total = event.totalInputTokens + event.totalOutputTokens;
-      const display = total > 0 ? `tokens: ${formatTokenCount(total)}` : "";
+      const display = total > 0 ? formatTokenCount(total) : "";
       layout.statusBar.updateSegment(4, display, ctp.overlay0);
       layout.tui.requestRender();
     });
 
-    // Wire /cost command to cost tracker (shows token usage)
+    // Wire /cost command to token tracker (shows token usage)
     registry.register({
       name: "cost",
+      aliases: ["tokens"],
       description: "Show session token usage",
       async execute(_args, msgCtx) {
         const sessionId = ctx.chatSession?.id ?? "";
-        const summary = costTracker.getSessionCost(sessionId);
+        const summary = tokenTracker.getSessionTokens(sessionId);
         const total = summary.totalInputTokens + summary.totalOutputTokens;
         const lines = [
-          `\u26a1 Tokens: ${formatTokenCount(total)}`,
-          `  Input:  ${summary.totalInputTokens.toLocaleString()}`,
-          `  Output: ${summary.totalOutputTokens.toLocaleString()}`,
+          `Session tokens: ${formatTokenCount(total)}`,
+          `  Prompt:     ${summary.totalInputTokens.toLocaleString()}`,
+          `  Completion: ${summary.totalOutputTokens.toLocaleString()}`,
         ];
         if (Object.keys(summary.byAgent).length > 0) {
           lines.push("", "  By agent:");
@@ -1450,7 +1667,7 @@ async function initSessionRouter(
       },
     });
   } catch {
-    // CostTracker not available
+    // TokenTracker not available
   }
 
   // ── Wire LatencyTracker — TTFT + tokens/sec metrics ────────────
@@ -1502,16 +1719,23 @@ async function initSessionRouter(
     // ErrorPresenter not available
   }
 
-  // Always try to resume the latest session first.
-  // Falls back to creating a new session if none exists or resume fails.
-  const latestResult = await ctx.sessionMgr.resumeLatest();
-  ctx.chatSession = latestResult.isOk() ? latestResult.value : null;
-  if (!ctx.chatSession) {
-    const createResult = await ctx.sessionMgr.create(process.cwd());
-    if (createResult.isOk()) {
-      ctx.chatSession = createResult.value;
-    }
+  // Session selection: 0 → new, 1 → auto-resume, 2+ → picker
+  const cwd = process.cwd();
+  const listResult = await ctx.sessionMgr.listByWorkspace(cwd);
+  const workspaceSessions = listResult.isOk() ? listResult.value : [];
+
+  if (workspaceSessions.length === 0) {
+    const createResult = await ctx.sessionMgr.create(cwd);
+    ctx.chatSession = createResult.isOk() ? createResult.value : null;
+  } else if (workspaceSessions.length === 1) {
+    const resumeResult = await ctx.sessionMgr.resume(workspaceSessions[0]!.id);
+    ctx.chatSession = resumeResult.isOk() ? resumeResult.value : null;
+  } else {
+    ctx.chatSession = await showSessionPicker(workspaceSessions, ctx.sessionMgr, layout);
   }
+
+  // Replay history into TUI
+  replaySessionHistory(ctx.chatSession, layout);
 
   // Wire events
   ctx.cleanupRouter = wireRouterEvents(ctx.router, layout, (agentId, content) => {
@@ -1525,6 +1749,9 @@ async function initSessionRouter(
   if (ctx.chatSession) {
     registerRouterCommands(registry, ctx.router, ctx.chatSession, layout);
   }
+
+  // Register session management commands
+  registerSessionCommands(registry, ctx, layout);
 
   // Update autocomplete to include @agent mentions
   layout.editor.setAutocompleteProvider(
@@ -1560,24 +1787,6 @@ function registerRouterCommands(
     },
   });
 
-  registry.register({
-    name: "session",
-    aliases: ["s"],
-    description: "Show current session info",
-    async execute(_args, ctx) {
-      const state = session.getState();
-      const lines = [
-        `**Session:** ${state.id}`,
-        `**Title:** ${state.title}`,
-        `**Status:** ${state.status}`,
-        `**Messages:** ${state.messageCount}`,
-        `**Tokens:** ${formatTokenCount(state.totalInputTokens + state.totalOutputTokens)}`,
-        `**Input tokens:** ${state.totalInputTokens.toLocaleString()}`,
-        `**Output tokens:** ${state.totalOutputTokens.toLocaleString()}`,
-      ];
-      ctx.addMessage("system", lines.join("\n"));
-    },
-  });
 }
 
 // ---------------------------------------------------------------------------
