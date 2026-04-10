@@ -63,6 +63,28 @@ async function main(): Promise<void> {
 
     const args = process.argv.slice(2);
 
+    // ── Global flags: --provider and --model ─────────────────────────────
+    {
+      const providerIdx = args.indexOf("--provider");
+      const overrides: { provider?: string; model?: string } = {};
+
+      if (providerIdx !== -1 && args[providerIdx + 1] && !args[providerIdx + 1]!.startsWith("-")) {
+        overrides.provider = args[providerIdx + 1]!;
+        args.splice(providerIdx, 2);
+      }
+      // Re-find modelIdx since splice may have shifted indices
+      const modelIdx2 = args.indexOf("--model");
+      if (modelIdx2 !== -1 && args[modelIdx2 + 1] && !args[modelIdx2 + 1]!.startsWith("-")) {
+        overrides.model = args[modelIdx2 + 1]!;
+        args.splice(modelIdx2, 2);
+      }
+
+      if (overrides.provider || overrides.model) {
+        const { setCliOverrides } = await import("./core/provider-config.js");
+        setCliOverrides(overrides);
+      }
+    }
+
     // ── TUI entry points (before any commander parsing) ──────────────────
 
     // No args → first-run check, then launch interactive TUI

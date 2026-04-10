@@ -21,6 +21,10 @@ import {
   resolveModelForAgent,
 } from "../core/model-config.js";
 import {
+  getActiveProviderName,
+  getActiveModel,
+} from "../core/provider-config.js";
+import {
   persistDefaultModel,
   persistAgentModel,
   resetAllModelOverrides,
@@ -215,8 +219,10 @@ async function runModelList(): Promise<void> {
 
 function runModelGet(): void {
   const config = getModelConfig();
-  console.log(pc.bold("\nModel Configuration:\n"));
-  console.log(`  Default: ${config.defaultModel || pc.dim("(gateway decides)")}`);
+
+  console.log(pc.bold("\nActive Configuration:\n"));
+  console.log(`  Provider: ${getActiveProviderName() || pc.dim("(none)")}`);
+  console.log(`  Model:    ${getActiveModel() || pc.dim("(gateway decides)")}`);
 
   if (Object.keys(config.agentModels).length > 0) {
     console.log(pc.bold("\n  Per-agent models:"));
@@ -270,12 +276,11 @@ function runModelReset(): void {
 async function runModelRefresh(args: string[]): Promise<void> {
   const { fetchModelsForProvider } = await import("../providers/model-fetcher.js");
   const { clearCache, setCachedModels } = await import("../providers/model-cache.js");
-  const { readGlobalConfig } = await import("../core/global-config.js");
+  const { listProviders } = await import("../core/provider-config.js");
 
   const providerFilter = args.includes("--provider") ? args[args.indexOf("--provider") + 1] : undefined;
 
-  const config = readGlobalConfig();
-  const providers = config?.providers ?? [];
+  const providers = listProviders();
 
   if (providers.length === 0) {
     logger.warn("No providers configured. Run `openpawl setup` first.");
