@@ -2,7 +2,7 @@ import tsPlugin from "@typescript-eslint/eslint-plugin";
 import reactHooks from "eslint-plugin-react-hooks";
 
 export default [
-  { ignores: ["dist/**", "src/dist/**", "node_modules/**"] },
+  { ignores: ["dist/**", "src/dist/**", "node_modules/**", "src/api/**", "src/middleware/**", "src/routes/**"] },
   ...tsPlugin.configs["flat/recommended"],
   {
     files: ["src/**/*.ts", "src/**/*.tsx"],

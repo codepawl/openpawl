@@ -148,6 +148,21 @@ export async function getGlobalProviderManager(): Promise<ProviderManager> {
     // Config unavailable — rely on env vars
   }
 
+  // Reorder config entries so the active provider comes first in the chain.
+  // Without this, the first entry in config.providers[] is tried first
+  // regardless of activeProvider, causing model-not-found errors.
+  if (configProviders && configProviders.length > 1) {
+    const { getActiveProviderName } = await import("../core/provider-config.js");
+    const activeName = getActiveProviderName();
+    if (activeName) {
+      const activeIdx = configProviders.findIndex((p) => p.type === activeName);
+      if (activeIdx > 0) {
+        const [active] = configProviders.splice(activeIdx, 1);
+        configProviders.unshift(active!);
+      }
+    }
+  }
+
   const chain = await createProviderChain(configProviders);
   if (chain.length === 0) {
     logger.warn("No LLM providers configured. Set an API key env var or run `openpawl setup`.");

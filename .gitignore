@@ -55,3 +55,10 @@ vite.config.ts
 
 # Agent configs
 .github/agents/
+
+# Agent-generated code (from headless tool execution)
+/home/
+/src/api/
+/src/middleware/
+/src/routes/
+/tmp/

@@ -13,6 +13,7 @@ import type { TUI } from "../../tui/core/tui.js";
 import { defaultTheme } from "../../tui/themes/default.js";
 import { visibleWidth } from "../../tui/utils/text-width.js";
 import { renderPanel } from "../../tui/components/panel.js";
+import { handleFilterInput } from "../../tui/components/input-handler.js";
 
 export abstract class InteractiveView {
   protected selectedIndex = 0;
@@ -22,6 +23,8 @@ export abstract class InteractiveView {
   protected filterText = "";
   /** When true, hides editor + status bar while the view is active. */
   protected fullscreen = false;
+  /** Bound resize handler for cleanup. */
+  private _resizeHandler: (() => void) | null = null;
 
   /** Max visible items — reads from responsive layout. */
   protected get maxVisible(): number {
@@ -44,12 +47,19 @@ export abstract class InteractiveView {
       this.tui.setScrollableHidden(true);
     }
     this.tui.pushKeyHandler(this);
+    // Re-render on terminal resize so panel dimensions stay correct
+    this._resizeHandler = () => { if (this.active) this.render(); };
+    process.stdout.on("resize", this._resizeHandler);
     this.render();
   }
 
   deactivate(): void {
     if (!this.active) return;
     this.active = false;
+    if (this._resizeHandler) {
+      process.stdout.off("resize", this._resizeHandler);
+      this._resizeHandler = null;
+    }
     if (this.fullscreen) {
       this.tui.setScrollableHidden(false);
       this.tui.setFixedBottomHidden("divider", false);
@@ -106,22 +116,16 @@ export abstract class InteractiveView {
       return true;
     }
 
-    // Filter: typing characters filters the list
-    if (this.filterEnabled && !this.isEditing() && event.type === "char" && !event.ctrl && !event.alt) {
-      this.filterText += event.char;
-      this.selectedIndex = 0;
-      this.scrollOffset = 0;
-      this.render();
-      return true;
-    }
-
-    // Filter: backspace removes last filter character
-    if (this.filterEnabled && !this.isEditing() && event.type === "backspace" && this.filterText) {
-      this.filterText = this.filterText.slice(0, -1);
-      this.selectedIndex = 0;
-      this.scrollOffset = 0;
-      this.render();
-      return true;
+    // Filter: delegate to centralized handler (supports char, backspace, Ctrl+W, Ctrl+U)
+    if (this.filterEnabled && !this.isEditing()) {
+      const filterResult = handleFilterInput(event, this.filterText);
+      if (filterResult.handled) {
+        this.filterText = filterResult.text;
+        this.selectedIndex = 0;
+        this.scrollOffset = 0;
+        this.render();
+        return true;
+      }
     }
 
     if (!this.isEditing()) {

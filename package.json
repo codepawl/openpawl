@@ -6,7 +6,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/codepawl/openpawl.git"
+    "url": "git+https://github.com/codepawl/openpawl.git"
   },
   "homepage": "https://github.com/codepawl/openpawl",
   "keywords": [
@@ -25,7 +25,7 @@
     "node": ">=20.0.0"
   },
   "bin": {
-    "openpawl": "./dist/cli.js"
+    "openpawl": "dist/cli.js"
   },
   "files": [
     "dist"
@@ -88,5 +88,14 @@
     "tsup": "^8.5.1",
     "tsx": "^4.21.0",
     "typescript": "~5.9.3"
+  },
+  "main": "eslint.config.js",
+  "directories": {
+    "doc": "docs",
+    "test": "tests"
+  },
+  "author": "",
+  "bugs": {
+    "url": "https://github.com/codepawl/openpawl/issues"
   }
 }

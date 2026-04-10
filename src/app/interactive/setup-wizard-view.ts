@@ -11,6 +11,8 @@ import type { DetectedProvider } from "../../providers/detect.js";
 import type { OpenPawlGlobalConfig, ProviderConfigEntry } from "../../core/global-config.js";
 import { InteractiveView } from "./base-view.js";
 import { renderPanel } from "../../tui/components/panel.js";
+import { ScrollableFilterList } from "../../tui/components/scrollable-filter-list.js";
+import { handleTextInput } from "../../tui/components/input-handler.js";
 import { detectProviders } from "../../providers/detect.js";
 import { getProviderMeta } from "../../providers/provider-catalog.js";
 import { getProviderRegistry } from "../../providers/provider-registry.js";
@@ -55,11 +57,29 @@ export class SetupWizardView extends InteractiveView {
   private deviceError: string | null = null;
   private oauthError: string | null = null;
   private oauthAuthUrl = "";
+  private providerList: ScrollableFilterList<ProviderItem>;
+  private modelList: ScrollableFilterList<string>;
 
   constructor(tui: TUI, onClose: () => void, prefill?: OpenPawlGlobalConfig) {
     super(tui, onClose);
     this.fullscreen = true;
     this.prefill = prefill;
+    this.providerList = new ScrollableFilterList<ProviderItem>({
+      renderItem: (item, index, selected) => this.renderProviderItem(item, index, selected),
+      filterFn: (item, query) => item.label.toLowerCase().includes(query.toLowerCase()),
+      emptyMessage: "No providers match",
+      filterPlaceholder: "Type to search providers...",
+    });
+    this.modelList = new ScrollableFilterList<string>({
+      renderItem: (model, _index, selected) => {
+        const t = this.theme;
+        const cursor = selected ? t.primary("\u25b8") : t.dim("\u2502");
+        return `  ${cursor} ${selected ? t.bold(model) : model}`;
+      },
+      filterFn: (model, query) => model.toLowerCase().includes(query.toLowerCase()),
+      emptyMessage: "No models available",
+      filterPlaceholder: "Type to search models...",
+    });
   }
 
   override activate(): void {
@@ -78,11 +98,11 @@ export class SetupWizardView extends InteractiveView {
 
   protected getItemCount(): number {
     switch (this.step) {
-      case WizardStep.PROVIDER: return this.getFilteredProviders().length;
+      case WizardStep.PROVIDER: return this.providerList.getFilteredCount(this.filterText);
       case WizardStep.DEVICE_AUTH: return 1;
       case WizardStep.OAUTH_AUTH: return 1;
       case WizardStep.API_KEY: return 1;
-      case WizardStep.MODEL: return this.getFilteredModels().length;
+      case WizardStep.MODEL: return this.modelList.getFilteredCount(this.filterText);
       case WizardStep.CONFIRM: return 1;
     }
   }
@@ -228,21 +248,16 @@ export class SetupWizardView extends InteractiveView {
         hint: meta.authMethod === "local" ? "local" : undefined,
       });
     }
-  }
 
-  private getFilteredProviders(): ProviderItem[] {
-    return this.providerItems.filter((i) => i.type === "provider" && this.matchesFilter(i.label));
-  }
-
-  private getFilteredModels(): string[] {
-    return this.models.filter((m) => this.matchesFilter(m));
+    // Update the ScrollableFilterList with only selectable provider items
+    this.providerList.setItems(this.providerItems.filter((i) => i.type === "provider"));
   }
 
   private handleProviderKey(event: KeyEvent): boolean {
     if (this.loading) return true;
 
     if (event.type === "enter" || (event.type === "tab" && !event.shift)) {
-      const filtered = this.getFilteredProviders();
+      const filtered = this.providerList.getFilteredItems(this.filterText);
       const item = filtered[this.selectedIndex];
       if (!item || !item.id) return true;
 
@@ -280,6 +295,35 @@ export class SetupWizardView extends InteractiveView {
     return true;
   }
 
+  private renderProviderItem(item: ProviderItem, index: number, selected: boolean): string[] {
+    const t = this.theme;
+    const filtered = this.providerList.getFilteredItems(this.filterText);
+    const lines: string[] = [];
+
+    // Section headers at boundaries
+    const detectedCount = filtered.filter((i) => i.detected).length;
+    if (item.detected && (index === 0 || !filtered[index - 1]?.detected)) {
+      lines.push("");
+      lines.push(`  ${t.bold("Detected")}`);
+      lines.push(`  ${"─".repeat(40)}`);
+    }
+    if (!item.detected && (index === 0 || index === detectedCount)) {
+      lines.push("");
+      lines.push(`  ${t.bold("All Providers")}`);
+      lines.push(`  ${"─".repeat(40)}`);
+    }
+
+    const cursor = selected ? t.primary("\u25b8") : t.dim("\u2502");
+    const hint = item.hint ? t.dim(` \u2014 ${item.hint}`) : "";
+    if (item.detected) {
+      lines.push(`  ${cursor} ${t.success("\u2713")} ${selected ? t.bold(item.label) : item.label}${hint}`);
+    } else {
+      lines.push(`  ${cursor}   ${selected ? t.bold(item.label) : item.label}${hint}`);
+    }
+
+    return lines;
+  }
+
   private renderProvider(): string[] {
     const t = this.theme;
     const lines: string[] = [];
@@ -290,58 +334,14 @@ export class SetupWizardView extends InteractiveView {
       lines.push("");
     }
 
-    const filterLine = this.renderFilterLine();
-    if (filterLine) {
-      lines.push("");
-      lines.push(filterLine);
-    }
-
-    const filtered = this.getFilteredProviders();
-
-    if (filtered.length === 0 && this.filterText) {
-      lines.push("");
-      lines.push(`  ${t.dim("No providers match")} "${this.filterText}"`);
-      lines.push("");
-      return lines;
-    }
-
-    const { start, end, aboveCount, belowCount } = this.getVisibleRange();
-    const visible = filtered.slice(start, end);
-
-    // Build section headers relative to the visible window
-    const detectedFiltered = filtered.filter((i) => i.detected);
-    const detectedCount = detectedFiltered.length;
-    const itemLines: string[] = [];
-
-    for (let vi = 0; vi < visible.length; vi++) {
-      const globalIdx = start + vi;
-      const item = visible[vi]!;
-      const isSelected = globalIdx === this.selectedIndex;
-
-      // Section header: "Detected" before first detected item in window
-      if (item.detected && (globalIdx === 0 || !filtered[globalIdx - 1]?.detected)) {
-        itemLines.push("");
-        itemLines.push(`  ${t.bold("Detected")}`);
-        itemLines.push(`  ${"─".repeat(40)}`);
-      }
-      // Section header: "All Providers" before first non-detected item in window
-      if (!item.detected && (globalIdx === 0 || globalIdx === detectedCount)) {
-        itemLines.push("");
-        itemLines.push(`  ${t.bold("All Providers")}`);
-        itemLines.push(`  ${"─".repeat(40)}`);
-      }
-
-      const cursor = isSelected ? t.primary("▸") : t.dim("│");
-      const hint = item.hint ? t.dim(` — ${item.hint}`) : "";
-      if (item.detected) {
-        itemLines.push(`  ${cursor} ${t.success("✓")} ${isSelected ? t.bold(item.label) : item.label}${hint}`);
-      } else {
-        itemLines.push(`  ${cursor}   ${isSelected ? t.bold(item.label) : item.label}${hint}`);
-      }
-    }
-
-    const withIndicators = this.addScrollIndicators(itemLines, aboveCount, belowCount);
-    lines.push(...withIndicators);
+    // Render provider list via ScrollableFilterList
+    const listLines = this.providerList.renderLines({
+      filterText: this.filterText,
+      selectedIndex: this.selectedIndex,
+      scrollOffset: this.scrollOffset,
+      maxVisible: this.maxVisible,
+    });
+    lines.push(...listLines);
 
     lines.push("");
     return lines;
@@ -555,35 +555,13 @@ export class SetupWizardView extends InteractiveView {
       return true;
     }
 
-    if (event.type === "char" && !event.ctrl && !event.alt) {
-      this.editBuffer = this.editBuffer.slice(0, this.editCursor) + event.char + this.editBuffer.slice(this.editCursor);
-      this.editCursor++;
-      this.validationError = null;
-      this.render();
+    // Backspace at position 0: go back instead of deleting
+    if (event.type === "backspace" && this.editCursor === 0) {
+      this.goBack();
       return true;
     }
-    if (event.type === "backspace") {
-      if (this.editCursor > 0) {
-        this.editBuffer = this.editBuffer.slice(0, this.editCursor - 1) + this.editBuffer.slice(this.editCursor);
-        this.editCursor--;
-      } else {
-        this.goBack();
-        return true;
-      }
-      this.validationError = null;
-      this.render();
-      return true;
-    }
-    if (event.type === "arrow" && event.direction === "left") {
-      this.editCursor = Math.max(0, this.editCursor - 1);
-      this.render();
-      return true;
-    }
-    if (event.type === "arrow" && event.direction === "right") {
-      this.editCursor = Math.min(this.editBuffer.length, this.editCursor + 1);
-      this.render();
-      return true;
-    }
+
+    // Component-specific: Enter validates and advances
     if (event.type === "enter") {
       if (!this.editBuffer.trim()) {
         this.validationError = "API key is required";
@@ -594,14 +572,15 @@ export class SetupWizardView extends InteractiveView {
       void this.validateAndAdvance();
       return true;
     }
-    if (event.type === "paste") {
-      this.editBuffer = this.editBuffer.slice(0, this.editCursor) + event.text + this.editBuffer.slice(this.editCursor);
-      this.editCursor += event.text.length;
+
+    // Delegate all text editing to centralized handler
+    const result = handleTextInput(event, this.editBuffer, this.editCursor);
+    if (result.handled) {
+      this.editBuffer = result.text;
+      this.editCursor = result.cursor;
       this.validationError = null;
       this.render();
-      return true;
     }
-
     return true;
   }
 
@@ -713,6 +692,7 @@ export class SetupWizardView extends InteractiveView {
       }
     }
 
+    this.modelList.setItems(this.models);
     this.loading = false;
     this.render();
   }
@@ -724,7 +704,7 @@ export class SetupWizardView extends InteractiveView {
     }
 
     if (event.type === "enter" || (event.type === "tab" && !event.shift)) {
-      const filtered = this.getFilteredModels();
+      const filtered = this.modelList.getFilteredItems(this.filterText);
       if (filtered.length > 0 && this.selectedIndex < filtered.length) {
         this.selectedModel = filtered[this.selectedIndex]!;
         this.step = WizardStep.CONFIRM;
@@ -760,37 +740,17 @@ export class SetupWizardView extends InteractiveView {
       return lines;
     }
 
-    const filterLine = this.renderFilterLine();
-    if (filterLine) {
-      lines.push(filterLine);
-      lines.push("");
-    }
-
-    const filtered = this.getFilteredModels();
-
-    if (filtered.length === 0 && this.filterText) {
-      lines.push(`  ${t.dim("No models match")} "${this.filterText}"`);
-      lines.push("");
-      return lines;
-    }
-
     lines.push(`  ${t.dim("Choose a default model:")}`);
     lines.push("");
 
-    const { start, end, aboveCount, belowCount } = this.getVisibleRange();
-    const visible = filtered.slice(start, end);
-    const itemLines: string[] = [];
-
-    for (let vi = 0; vi < visible.length; vi++) {
-      const globalIdx = start + vi;
-      const isSelected = globalIdx === this.selectedIndex;
-      const model = visible[vi]!;
-      const cursor = isSelected ? t.primary("▸") : t.dim("│");
-      itemLines.push(`  ${cursor} ${isSelected ? t.bold(model) : model}`);
-    }
-
-    const withIndicators = this.addScrollIndicators(itemLines, aboveCount, belowCount);
-    lines.push(...withIndicators);
+    // Render model list via ScrollableFilterList
+    const listLines = this.modelList.renderLines({
+      filterText: this.filterText,
+      selectedIndex: this.selectedIndex,
+      scrollOffset: this.scrollOffset,
+      maxVisible: this.maxVisible,
+    });
+    lines.push(...listLines);
 
     lines.push("");
     return lines;

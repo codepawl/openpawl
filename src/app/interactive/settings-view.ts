@@ -7,6 +7,8 @@ import type { KeyEvent } from "../../tui/core/input.js";
 import type { TUI } from "../../tui/core/tui.js";
 import { InteractiveView } from "./base-view.js";
 import { getProviderRegistry } from "../../providers/provider-registry.js";
+import { ScrollableFilterList } from "../../tui/components/scrollable-filter-list.js";
+import { handleTextInput, handleFilterInput } from "../../tui/components/input-handler.js";
 import {
   getActiveProviderName,
   getActiveModel,
@@ -15,6 +17,7 @@ import {
   setActiveModel,
 } from "../../core/provider-config.js";
 import { getActiveProviderState } from "../../providers/active-state.js";
+import { getProviderMeta } from "../../providers/provider-catalog.js";
 
 interface SettingField {
   key: string;
@@ -48,12 +51,25 @@ export class SettingsView extends InteractiveView {
   private editBuffer = "";
   private editCursor = 0;
   private selectIndex = 0;
+  private selectScrollOffset = 0;
+  private selectFilterText = "";
   private editError: string | null = null;
   private values: Map<string, string> = new Map();
   private connectionStatus: Map<string, string> = new Map();
+  private selectList: ScrollableFilterList<string>;
 
   constructor(tui: TUI, onClose: () => void) {
     super(tui, onClose);
+    this.selectList = new ScrollableFilterList<string>({
+      renderItem: (opt, index, selected) => {
+        const t = this.theme;
+        return `  \u2502  ${selected ? t.primary("\u25b8 " + opt) : "  " + opt}`;
+      },
+      filterFn: (opt, query) => opt.toLowerCase().includes(query.toLowerCase()),
+      emptyMessage: "No matches",
+      filterPlaceholder: "Type to filter...",
+      showFilter: false, // we render the filter inline in the select header
+    });
   }
 
   override activate(): void {
@@ -72,6 +88,7 @@ export class SettingsView extends InteractiveView {
   protected override cancelEdit(): void {
     this.editing = false;
     this.editError = null;
+    this.selectFilterText = "";
   }
 
   protected handleCustomKey(event: KeyEvent): boolean {
@@ -89,6 +106,42 @@ export class SettingsView extends InteractiveView {
     // Model depends on provider — disable when provider not set
     if (field.key === "model" && !this.values.get("provider")) return true;
     return false;
+  }
+
+  /** Whether the current provider requires an API key. */
+  private providerNeedsApiKey(providerId?: string): boolean {
+    const id = providerId ?? this.values.get("provider");
+    if (!id) return false;
+    const meta = getProviderMeta(id);
+    return meta?.authMethod === "apikey" || meta?.authMethod === "credentials";
+  }
+
+  /** Navigate to a field by key and optionally start editing it. */
+  private goToField(key: string, autoEdit = false): void {
+    const idx = FIELDS.findIndex((f) => f.key === key);
+    if (idx >= 0) {
+      this.selectedIndex = idx;
+      this.adjustScroll();
+      if (autoEdit) {
+        this.startEditing();
+      } else {
+        this.render();
+      }
+    }
+  }
+
+  /** Keep selectIndex visible within the scrolled select option list. */
+  private adjustSelectScroll(optionCount: number): void {
+    const maxOpts = Math.max(3, this.maxVisible - 4);
+    if (optionCount <= maxOpts) {
+      this.selectScrollOffset = 0;
+      return;
+    }
+    if (this.selectIndex < this.selectScrollOffset) {
+      this.selectScrollOffset = this.selectIndex;
+    } else if (this.selectIndex >= this.selectScrollOffset + maxOpts) {
+      this.selectScrollOffset = this.selectIndex - maxOpts + 1;
+    }
   }
 
   private startEditing(): void {
@@ -110,9 +163,14 @@ export class SettingsView extends InteractiveView {
     this.editError = null;
 
     if (field.type === "select") {
+      const opts = field.options ?? [];
+      this.selectList.setItems(opts);
+      this.selectFilterText = "";
       const current = this.values.get(field.key) ?? "";
-      this.selectIndex = field.options?.indexOf(current) ?? 0;
+      this.selectIndex = opts.indexOf(current);
       if (this.selectIndex < 0) this.selectIndex = 0;
+      this.selectScrollOffset = 0;
+      this.adjustSelectScroll(opts.length);
     } else {
       const raw = this.getRawValue(field.key);
       this.editBuffer = raw;
@@ -156,12 +214,16 @@ export class SettingsView extends InteractiveView {
       }
 
       field.options = available.map((m) => m.model);
+      this.selectList.setItems(field.options);
+      this.selectFilterText = "";
       this.editing = true;
       this.editError = null;
 
       const current = this.values.get("model") ?? "";
       this.selectIndex = field.options.indexOf(current);
       if (this.selectIndex < 0) this.selectIndex = 0;
+      this.selectScrollOffset = 0;
+      this.adjustSelectScroll(field.options.length);
       this.render();
     } catch {
       this.editError = "Failed to discover models";
@@ -173,58 +235,61 @@ export class SettingsView extends InteractiveView {
     const field = FIELDS[this.selectedIndex]!;
 
     if (field.type === "select") {
+      const filtered = this.selectList.getFilteredItems(this.selectFilterText);
+      const filteredCount = filtered.length;
+
       if (event.type === "arrow" && event.direction === "up") {
-        this.selectIndex = Math.max(0, this.selectIndex - 1);
+        if (filteredCount > 0) {
+          this.selectIndex = Math.max(0, this.selectIndex - 1);
+          this.adjustSelectScroll(filteredCount);
+        }
         this.render();
         return true;
       }
       if (event.type === "arrow" && event.direction === "down") {
-        this.selectIndex = Math.min((field.options?.length ?? 1) - 1, this.selectIndex + 1);
+        if (filteredCount > 0) {
+          this.selectIndex = Math.min(filteredCount - 1, this.selectIndex + 1);
+          this.adjustSelectScroll(filteredCount);
+        }
         this.render();
         return true;
       }
       if (event.type === "enter") {
-        const selected = field.options?.[this.selectIndex];
+        const selected = filtered[this.selectIndex];
         if (selected) this.saveField(field.key, selected);
         this.editing = false;
+        this.selectFilterText = "";
         this.render();
         return true;
       }
       if (event.type === "escape") {
-        this.editing = false;
-        this.render();
+        if (this.selectFilterText) {
+          // First Esc clears filter
+          this.selectFilterText = "";
+          this.selectIndex = 0;
+          this.selectScrollOffset = 0;
+          this.render();
+        } else {
+          this.editing = false;
+          this.render();
+        }
         return true;
+      }
+      // Type to filter (supports char, backspace, Ctrl+W, Ctrl+U)
+      {
+        const filterResult = handleFilterInput(event, this.selectFilterText);
+        if (filterResult.handled) {
+          this.selectFilterText = filterResult.text;
+          this.selectIndex = 0;
+          this.selectScrollOffset = 0;
+          this.render();
+          return true;
+        }
       }
       return true;
     }
 
-    // Text/password/number editing
-    if (event.type === "char" && !event.ctrl && !event.alt) {
-      this.editBuffer = this.editBuffer.slice(0, this.editCursor) + event.char + this.editBuffer.slice(this.editCursor);
-      this.editCursor++;
-      this.editError = null;
-      this.render();
-      return true;
-    }
-    if (event.type === "backspace") {
-      if (this.editCursor > 0) {
-        this.editBuffer = this.editBuffer.slice(0, this.editCursor - 1) + this.editBuffer.slice(this.editCursor);
-        this.editCursor--;
-      }
-      this.editError = null;
-      this.render();
-      return true;
-    }
-    if (event.type === "arrow" && event.direction === "left") {
-      this.editCursor = Math.max(0, this.editCursor - 1);
-      this.render();
-      return true;
-    }
-    if (event.type === "arrow" && event.direction === "right") {
-      this.editCursor = Math.min(this.editBuffer.length, this.editCursor + 1);
-      this.render();
-      return true;
-    }
+    // Component-specific: Enter saves, Escape cancels
     if (event.type === "enter") {
       if (field.validate) {
         const err = field.validate(this.editBuffer);
@@ -242,11 +307,29 @@ export class SettingsView extends InteractiveView {
       this.render();
       return true;
     }
+
+    // Delegate all text editing to centralized handler
+    const result = handleTextInput(event, this.editBuffer, this.editCursor);
+    if (result.handled) {
+      this.editBuffer = result.text;
+      this.editCursor = result.cursor;
+      this.editError = null;
+      this.render();
+    }
     return true;
   }
 
   protected override getPanelTitle(): string { return "\u2699 Settings"; }
-  protected override getPanelFooter(): string { return "\u2191\u2193 navigate \u00b7 Enter edit \u00b7 Esc close"; }
+  protected override getPanelFooter(): string {
+    if (this.editing) {
+      const field = FIELDS[this.selectedIndex];
+      if (field?.type === "select") {
+        return "\u2191\u2193 navigate \u00b7 Type to filter \u00b7 Enter select \u00b7 Esc back";
+      }
+      return "Enter save \u00b7 Esc cancel";
+    }
+    return "\u2191\u2193 navigate \u00b7 Enter edit \u00b7 Esc close";
+  }
 
   protected renderLines(): string[] {
     const t = this.theme;
@@ -264,14 +347,18 @@ export class SettingsView extends InteractiveView {
 
       if (isSelected && this.editing) {
         if (field.type === "select") {
-          lines.push(`  \u270e ${t.bold(field.label)} ${"─".repeat(30)}`);
-          for (let j = 0; j < (field.options?.length ?? 0); j++) {
-            const opt = field.options![j]!;
-            const sel = j === this.selectIndex;
-            // Register each option as clickable → selects that option
-
-            lines.push(`  \u2502  ${sel ? t.primary("\u25b8 " + opt) : "  " + opt}`);
-          }
+          const maxOpts = Math.max(3, this.maxVisible - 4);
+          const headerLabel = this.selectFilterText
+            ? `${field.label} ${t.dim("filter:")} ${this.selectFilterText}${t.primary("\u25cc")}`
+            : field.label;
+          lines.push(`  \u270e ${t.bold(headerLabel)} ${"─".repeat(Math.max(5, 30 - (this.selectFilterText.length)))}`);
+          const selectLines = this.selectList.renderLines({
+            filterText: this.selectFilterText,
+            selectedIndex: this.selectIndex,
+            scrollOffset: this.selectScrollOffset,
+            maxVisible: maxOpts,
+          });
+          lines.push(...selectLines);
           lines.push(`  ${"─".repeat(35)}`);
         } else {
           const display = field.type === "password"
@@ -365,6 +452,15 @@ export class SettingsView extends InteractiveView {
         if (defaultModel) {
           setActiveModel(defaultModel);
         }
+
+        // Auto-advance: apikey-based → go to apikey field; local → go to model
+        if (this.providerNeedsApiKey(value)) {
+          this.goToField("apikey", true);
+        } else {
+          this.goToField("model", true);
+        }
+        // Skip the health check below since we'll do it after apikey/model
+        return;
       } else if (key === "model") {
         // Write through unified provider-config
         setActiveModel(value);
@@ -376,6 +472,27 @@ export class SettingsView extends InteractiveView {
           getProviderRegistry().setConfig(provider, { apiKey: value });
         }
         this.values.set(key, value);
+
+        // Auto-advance to model field after setting API key
+        // Run health check first, then advance
+        this.connectionStatus.set("apikey", "...");
+        this.render();
+        try {
+          const { getGlobalProviderManager, resetGlobalProviderManager } = await import("../../providers/provider-factory.js");
+          resetGlobalProviderManager();
+          const mgr = await getGlobalProviderManager();
+          const providers = mgr.getProviders();
+          if (providers.length > 0) {
+            const ok = await providers[0]!.healthCheck().catch(() => false);
+            this.connectionStatus.set("provider", ok ? "ok" : "fail");
+            this.connectionStatus.set("apikey", ok ? "ok" : "fail");
+          }
+        } catch {
+          this.connectionStatus.set("apikey", "fail");
+        }
+        getProviderRegistry().refreshModels(this.values.get("provider") ?? "").catch(() => {});
+        this.goToField("model", true);
+        return;
       } else {
         // Project-scoped fields: mode, maxCycles, temperature
         const { setConfigValue } = await import("../../core/configManager.js");

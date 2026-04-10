@@ -1773,6 +1773,7 @@ async function showSessionPicker(
   sessions: import("../session/session-state.js").SessionListItem[],
   sessionMgr: SessionManager,
   layout: AppLayout,
+  activeSessionId?: string,
 ): Promise<Session | null> {
   const { SessionPickerView } = await import("./interactive/session-picker-view.js");
 
@@ -1791,7 +1792,6 @@ async function showSessionPicker(
         }
         case "delete": {
           await sessionMgr.delete(result.sessionId!);
-          // After delete, re-list and pick again or create new
           const listResult = await sessionMgr.listByWorkspace(process.cwd());
           const remaining = listResult.isOk() ? listResult.value : [];
           if (remaining.length === 0) {
@@ -1801,13 +1801,31 @@ async function showSessionPicker(
             const r = await sessionMgr.resume(remaining[0]!.id);
             resolve(r.isOk() ? r.value : null);
           } else {
-            // Show picker again with updated list
-            resolve(await showSessionPicker(remaining, sessionMgr, layout));
+            resolve(await showSessionPicker(remaining, sessionMgr, layout, activeSessionId));
+          }
+          break;
+        }
+        case "clear-all": {
+          // Delete all sessions except the active one
+          for (const s of sessions) {
+            if (s.id !== activeSessionId) {
+              await sessionMgr.delete(s.id);
+            }
+          }
+          const listResult = await sessionMgr.listByWorkspace(process.cwd());
+          const remaining = listResult.isOk() ? listResult.value : [];
+          if (remaining.length === 0) {
+            const r = await sessionMgr.create(process.cwd());
+            resolve(r.isOk() ? r.value : null);
+          } else if (remaining.length === 1) {
+            const r = await sessionMgr.resume(remaining[0]!.id);
+            resolve(r.isOk() ? r.value : null);
+          } else {
+            resolve(await showSessionPicker(remaining, sessionMgr, layout, activeSessionId));
           }
           break;
         }
         case "cancel": {
-          // Resume most recent or create new
           if (sessions.length > 0) {
             const r = await sessionMgr.resume(sessions[0]!.id);
             resolve(r.isOk() ? r.value : null);
@@ -1818,7 +1836,7 @@ async function showSessionPicker(
           break;
         }
       }
-    }, () => {});
+    }, () => {}, activeSessionId);
     view.activate();
   });
 }
@@ -1899,7 +1917,7 @@ function registerSessionCommands(
         return;
       }
 
-      const picked = await showSessionPicker(sessions, ctx.sessionMgr, layout);
+      const picked = await showSessionPicker(sessions, ctx.sessionMgr, layout, ctx.chatSession?.id);
       if (picked && picked.id !== ctx.chatSession?.id) {
         ctx.chatSession = picked;
         layout.messages.clear();

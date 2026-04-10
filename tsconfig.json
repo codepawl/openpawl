@@ -21,6 +21,9 @@
     "src"
   ],
   "exclude": [
-    "src/web/client"
+    "src/web/client",
+    "src/api",
+    "src/middleware",
+    "src/routes"
   ]
 }
