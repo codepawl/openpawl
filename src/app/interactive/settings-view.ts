@@ -7,6 +7,14 @@ import type { KeyEvent } from "../../tui/core/input.js";
 import type { TUI } from "../../tui/core/tui.js";
 import { InteractiveView } from "./base-view.js";
 import { getProviderRegistry } from "../../providers/provider-registry.js";
+import {
+  getActiveProviderName,
+  getActiveModel,
+  getActiveProvider,
+  setActiveProvider,
+  setActiveModel,
+} from "../../core/provider-config.js";
+import { getActiveProviderState } from "../../providers/active-state.js";
 
 interface SettingField {
   key: string;
@@ -300,24 +308,34 @@ export class SettingsView extends InteractiveView {
 
   private async loadValues(): Promise<void> {
     try {
-      const { getConfigValue } = await import("../../core/configManager.js");
-      for (const field of FIELDS) {
-        const result = getConfigValue(field.key, { raw: true });
-        this.values.set(field.key, result.value ?? "");
+      // Provider/model from unified provider-config (single source of truth)
+      const providerName = getActiveProviderName();
+      const model = getActiveModel();
+      if (providerName) this.values.set("provider", providerName);
+      if (model) this.values.set("model", model);
+
+      // Connection status from ActiveProviderState
+      if (getActiveProviderState().connectionStatus === "connected") {
+        this.connectionStatus.set("provider", "ok");
       }
 
-      // Override provider and model from ActiveProviderState (runtime truth)
-      const { getActiveProviderState } = await import("../../providers/active-state.js");
-      const active = getActiveProviderState();
-      if (active.isConfigured()) {
-        this.values.set("provider", active.provider);
-        this.values.set("model", active.model);
-        this.connectionStatus.set("provider", "ok");
+      // API key from provider config entry
+      const entry = getActiveProvider();
+      if (entry?.apiKey) {
+        this.values.set("apikey", entry.apiKey);
+      } else if (entry?.hasCredential) {
+        this.values.set("apikey", "(stored in credential store)");
+      }
+
+      // Project-scoped fields from project config
+      const { getConfigValue } = await import("../../core/configManager.js");
+      for (const key of ["mode", "maxCycles", "temperature"]) {
+        const result = getConfigValue(key, { raw: true });
+        this.values.set(key, result.value ?? "");
       }
     } catch {
       // Config unavailable
     }
-    // Re-render now that async values are loaded
     this.render();
   }
 
@@ -336,31 +354,37 @@ export class SettingsView extends InteractiveView {
 
   private async saveField(key: string, value: string): Promise<void> {
     try {
-      const { setConfigValue } = await import("../../core/configManager.js");
-      const result = setConfigValue(key, value);
-      if ("error" in result) return;
-      this.values.set(key, value);
+      if (key === "provider") {
+        // Write through unified provider-config (syncs globalConfig + ActiveProviderState)
+        setActiveProvider(value);
+        this.values.set(key, value);
 
-      // Reset model when provider changes — old model is invalid for new provider
-      if (key === "provider" && value) {
+        // Reset model to default for the new provider
         const defaultModel = DEFAULT_MODELS[value] ?? "";
         this.values.set("model", defaultModel);
         if (defaultModel) {
-          const modelResult = setConfigValue("model", defaultModel);
-          if ("error" in modelResult) {
-            this.values.set("model", "");
-          }
+          setActiveModel(defaultModel);
         }
+      } else if (key === "model") {
+        // Write through unified provider-config
+        setActiveModel(value);
+        this.values.set(key, value);
+      } else if (key === "apikey") {
+        // Write to providers[] entry in global config via registry
+        const provider = this.values.get("provider");
+        if (provider) {
+          getProviderRegistry().setConfig(provider, { apiKey: value });
+        }
+        this.values.set(key, value);
+      } else {
+        // Project-scoped fields: mode, maxCycles, temperature
+        const { setConfigValue } = await import("../../core/configManager.js");
+        const result = setConfigValue(key, value);
+        if ("error" in result) return;
+        this.values.set(key, value);
       }
 
-      // Update ActiveProviderState when model changes
-      if (key === "model" && value) {
-        try {
-          const { getActiveProviderState } = await import("../../providers/active-state.js");
-          getActiveProviderState().setModel(value);
-        } catch { /* */ }
-      }
-
+      // Health check after provider or apikey changes
       if (key === "provider" || key === "apikey") {
         this.connectionStatus.set(key, "...");
         this.render();
@@ -377,9 +401,7 @@ export class SettingsView extends InteractiveView {
         } catch {
           this.connectionStatus.set(key, "fail");
         }
-        // Sync registry so model picker and status bar update
         getProviderRegistry().refreshModels(this.values.get("provider") ?? "").catch(() => {});
-
         this.render();
       }
     } catch {

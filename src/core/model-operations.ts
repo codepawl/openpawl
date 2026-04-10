@@ -12,6 +12,7 @@ import {
   buildDefaultGlobalConfig,
   type OpenPawlGlobalConfig,
 } from "./global-config.js";
+import { setActiveModel as setProviderActiveModel } from "./provider-config.js";
 import {
   setDefaultModel,
   setAgentModel,
@@ -38,9 +39,8 @@ function readOrDefault(): OpenPawlGlobalConfig {
 
 export function persistDefaultModel(model: string): void {
   setDefaultModel(model);
-
-  const existing = readOrDefault();
-  writeGlobalConfig({ ...existing, model });
+  // Write through provider-config (syncs activeModel + legacy model + ActiveProviderState)
+  setProviderActiveModel(model);
 }
 
 export function persistAgentModel(role: string, model: string): void {

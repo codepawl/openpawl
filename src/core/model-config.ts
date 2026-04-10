@@ -12,6 +12,7 @@ import {
   readGlobalConfig,
   buildDefaultGlobalConfig,
 } from "./global-config.js";
+import { getActiveModel as getProviderConfigModel } from "./provider-config.js";
 import { recordTierDowngrade } from "../token-opt/stats.js";
 
 export interface ModelConfig {
@@ -160,10 +161,9 @@ export function resolveModelForAgent(agentRole: string): string {
     }
   }
 
-  // Priority 3: Global config model
+  // Priority 3: Global active model (via provider-config unified resolution)
   if (!resolved) {
-    const globalCfg = readGlobalConfig() ?? buildDefaultGlobalConfig();
-    const globalModel = globalCfg.model?.trim();
+    const globalModel = getProviderConfigModel();
     if (globalModel) resolved = globalModel;
   }
 

@@ -33,13 +33,9 @@ export function createModelCommand(): SlashCommand {
             ctx.tui,
             current,
             async (model) => {
-              const { setConfigValue } = await import("../../core/configManager.js");
-              const result = setConfigValue("model", model);
-              if ("error" in result) {
-                ctx.addMessage("error", result.error);
-              } else {
-                ctx.addMessage("system", `\u2713 Switched to ${model}`);
-              }
+              const { setActiveModel } = await import("../../core/provider-config.js");
+              setActiveModel(model);
+              ctx.addMessage("system", `\u2713 Switched to ${model}`);
             },
             () => { /* closed */ },
           );
@@ -110,18 +106,12 @@ export function createModelCommand(): SlashCommand {
         return;
       }
 
-      const { setConfigValue } = await import("../../core/configManager.js");
-      const setResult = setConfigValue("model", match.model);
-      if ("error" in setResult) {
-        ctx.addMessage("error", setResult.error);
-      } else {
-        // Update ActiveProviderState (single source of truth)
-        const { getActiveProviderState } = await import("../../providers/active-state.js");
-        getActiveProviderState().setModel(match.model);
+      // Write through unified provider config (syncs globalConfig + ActiveProviderState)
+      const { setActiveModel } = await import("../../core/provider-config.js");
+      setActiveModel(match.model);
 
-        const via = match.provider !== modelName ? ` via ${match.provider}` : "";
-        ctx.addMessage("system", `\u2713 Switched to ${match.model}${via}`);
-      }
+      const via = match.provider !== modelName ? ` via ${match.provider}` : "";
+      ctx.addMessage("system", `\u2713 Switched to ${match.model}${via}`);
     },
   };
 }

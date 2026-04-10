@@ -15,7 +15,8 @@ import { ChatGPTOAuthProvider } from "./chatgpt-oauth-provider.js";
 import { BedrockProvider } from "./bedrock-provider.js";
 import { VertexProvider } from "./vertex-provider.js";
 import type { StreamProvider } from "./provider.js";
-import { readGlobalConfig, type ProviderConfigEntry } from "../core/global-config.js";
+import { type ProviderConfigEntry } from "../core/global-config.js";
+import { listProviders as getConfigProviders } from "../core/provider-config.js";
 import { logger } from "../core/logger.js";
 import { setActiveProviderFamily } from "../core/model-config.js";
 import { CredentialStore } from "../credentials/credential-store.js";
@@ -141,8 +142,8 @@ export async function getGlobalProviderManager(): Promise<ProviderManager> {
 
   let configProviders: ProviderConfigEntry[] | undefined;
   try {
-    const cfg = readGlobalConfig();
-    configProviders = cfg?.providers;
+    const providers = getConfigProviders();
+    configProviders = providers.length > 0 ? providers : undefined;
   } catch {
     // Config unavailable — rely on env vars
   }

@@ -1015,6 +1015,10 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
   // ── Tier 1: Instant config check (no network, no async) ──────────
   _mark("tier1 config check start");
   const instantConfig = checkConfigInstant();
+
+  // Initialize unified provider config (reads global config + env vars)
+  const { initProviderConfig, refreshProviderConfig, getActiveModel: getProviderActiveModel } = await import("../core/provider-config.js");
+  initProviderConfig();
   _mark("tier1 config check done");
 
   // Set initial connection state and status bar
@@ -1113,11 +1117,10 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
         setConnectionState({ status, providerName: newState.providerName });
 
         if (newState.isConnected) {
+          // Re-resolve provider config after wizard wrote new config
+          refreshProviderConfig();
           const { getActiveProviderState } = await import("../providers/active-state.js");
-          const activeState = getActiveProviderState();
-          const { getConfigValue } = await import("../core/configManager.js");
-          const modelResult = getConfigValue("model", { raw: true });
-          activeState.setActive(newState.providerName, modelResult.value ?? "auto", { autoDetected: true });
+          getActiveProviderState().setActive(newState.providerName, getProviderActiveModel() || "auto", { autoDetected: true });
         }
       }
       initialHealthCheckDone = true;
@@ -1600,13 +1603,10 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
         };
 
         if (status === "connected") {
-          // Set ActiveProviderState
+          // Sync provider config → ActiveProviderState
+          refreshProviderConfig();
           import("../providers/active-state.js").then(({ getActiveProviderState }) => {
-            import("../core/configManager.js").then(({ getConfigValue }) => {
-              const activeState = getActiveProviderState();
-              const modelResult = getConfigValue("model", { raw: true });
-              activeState.setActive(instantConfig.providerName, modelResult.value ?? "auto", { autoDetected: true });
-            });
+            getActiveProviderState().setActive(instantConfig.providerName, getProviderActiveModel() || "auto", { autoDetected: true });
           });
         } else if (status === "auth_failed") {
           showConfigWarning({

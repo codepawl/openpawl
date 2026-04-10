@@ -16,11 +16,15 @@ import {
 import { getProviderRegistry } from "../providers/provider-registry.js";
 import { searchableSelect, clampSelectOptions } from "../utils/searchable-select.js";
 import {
-  readGlobalConfig,
   readGlobalConfigWithDefaults,
   writeGlobalConfig,
   type ProviderConfigEntry,
 } from "../core/global-config.js";
+import {
+  getActiveProviderName,
+  setActiveProvider,
+  listProviders as getConfigProviders,
+} from "../core/provider-config.js";
 import { validateApiKeyFormat, maskApiKey } from "../core/errors.js";
 import { handleCancel } from "../onboard/setup-flow.js";
 import { getGlobalProviderManager } from "../providers/provider-factory.js";
@@ -39,6 +43,7 @@ export async function runProvidersCommand(args: string[]): Promise<void> {
     logger.plain("Subcommands:");
     logger.plain("  list     Show configured providers and status");
     logger.plain("  add      Add a new provider interactively");
+    logger.plain("  remove   Remove a configured provider");
     logger.plain("  test     Test each provider in the chain");
     return;
   }
@@ -53,6 +58,11 @@ export async function runProvidersCommand(args: string[]): Promise<void> {
     return;
   }
 
+  if (sub === "remove") {
+    await removeProvider(args.slice(1));
+    return;
+  }
+
   if (sub === "test") {
     await testProviders();
     return;
@@ -64,13 +74,8 @@ export async function runProvidersCommand(args: string[]): Promise<void> {
 }
 
 export async function listProviders(): Promise<void> {
-  let configEntries: ProviderConfigEntry[] | undefined;
-  try {
-    const cfg = readGlobalConfig();
-    configEntries = cfg?.providers;
-  } catch {
-    // Config unavailable
-  }
+  const configEntries = getConfigProviders();
+  const activeProvider = getActiveProviderName();
 
   // Detect env-var providers
   const detected = await detectProviders();
@@ -78,32 +83,54 @@ export async function listProviders(): Promise<void> {
     .filter((d) => d.source === "env" && d.available)
     .map((d) => ({ type: d.type, envVar: d.envKey ?? "" }));
 
-  logger.plain("Providers:");
   logger.plain("");
+  logger.plain(pc.bold("  Provider         Type             Model              Status"));
+  logger.plain(pc.dim("  " + "─".repeat(70)));
 
-  if (configEntries && configEntries.length > 0) {
-    logger.plain(pc.dim("  From config:"));
-    configEntries.forEach((entry, i) => {
-      const model = entry.model ? pc.dim(` (${entry.model})`) : "";
-      logger.plain(`  ${i + 1}. ${pc.bold(entry.name ?? entry.type)}${model}  ${pc.green("configured")}`);
-    });
-  } else {
-    logger.plain(pc.dim("  No providers in config file."));
+  if (configEntries.length > 0) {
+    for (const entry of configEntries) {
+      const name = (entry.name ?? entry.type).padEnd(16);
+      const type = entry.type.padEnd(16);
+      const model = (entry.model ?? "(none)").padEnd(18);
+      const isActive = entry.type === activeProvider;
+      const hasKey = !!(entry.apiKey || entry.oauthToken || entry.githubToken || entry.copilotToken || entry.hasCredential);
+      const noKeyNeeded = entry.type === "ollama" || entry.type === "lmstudio";
+
+      let status: string;
+      if (isActive) {
+        status = pc.green("\u25cf active");
+      } else if (hasKey || noKeyNeeded) {
+        status = pc.dim("\u25cb configured");
+      } else {
+        status = pc.yellow("\u25cb no API key");
+      }
+
+      logger.plain(`  ${name} ${type} ${model} ${status}`);
+    }
   }
 
   if (envProviders.length > 0) {
-    logger.plain("");
-    logger.plain(pc.dim("  From environment:"));
-    envProviders.forEach((ep) => {
-      logger.plain(`     ${pc.bold(ep.type)}  ${pc.green("from env")} ${pc.dim(`(${ep.envVar})`)}`);
-    });
+    for (const ep of envProviders) {
+      // Skip if already in config
+      if (configEntries.some((e) => e.type === ep.type)) continue;
+      const name = ep.type.padEnd(16);
+      const type = ep.type.padEnd(16);
+      const model = "(none)".padEnd(18);
+      const isActive = ep.type === activeProvider;
+      const status = isActive
+        ? pc.green("\u25cf active (env)")
+        : pc.dim("\u25cb from env");
+      logger.plain(`  ${name} ${type} ${model} ${status}`);
+    }
   }
 
-  if ((!configEntries || configEntries.length === 0) && envProviders.length === 0) {
+  if (configEntries.length === 0 && envProviders.length === 0) {
     logger.plain("");
     logger.plain(pc.yellow("  No providers configured."));
     logger.plain(pc.dim("  Run `openpawl setup` or set an API key env var (e.g. ANTHROPIC_API_KEY)."));
   }
+
+  logger.plain("");
 }
 
 async function testProviders(): Promise<void> {
@@ -147,6 +174,37 @@ async function testProviders(): Promise<void> {
       logger.plain(`  ${i + 1}. ${p.name}`);
     });
   }
+}
+
+// ── Remove provider ──────────────────────────────────────────────────────
+
+async function removeProvider(args: string[]): Promise<void> {
+  const name = args[0];
+  if (!name) {
+    logger.error("Usage: openpawl providers remove <provider-type>");
+    logger.error("Example: openpawl providers remove ollama");
+    process.exit(1);
+  }
+
+  const entries = getConfigProviders();
+  const entry = entries.find((e) => e.type === name || e.name === name);
+  if (!entry) {
+    logger.error(`Provider "${name}" not found in config.`);
+    logger.plain(pc.dim("  Run `openpawl providers list` to see configured providers."));
+    process.exit(1);
+  }
+
+  const confirmed = await confirm({
+    message: `Remove provider ${pc.bold(entry.name ?? entry.type)}?`,
+    initialValue: false,
+  });
+  if (!confirmed || typeof confirmed === "symbol") {
+    cancel("Cancelled.");
+    return;
+  }
+
+  getProviderRegistry().removeConfig(entry.type);
+  logger.plain(`${pc.green("\u2713")} Provider ${pc.bold(entry.name ?? entry.type)} removed.`);
 }
 
 // ── Add provider ─────────────────────────────────────────────────────────
@@ -302,6 +360,16 @@ export async function addProvider(args: string[]): Promise<void> {
   filtered.push(entry);
   config.providers = filtered;
   writeGlobalConfig(config);
+
+  // Set as active provider if it's the first/only one or no active provider set
+  const currentActive = getActiveProviderName();
+  if (!currentActive || filtered.length === 1) {
+    setActiveProvider(entry.type);
+    if (entry.model) {
+      const { setActiveModel } = await import("../core/provider-config.js");
+      setActiveModel(entry.model);
+    }
+  }
 
   logger.plain(`\n${pc.green("\u2713")} Provider ${pc.bold(meta.name)} added successfully.`);
   if (entry.model) logger.plain(`  Model: ${entry.model}`);

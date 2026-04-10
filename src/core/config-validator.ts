@@ -15,6 +15,11 @@ export const OpenPawlConfigSchema = z.object({
     setupVersion: z.string().optional(),
   }).optional(),
 
+  activeProvider: z.string().optional(),
+  activeModel: z.string().optional(),
+  /** @deprecated Use activeModel instead. Kept for backward compatibility. */
+  model: z.string().optional(),
+
   dashboardPort: z.number().int().positive().default(9001),
   debugMode: z.boolean().default(false),
 

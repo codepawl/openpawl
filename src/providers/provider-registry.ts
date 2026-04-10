@@ -24,11 +24,16 @@ import {
   type ProviderConfigEntry,
 } from "../core/global-config.js";
 import {
+  listProviders as getConfigProviders,
+  getActiveProviderName as getConfigActiveProvider,
+  getActiveModel as getConfigActiveModel,
+} from "../core/provider-config.js";
+import {
   discoverModels,
   invalidateModelCache,
   type DiscoveredModel,
 } from "./model-discovery.js";
-import { getActiveProviderState } from "./active-state.js";
+
 import type { ProviderName } from "./types.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -160,11 +165,11 @@ export class ProviderRegistry extends EventEmitter {
     if (cached) return cached;
 
     const configEntry = this.getConfig(providerId);
-    const active = getActiveProviderState();
     const discoveredModels = this.lastDiscovery
       .filter((m) => m.provider === providerId)
       .map((m) => m.model);
     const def = this.getDefinition(providerId);
+    const activeProvider = getConfigActiveProvider();
 
     const state: ProviderRuntimeState = {
       configured: configEntry !== null,
@@ -172,7 +177,7 @@ export class ProviderRegistry extends EventEmitter {
       models: discoveredModels.length > 0
         ? discoveredModels
         : (def?.defaultModels ?? []),
-      activeModel: active.provider === providerId ? active.model : null,
+      activeModel: activeProvider === providerId ? getConfigActiveModel() : null,
     };
 
     this.runtimeCache.set(providerId, state);
@@ -219,7 +224,7 @@ export class ProviderRegistry extends EventEmitter {
   // ─── Helpers ──────────────────────────────────────────────────
 
   private getConfigEntries(): ProviderConfigEntry[] {
-    return readGlobalConfig()?.providers ?? [];
+    return getConfigProviders();
   }
 
   private clearRuntimeCache(providerId: string): void {
