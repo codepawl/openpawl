@@ -8,6 +8,7 @@ import type { TUI } from "../../tui/core/tui.js";
 import { InteractiveView } from "./base-view.js";
 import { getThemeEngine } from "../../tui/themes/theme-engine.js";
 import { ctp } from "../../tui/themes/default.js";
+import { ScrollableFilterList } from "../../tui/components/scrollable-filter-list.js";
 
 interface ThemeItem {
   id: string;
@@ -22,12 +23,22 @@ export class ThemeView extends InteractiveView {
   private onSelect: (themeId: string) => void;
   /** Theme currently being previewed (awaiting confirm), or null if browsing. */
   private previewingId: string | null = null;
+  private list: ScrollableFilterList<ThemeItem>;
 
   constructor(tui: TUI, onSelect: (themeId: string) => void, onClose: () => void) {
     super(tui, onClose);
     this.onSelect = onSelect;
     this.currentId = getThemeEngine().getCurrentId();
     this.originalId = this.currentId;
+    this.list = new ScrollableFilterList<ThemeItem>({
+      renderItem: (item, _index, selected) => this.renderThemeItem(item, selected),
+      filterFn: (item, query) => {
+        const q = query.toLowerCase();
+        return item.name.toLowerCase().includes(q) || item.id.toLowerCase().includes(q);
+      },
+      emptyMessage: "No themes available.",
+      filterPlaceholder: "Type to search themes...",
+    });
   }
 
   override activate(): void {
@@ -39,6 +50,7 @@ export class ThemeView extends InteractiveView {
       name: t.name,
       variant: t.variant as "dark" | "light",
     }));
+    this.list.setItems(this.items);
     // Pre-select current theme
     const idx = this.items.findIndex((t) => t.id === this.currentId);
     if (idx >= 0) this.selectedIndex = idx;
@@ -54,19 +66,13 @@ export class ThemeView extends InteractiveView {
     super.deactivate();
   }
 
-  private getFilteredItems(): ThemeItem[] {
-    return this.items.filter((item) =>
-      this.matchesFilter(item.name) || this.matchesFilter(item.id),
-    );
-  }
-
   protected getItemCount(): number {
-    return this.getFilteredItems().length;
+    return this.list.getFilteredCount(this.filterText);
   }
 
   protected handleCustomKey(event: KeyEvent): boolean {
     if (event.type === "enter") {
-      const filtered = this.getFilteredItems();
+      const filtered = this.list.getFilteredItems(this.filterText);
       const item = filtered[this.selectedIndex];
       if (!item) return true;
 
@@ -107,49 +113,30 @@ export class ThemeView extends InteractiveView {
     return "\u2191\u2193 navigate \u00b7 Enter preview \u00b7 Type to filter \u00b7 Esc close";
   }
 
+  private renderThemeItem(item: ThemeItem, selected: boolean): string {
+    const t = this.theme;
+    const isCurrent = item.id === this.currentId;
+    const isPreviewing = item.id === this.previewingId;
+    const cursor = selected ? ctp.mauve("\u25b8 ") : "  ";
+    const current = isCurrent ? ctp.green("  \u2190 current") : "";
+    const preview = isPreviewing ? t.warning("  \u25c6 previewing") : "";
+    const variant = item.variant === "light" ? t.dim(" (light)") : t.dim(" (dark)");
+    const label = selected ? t.bold(item.name) : item.name;
+    return `      ${cursor}${label}${variant}${current}${preview}`;
+  }
+
   protected renderLines(): string[] {
     const t = this.theme;
     const lines: string[] = [];
 
-    const filterLine = this.renderFilterLine();
-    if (filterLine) {
-      lines.push(`    ${filterLine}`);
-      lines.push("");
-    }
-
-    const filtered = this.getFilteredItems();
-
-    if (filtered.length === 0 && this.filterText) {
-      lines.push(`    ${ctp.overlay1(`No themes match "${this.filterText}"`)}`);
-      lines.push("");
-      return lines;
-    }
-
-    const { start, end, aboveCount, belowCount } = this.getVisibleRange();
-    const visible = filtered.slice(start, end);
-    const itemLines: string[] = [];
-
-    for (let vi = 0; vi < visible.length; vi++) {
-      const globalIdx = start + vi;
-      const item = visible[vi]!;
-      const isSelected = globalIdx === this.selectedIndex;
-      const isCurrent = item.id === this.currentId;
-      const isPreviewing = item.id === this.previewingId;
-
-      const cursor = isSelected ? ctp.mauve("\u25b8 ") : "  ";
-      const current = isCurrent ? ctp.green("  \u2190 current") : "";
-      const preview = isPreviewing ? t.warning("  \u25c6 previewing") : "";
-      const variant = item.variant === "light" ? t.dim(" (light)") : t.dim(" (dark)");
-
-      if (isSelected) {
-        itemLines.push(`      ${cursor}${t.bold(item.name)}${variant}${current}${preview}`);
-      } else {
-        itemLines.push(`      ${cursor}${item.name}${variant}${current}${preview}`);
-      }
-    }
-
-    const withIndicators = this.addScrollIndicators(itemLines, aboveCount, belowCount);
-    lines.push(...withIndicators);
+    // Render theme list via ScrollableFilterList
+    const listLines = this.list.renderLines({
+      filterText: this.filterText,
+      selectedIndex: this.selectedIndex,
+      scrollOffset: this.scrollOffset,
+      maxVisible: this.maxVisible,
+    });
+    lines.push(...listLines);
 
     lines.push("");
     if (this.previewingId) {
