@@ -8,7 +8,7 @@ import type { AgentRegistry } from "../router/agent-registry.js";
 import type { SprintTask, SprintState, SprintResult, SprintOptions, SprintEventMap } from "./types.js";
 import { parseTasks } from "./task-parser.js";
 import { validatePlan, reorderSetupFirst } from "./plan-validator.js";
-import { profileStart, profileMeasure } from "../telemetry/profiler.js";
+import { profileMeasure } from "../telemetry/profiler.js";
 import { resolveModelForAgent } from "../core/model-config.js";
 
 const PLANNER_PROMPT = (goal: string, maxTasks: number) =>
