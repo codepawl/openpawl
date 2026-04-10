@@ -8,6 +8,7 @@ import { InteractiveView } from "./base-view.js";
 import { SettingsView } from "./settings-view.js";
 import { discoverModels, getCurrentModel, type DiscoveredModel, type ProviderStatus } from "../../providers/model-discovery.js";
 import { ctp } from "../../tui/themes/default.js";
+import { ScrollableFilterList } from "../../tui/components/scrollable-filter-list.js";
 
 interface ModelItem {
   model: DiscoveredModel;
@@ -21,11 +22,22 @@ export class ModelView extends InteractiveView {
   private items: ModelItem[] = [];
   private providerStatuses: ProviderStatus[] = [];
   private loading = true;
+  private list: ScrollableFilterList<ModelItem>;
 
   constructor(tui: TUI, currentModel: string, onSelect: (model: string) => void, onClose: () => void) {
     super(tui, onClose);
     this.currentModel = currentModel || getCurrentModel();
     this.onSelect = onSelect;
+    this.list = new ScrollableFilterList<ModelItem>({
+      renderItem: (item, index, selected) => this.renderModelItem(item, index, selected),
+      filterFn: (item, query) => {
+        const q = query.toLowerCase();
+        return (item.model.displayName || item.model.model).toLowerCase().includes(q)
+          || item.model.provider.toLowerCase().includes(q);
+      },
+      emptyMessage: "No models available.",
+      filterPlaceholder: "Type to search models...",
+    });
   }
 
   override activate(): void {
@@ -44,9 +56,11 @@ export class ModelView extends InteractiveView {
     this.items = result.models
       .filter((m) => m.status === "available" || m.status === "configured")
       .map((m) => ({ model: m, selectable: true }));
+    this.list.setItems(this.items);
 
     // Pre-select current model and adjust scroll
-    const idx = this.items.findIndex((item) => item.model.model === this.currentModel);
+    const filtered = this.list.getFilteredItems(this.filterText);
+    const idx = filtered.findIndex((item) => item.model.model === this.currentModel);
     if (idx >= 0) {
       this.selectedIndex = idx;
       this.adjustScroll();
@@ -56,15 +70,11 @@ export class ModelView extends InteractiveView {
     this.render();
   }
 
-  private getFilteredItems(): ModelItem[] {
-    return this.items.filter((item) => this.matchesFilter(item.model.displayName || item.model.model));
-  }
-
   // +1 for the "Add provider..." action at the bottom
-  protected getItemCount(): number { return this.getFilteredItems().length + 1; }
+  protected getItemCount(): number { return this.list.getFilteredCount(this.filterText) + 1; }
 
   private isAddProviderSelected(): boolean {
-    return this.selectedIndex === this.getFilteredItems().length;
+    return this.selectedIndex === this.list.getFilteredCount(this.filterText);
   }
 
   private openProviderSettings(): void {
@@ -78,7 +88,7 @@ export class ModelView extends InteractiveView {
       this.openProviderSettings();
       return;
     }
-    const filtered = this.getFilteredItems();
+    const filtered = this.list.getFilteredItems(this.filterText);
     const item = filtered[this.selectedIndex];
     if (item?.selectable) {
       this.onSelect(item.model.model);
@@ -101,6 +111,17 @@ export class ModelView extends InteractiveView {
   protected override getPanelTitle(): string { return "\u26a1 Models"; }
   protected override getPanelFooter(): string { return "\u2191\u2193 navigate \u00b7 Enter select \u00b7 r refresh \u00b7 Type to filter \u00b7 Esc close"; }
 
+  private renderModelItem(item: ModelItem, _index: number, selected: boolean): string[] {
+    const t = this.theme;
+    const m = item.model;
+    const isCurrent = m.model === this.currentModel;
+    const cursor = selected ? ctp.mauve("\u25b8 ") : "  ";
+    const current = isCurrent ? ctp.green("  \u2190 current") : "";
+    const ctxInfo = m.contextWindow ? t.dim(` ${Math.round(m.contextWindow / 1000)}k ctx`) : "";
+    const label = selected ? t.bold(m.displayName) : m.displayName;
+    return [`      ${cursor}${label}${ctxInfo}${current}`];
+  }
+
   protected renderLines(): string[] {
     const t = this.theme;
     const lines: string[] = [];
@@ -117,61 +138,21 @@ export class ModelView extends InteractiveView {
       const addSelected = this.isAddProviderSelected();
       const addCursor = addSelected ? ctp.mauve("\u25b8 ") : "  ";
       const addLabel = addSelected
-        ? this.theme.bold(ctp.overlay1("+ Add provider..."))
+        ? t.bold(ctp.overlay1("+ Add provider..."))
         : ctp.overlay0("+ Add provider...");
       lines.push(`      ${addCursor}${addLabel}`);
       lines.push("");
       return lines;
     }
 
-    const filterLine = this.renderFilterLine();
-    if (filterLine) {
-      lines.push(`    ${filterLine}`);
-      lines.push("");
-    }
-
-    const filtered = this.getFilteredItems();
-
-    if (filtered.length === 0 && this.filterText) {
-      lines.push(`    ${ctp.overlay1(`No models match "${this.filterText}"`)}`);
-      lines.push("");
-      return lines;
-    }
-
-    // Group available models by provider (with scroll)
-    const { start, end, aboveCount, belowCount } = this.getVisibleRange();
-    const visible = filtered.slice(start, end);
-    let lastProvider = "";
-    const itemLines: string[] = [];
-
-    for (let vi = 0; vi < visible.length; vi++) {
-      const globalIdx = start + vi;
-      const item = visible[vi]!;
-      const m = item.model;
-      const isSelected = globalIdx === this.selectedIndex;
-      const isCurrent = m.model === this.currentModel;
-
-      if (m.provider !== lastProvider) {
-        if (lastProvider) itemLines.push("");
-        const status = this.providerStatuses.find((p) => p.id === m.provider);
-        const dot = status?.status === "connected" ? ctp.green("\u25cf") : ctp.yellow("\u25d0");
-        itemLines.push(`    ${dot} ${t.dim(m.provider)}`);
-        lastProvider = m.provider;
-      }
-
-      const cursor = isSelected ? ctp.mauve("\u25b8 ") : "  ";
-      const current = isCurrent ? ctp.green("  \u2190 current") : "";
-      const ctxInfo = m.contextWindow ? t.dim(` ${Math.round(m.contextWindow / 1000)}k ctx`) : "";
-
-      if (isSelected) {
-        itemLines.push(`      ${cursor}${t.bold(m.displayName)}${ctxInfo}${current}`);
-      } else {
-        itemLines.push(`      ${cursor}${m.displayName}${ctxInfo}${current}`);
-      }
-    }
-
-    const withIndicators = this.addScrollIndicators(itemLines, aboveCount, belowCount);
-    lines.push(...withIndicators);
+    // Render model list via ScrollableFilterList
+    const listLines = this.list.renderLines({
+      filterText: this.filterText,
+      selectedIndex: this.selectedIndex,
+      scrollOffset: this.scrollOffset,
+      maxVisible: this.maxVisible,
+    });
+    lines.push(...listLines);
 
     // Show unconfigured providers
     const unconfigured = this.providerStatuses.filter((p) => p.status === "not_configured" || (p.modelCount === 0 && p.status !== "connected"));
@@ -188,7 +169,7 @@ export class ModelView extends InteractiveView {
     const addSelected = this.isAddProviderSelected();
     const addCursor = addSelected ? ctp.mauve("\u25b8 ") : "  ";
     const addLabel = addSelected
-      ? this.theme.bold(ctp.overlay1("+ Add provider..."))
+      ? t.bold(ctp.overlay1("+ Add provider..."))
       : ctp.overlay0("+ Add provider...");
     lines.push(`      ${addCursor}${addLabel}`);
 
