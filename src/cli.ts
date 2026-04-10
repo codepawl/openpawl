@@ -362,6 +362,15 @@ async function main(): Promise<void> {
         const { runUninstall } = await import("./commands/uninstall.js");
         await runUninstall(args.slice(1));
 
+    } else if (cmd === "run") {
+        if (args.slice(1).includes("--headless")) {
+            const { runHeadless } = await import("./app/headless.js");
+            await runHeadless(args.slice(1));
+        } else {
+            logger.error("Usage: openpawl run --headless --goal \"<prompt>\" [--runs N]");
+            process.exit(1);
+        }
+
     } else {
         const match = findClosestCommand(rawCmd);
         handleUnknownCommand(rawCmd, match);
