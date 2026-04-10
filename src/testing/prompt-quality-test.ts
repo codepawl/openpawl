@@ -29,6 +29,7 @@ if (proxyUrl && !process.execArgv.includes("--use-env-proxy")) {
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { isProfilingEnabled, profileStart, generateReport as generateProfileReport } from "../telemetry/profiler.js";
 
 // ── Test configuration ──────────────────────────────────────────────
 
@@ -326,7 +327,9 @@ function generateReport(results: AgentTestResult[]): string {
 async function main() {
   mkdirSync(OUTPUT_DIR, { recursive: true });
 
+  const finishPipeline = profileStart("total_pipeline", "prompt-quality-test");
   const results = await runPipeline();
+  finishPipeline();
 
   // Save individual outputs
   for (const r of results) {
@@ -354,6 +357,14 @@ async function main() {
   // Save summary report
   const report = generateReport(results);
   writeFileSync(join(OUTPUT_DIR, "QUALITY_REPORT.md"), report);
+
+  // Save profiler report if profiling is enabled
+  if (isProfilingEnabled()) {
+    const profileReport = generateProfileReport();
+    const profilePath = join(homedir(), ".openpawl", "profile-report.md");
+    writeFileSync(profilePath, profileReport);
+    console.log(`\n  Profile report: ${profilePath}`);
+  }
 
   console.log(`\n\n=== Done ===`);
   console.log(`Reports saved to: ${OUTPUT_DIR}/`);
