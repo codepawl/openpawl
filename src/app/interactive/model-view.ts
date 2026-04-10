@@ -183,8 +183,8 @@ export class ModelView extends InteractiveView {
     });
     lines.push(...listLines);
 
-    // Show unconfigured providers (only those not in config at all)
-    const unconfigured = this.providerStatuses.filter((p) => p.status === "not_configured");
+    // Show unconfigured providers
+    const unconfigured = this.providerStatuses.filter((p) => p.status === "not_configured" || (p.modelCount === 0 && p.status !== "connected"));
     if (unconfigured.length > 0) {
       lines.push("");
       lines.push(`    ${t.dim("Not configured:")}`);
