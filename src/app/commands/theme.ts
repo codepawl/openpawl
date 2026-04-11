@@ -7,6 +7,7 @@
 import type { SlashCommand } from "../../tui/index.js";
 import { ThemeView } from "../interactive/theme-view.js";
 import { getThemeEngine } from "../../tui/themes/theme-engine.js";
+import { ICONS } from "../../tui/constants/icons.js";
 
 async function persistTheme(themeId: string): Promise<void> {
   const { readGlobalConfigWithDefaults, writeGlobalConfig } = await import("../../core/global-config.js");
@@ -32,7 +33,7 @@ export function createThemeCommand(): SlashCommand {
             async (themeId) => {
               engine.switchTheme(themeId);
               await persistTheme(themeId);
-              ctx.addMessage("system", `\u2713 Switched to ${themeId}`);
+              ctx.addMessage("system", `${ICONS.success} Switched to ${themeId}`);
               ctx.tui?.requestRender();
             },
             () => { /* closed */ },
@@ -59,7 +60,7 @@ export function createThemeCommand(): SlashCommand {
       const ok = engine.switchTheme(args.trim());
       if (ok) {
         await persistTheme(args.trim());
-        ctx.addMessage("system", `\u2713 Switched to ${args.trim()}`);
+        ctx.addMessage("system", `${ICONS.success} Switched to ${args.trim()}`);
         ctx.tui?.requestRender();
       } else {
         const available = engine.listThemes().map((t) => t.id).join(", ");

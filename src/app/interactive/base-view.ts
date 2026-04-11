@@ -13,6 +13,8 @@ import type { TUI } from "../../tui/core/tui.js";
 import { defaultTheme } from "../../tui/themes/default.js";
 import { visibleWidth } from "../../tui/utils/text-width.js";
 import { renderPanel } from "../../tui/components/panel.js";
+import { renderScrollAbove, renderScrollBelow } from "../../tui/utils/scroll-indicators.js";
+import { handleVerticalNav } from "../../tui/core/navigation.js";
 import { handleFilterInput } from "../../tui/components/input-handler.js";
 
 export abstract class InteractiveView {
@@ -129,21 +131,11 @@ export abstract class InteractiveView {
     }
 
     if (!this.isEditing()) {
-      if (event.type === "arrow" && event.direction === "up") {
-        const count = this.getItemCount();
-        if (count > 0) {
-          this.selectedIndex = this.selectedIndex <= 0 ? count - 1 : this.selectedIndex - 1;
-          this.adjustScroll();
-        }
-        this.render();
-        return true;
-      }
-      if (event.type === "arrow" && event.direction === "down") {
-        const count = this.getItemCount();
-        if (count > 0) {
-          this.selectedIndex = this.selectedIndex >= count - 1 ? 0 : this.selectedIndex + 1;
-          this.adjustScroll();
-        }
+      const count = this.getItemCount();
+      const nav = handleVerticalNav(event, this.selectedIndex, count, { wrapAround: true });
+      if (nav.handled) {
+        this.selectedIndex = nav.index;
+        this.adjustScroll();
         this.render();
         return true;
       }
@@ -229,13 +221,12 @@ export abstract class InteractiveView {
 
   /** Wrap item lines with scroll indicators when items are hidden. */
   protected addScrollIndicators(lines: string[], aboveCount: number, belowCount: number): string[] {
-    const t = this.theme;
     const result = [...lines];
     if (aboveCount > 0) {
-      result.unshift(t.dim(`  ${"▲"} ${aboveCount} more`));
+      result.unshift(renderScrollAbove(aboveCount));
     }
     if (belowCount > 0) {
-      result.push(t.dim(`  ${"▼"} ${belowCount} more`));
+      result.push(renderScrollBelow(belowCount));
     }
     return result;
   }

@@ -17,7 +17,9 @@ import type { SprintRunner } from "../../sprint/sprint-runner.js";
 import type { SprintTask, SprintResult, SprintState } from "../../sprint/types.js";
 import { createSprintRunner } from "../../sprint/create-sprint-runner.js";
 import { renderPanel, panelSection } from "../../tui/components/panel.js";
-import { ctp } from "../../tui/themes/default.js";
+import { defaultTheme } from "../../tui/themes/default.js";
+import { formatDuration } from "../../utils/formatters.js";
+import { SprintEvent } from "../../router/event-types.js";
 
 export interface SprintCommandDeps {
   agents: AgentRegistry;
@@ -53,16 +55,6 @@ function formatTaskList(tasks: SprintTask[]): string {
       return `  ${icon} ${i + 1}. ${t.description}${agent}`;
     })
     .join("\n");
-}
-
-/** Format a duration in ms to a human-readable string. */
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  const secs = Math.round(ms / 1000);
-  if (secs < 60) return `${secs}s`;
-  const mins = Math.floor(secs / 60);
-  const remSecs = secs % 60;
-  return `${mins}m ${remSecs}s`;
 }
 
 /** Get terminal-aware panel options so panels use full available width. */
@@ -203,33 +195,33 @@ export function createSprintCommand(deps: SprintCommandDeps): SlashCommand {
 
       // ── Wire sprint events to TUI ────────────────────────────────
 
-      runner.on("sprint:start", ({ goal: g }: { goal: string }) => {
+      runner.on(SprintEvent.Start, ({ goal: g }: { goal: string }) => {
         ctx.addMessage("system", `**Sprint started:** ${g}`);
         ctx.requestRender();
       });
 
-      runner.on("sprint:planning", () => {
+      runner.on(SprintEvent.Planning, () => {
         layout.messages.addMessage({
           role: "agent",
           agentName: agentDisplayName("planner"),
           content: "Analyzing goal and generating task plan...",
           timestamp: new Date(),
         });
-        layout.statusBar.updateSegment(3, "Planning sprint...", ctp.teal);
+        layout.statusBar.updateSegment(3, "Planning sprint...", defaultTheme.accent);
         ctx.requestRender();
       });
 
-      runner.on("sprint:plan", ({ tasks }: { tasks: SprintTask[] }) => {
+      runner.on(SprintEvent.Plan, ({ tasks }: { tasks: SprintTask[] }) => {
         const lines = [
           ...panelSection("Task Plan"),
           formatTaskList(tasks),
         ];
         ctx.addMessage("system", renderPanel(sprintPanelOpts(`Sprint \u2014 ${tasks.length} tasks`), lines).join("\n"));
-        layout.statusBar.updateSegment(3, "Executing tasks...", ctp.teal);
+        layout.statusBar.updateSegment(3, "Executing tasks...", defaultTheme.accent);
         ctx.requestRender();
       });
 
-      runner.on("sprint:task:start", ({ task, agentName }: { task: SprintTask; agentName: string }) => {
+      runner.on(SprintEvent.TaskStart, ({ task, agentName }: { task: SprintTask; agentName: string }) => {
         layout.messages.addMessage({
           role: "agent",
           agentName: agentDisplayName(agentName),
@@ -239,12 +231,12 @@ export function createSprintCommand(deps: SprintCommandDeps): SlashCommand {
         ctx.requestRender();
       });
 
-      runner.on("sprint:agent:token", ({ token }: { agentName: string; token: string }) => {
+      runner.on(SprintEvent.AgentToken, ({ token }: { agentName: string; token: string }) => {
         layout.messages.appendToLast(token);
         ctx.requestRender();
       });
 
-      runner.on("sprint:agent:tool", (data: {
+      runner.on(SprintEvent.AgentTool, (data: {
         agentName: string;
         toolName: string;
         status: string;
@@ -259,36 +251,36 @@ export function createSprintCommand(deps: SprintCommandDeps): SlashCommand {
         ctx.requestRender();
       });
 
-      runner.on("sprint:task:complete", ({ task }: { task: SprintTask }) => {
+      runner.on(SprintEvent.TaskComplete, ({ task }: { task: SprintTask }) => {
         const icon = task.status === "completed" ? "+" : "x";
         const statusText = task.status === "completed" ? "completed" : `failed: ${task.error ?? "unknown"}`;
         ctx.addMessage("system", `${icon} Task "${task.description}" ${statusText}`);
         ctx.requestRender();
       });
 
-      runner.on("sprint:done", ({ result }: { result: SprintResult }) => {
+      runner.on(SprintEvent.Done, ({ result }: { result: SprintResult }) => {
         ctx.addMessage("system", buildSummaryPanel(result));
-        layout.statusBar.updateSegment(3, "idle", ctp.overlay0);
+        layout.statusBar.updateSegment(3, "idle", defaultTheme.dim);
         ctx.requestRender();
       });
 
-      runner.on("sprint:error", ({ error, task }: { error: Error; task?: SprintTask }) => {
+      runner.on(SprintEvent.Error, ({ error, task }: { error: Error; task?: SprintTask }) => {
         const taskInfo = task ? ` (task: ${task.description})` : "";
         ctx.addMessage("error", `Sprint error${taskInfo}: ${error.message}`);
         ctx.requestRender();
       });
 
-      runner.on("sprint:warning", ({ warning, type }: { warning: string; type: string; taskIndex?: number }) => {
+      runner.on(SprintEvent.Warning, ({ warning, type }: { warning: string; type: string; taskIndex?: number }) => {
         ctx.addMessage("system", `[${type}] ${warning}`);
         ctx.requestRender();
       });
 
-      runner.on("sprint:paused", () => {
+      runner.on(SprintEvent.Paused, () => {
         ctx.addMessage("system", "Sprint paused. Use `/sprint resume` to continue.");
         ctx.requestRender();
       });
 
-      runner.on("sprint:resumed", () => {
+      runner.on(SprintEvent.Resumed, () => {
         ctx.addMessage("system", "Sprint resumed.");
         ctx.requestRender();
       });

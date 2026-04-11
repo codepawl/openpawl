@@ -3,6 +3,7 @@
  */
 import type { SlashCommand } from "../../tui/index.js";
 import { DEV } from "../../dev/index.js";
+import { formatBytes } from "../../utils/formatters.js";
 
 export function createDevCommand(): SlashCommand {
   return {
@@ -16,8 +17,8 @@ export function createDevCommand(): SlashCommand {
         const mem = process.memoryUsage();
         ctx.addMessage("system", [
           "Dev Config Dump:",
-          `  Heap: ${(mem.heapUsed / 1024 / 1024).toFixed(0)}mb / ${(mem.heapTotal / 1024 / 1024).toFixed(0)}mb`,
-          `  RSS: ${(mem.rss / 1024 / 1024).toFixed(0)}mb`,
+          `  Heap: ${formatBytes(mem.heapUsed)} / ${formatBytes(mem.heapTotal)}`,
+          `  RSS: ${formatBytes(mem.rss)}`,
           `  Dev mode: ${DEV.enabled ? "ON" : "OFF"}`,
           `  PID: ${process.pid}`,
           `  Uptime: ${(process.uptime() / 60).toFixed(1)}min`,

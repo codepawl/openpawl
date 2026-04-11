@@ -17,6 +17,7 @@ import {
   writeWorkspaceConfig,
   getWorkspaceRules,
 } from "../../core/workspace.js";
+import { ICONS } from "../../tui/constants/icons.js";
 
 export function createWorkspaceCommand(): SlashCommand {
   return {
@@ -44,7 +45,7 @@ export function createWorkspaceCommand(): SlashCommand {
           setWorkspaceOverlay(wsConfig as Record<string, unknown>);
         }
         ctx.addMessage("system", [
-          "\u2713 Workspace initialized",
+          `${ICONS.success} Workspace initialized`,
           "",
           `  ${wsPath}/`,
           "  \u251c\u2500\u2500 config.json   \u2500 workspace config overrides",
@@ -72,7 +73,7 @@ export function createWorkspaceCommand(): SlashCommand {
             ctx.addMessage("system", "Workspace config is empty. Set values with `/workspace config <key> <value>`.");
             return;
           }
-          const lines = ["\u2699 Workspace Config\n"];
+          const lines = [`${ICONS.gear} Workspace Config\n`];
           for (const [k, v] of Object.entries(config)) {
             if (k === "version") continue;
             lines.push(`  ${k.padEnd(20)} ${typeof v === "string" ? v : JSON.stringify(v)}`);
@@ -108,7 +109,7 @@ export function createWorkspaceCommand(): SlashCommand {
         const { setWorkspaceOverlay } = await import("../../core/global-config.js");
         setWorkspaceOverlay(config as Record<string, unknown>);
 
-        ctx.addMessage("system", `\u2713 ${key} = ${value} (workspace)`);
+        ctx.addMessage("system", `${ICONS.success} ${key} = ${value} (workspace)`);
         return;
       }
 
@@ -152,7 +153,7 @@ function showStatus(ctx: { addMessage: (role: string, content: string) => void }
   const hasRules = rules ? rules.split("\n").some((l) => !l.startsWith("#") && l.trim()) : false;
 
   ctx.addMessage("system", [
-    `\u2713 Workspace: ${info.projectName}`,
+    `${ICONS.success} Workspace: ${info.projectName}`,
     "",
     `  Path:    ${info.path}`,
     `  Config:  ${configKeys > 0 ? `${configKeys} override(s)` : "empty"}`,

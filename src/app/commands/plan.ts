@@ -4,6 +4,7 @@
  */
 import type { SlashCommand } from "../../tui/index.js";
 import type { ModeSystem } from "../../tui/keybindings/mode-system.js";
+import { ICONS } from "../../tui/constants/icons.js";
 
 export interface PlanCommandDeps {
   modeSystem: ModeSystem;
@@ -32,7 +33,7 @@ export function createPlanCommand(deps: PlanCommandDeps): SlashCommand {
       deps.modeSystem.setMode("plan-only");
       deps.updateModeDisplay();
       ctx.addMessage("system", PLAN_SYSTEM_MESSAGE);
-      deps.flashMessage("\u25a3 Plan mode active");
+      deps.flashMessage(`${ICONS.planMode} Plan mode active`);
     },
   };
 }

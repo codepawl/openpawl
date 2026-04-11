@@ -72,13 +72,17 @@ import { resolveFileRef } from "./file-ref.js";
 import { executeShell } from "./shell.js";
 import { type ConfigState, checkConfigInstant, detectConfig, pingProvider, showConfigWarning } from "./config-check.js";
 import { setConnectionState, getConnectionState, onConnectionChange, getStatusDisplay, type ConnectionStatus } from "../core/connection-state.js";
+import { DOT_SYMBOL } from "../tui/components/status-indicator.js";
+import { ICONS } from "../tui/constants/icons.js";
+import { formatTokens } from "../utils/formatters.js";
 import { setLoggerMuted, logger, isDebugMode } from "../core/logger.js";
-import { defaultTheme, ctp } from "../tui/themes/default.js";
+import { defaultTheme } from "../tui/themes/default.js";
 import { bold } from "../tui/core/ansi.js";
 import { visibleWidth } from "../tui/utils/text-width.js";
 import { separator } from "../tui/primitives/separator.js";
 import { findClosest } from "../utils/fuzzy.js";
 import { ModeSystem, type OperatingMode } from "../tui/keybindings/mode-system.js";
+import { RouterEvent, ToolEvent, SessionEvent } from "../router/event-types.js";
 import { LeaderKeyHandler } from "../tui/keybindings/leader-key.js";
 import { CommandPalette, type PaletteSource } from "../tui/keybindings/command-palette.js";
 import { KeybindingHelp, buildHelpSections } from "../tui/keybindings/keybinding-help.js";
@@ -96,11 +100,9 @@ import type { PromptRouter } from "../router/prompt-router.js";
 // Token count formatter
 // ---------------------------------------------------------------------------
 
-function formatTokenCount(count: number): string {
-  if (count < 1000) return `${count} tok`;
-  if (count < 10_000) return `${(count / 1000).toFixed(1)}k tok`;
-  if (count < 1_000_000) return `${Math.round(count / 1000)}k tok`;
-  return `${(count / 1_000_000).toFixed(1)}M tok`;
+function formatTokenPair(input: number, output: number): string {
+  if (input === 0 && output === 0) return "";
+  return `${defaultTheme.info(`${formatTokens(input)}${ICONS.arrowUp}`)} ${defaultTheme.warning(`${formatTokens(output)}${ICONS.arrowDown}`)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -165,19 +167,19 @@ function riskIndicator(riskLevel: string): { icon: string; color: (s: string) =>
   switch (riskLevel) {
     case "dangerous":
     case "destructive":
-      return { icon: "\u26a0", color: ctp.yellow };
+      return { icon: ICONS.warning, color: defaultTheme.warning };
     case "moderate":
-      return { icon: "\u270e", color: ctp.blue };
+      return { icon: "\u270e", color: defaultTheme.info };
     default:
-      return { icon: "\u2713", color: ctp.green };
+      return { icon: ICONS.success, color: defaultTheme.success };
   }
 }
 
 /** Build the styled action buttons string. */
 function permissionButtons(): string {
-  const y = ctp.green(`[${bold("Y")}]es`);
-  const n = ctp.red(`[${bold("N")}]o`);
-  const a = ctp.yellow(`[${bold("!")}]Always`);
+  const y = defaultTheme.success(`[${bold("Y")}]es`);
+  const n = defaultTheme.error(`[${bold("N")}]o`);
+  const a = defaultTheme.warning(`[${bold("!")}]Always`);
   return `${y}    ${n}    ${a}`;
 }
 
@@ -198,7 +200,7 @@ function formatToolPermissionPrompt(toolName: string, input: unknown, riskLevel:
     const display = primaryValue.length > 120
       ? primaryValue.slice(0, 117) + "..."
       : primaryValue;
-    lines.push(`  ${ctp.text(display)}`);
+    lines.push(`  ${defaultTheme.secondary(display)}`);
   }
 
   // Show remaining args (excluding primary and metadata like timeout)
@@ -213,10 +215,10 @@ function formatToolPermissionPrompt(toolName: string, input: unknown, riskLevel:
         const short = val.length > 60 ? val.slice(0, 57) + "..." : val;
         return `${k}: ${short}`;
       }).join("  ");
-      lines.push(`  ${ctp.overlay0(extraStr)}`);
+      lines.push(`  ${defaultTheme.dim(extraStr)}`);
     }
   } else if (!primaryValue && input !== undefined) {
-    lines.push(`  ${ctp.overlay0(String(input).slice(0, 120))}`);
+    lines.push(`  ${defaultTheme.dim(String(input).slice(0, 120))}`);
   }
 
   lines.push(`  ${permissionButtons()}`);
@@ -239,10 +241,13 @@ function wireRouterEvents(
   onAssistantResponse?: (agentId: string, content: string) => void,
   onPlanReady?: () => void,
   onQueueDrain?: () => void,
+  onTokensUsed?: (input: number, output: number) => void,
 ): () => void {
   let streamingForAgent: string | null = null;
   let streamedContent = "";
   let tokenFilter: ToolCallTokenFilter | null = null;
+  let sessionInputTokens = 0;
+  let sessionOutputTokens = 0;
   const thinking = new ThinkingIndicator();
   let thinkingMsgAdded = false;
 
@@ -284,7 +289,7 @@ function wireRouterEvents(
     });
     thinkingMsgAdded = true;
 
-    layout.statusBar.updateSegment(3, `${agentDisplayName(agentId)} thinking...`, ctp.teal);
+    layout.statusBar.updateSegment(3, `${agentDisplayName(agentId)} thinking...`, defaultTheme.accent);
     layout.tui.requestRender();
   };
 
@@ -295,7 +300,7 @@ function wireRouterEvents(
       thinkingMsgAdded = false;
       // Clear the thinking text — streaming content will replace it
       layout.messages.replaceLast("");
-      layout.statusBar.updateSegment(3, `${agentDisplayName(agentId)} working...`, ctp.teal);
+      layout.statusBar.updateSegment(3, `${agentDisplayName(agentId)} working...`, defaultTheme.accent);
     }
     if (streamingForAgent !== agentId || !layout.messages.isLastAgentMessage()) {
       // New agent started streaming, or last message is no longer the agent's
@@ -367,7 +372,7 @@ function wireRouterEvents(
     stopToolSpinner();
     // Bake completed tool calls into chat history, then clear the live views
     layout.messages.bakeToolCalls();
-    layout.statusBar.updateSegment(3, "idle", ctp.overlay0);
+    layout.statusBar.updateSegment(3, "idle", defaultTheme.dim);
     layout.tui.requestRender();
 
     // If in plan mode and agent just responded, show execute confirmation
@@ -392,24 +397,36 @@ function wireRouterEvents(
       content: `Dispatch error: ${error.type}`,
       timestamp: new Date(),
     });
-    layout.statusBar.updateSegment(3, "idle", ctp.overlay0);
+    layout.statusBar.updateSegment(3, "idle", defaultTheme.dim);
     layout.tui.requestRender();
   };
 
-  router.on("dispatch:agent:start", onAgentStart);
-  router.on("dispatch:agent:token", onAgentToken);
-  router.on("dispatch:agent:tool", onAgentTool);
-  router.on("dispatch:agent:done", onAgentDone);
-  router.on("dispatch:error", onDispatchError);
+  // Update token counter in status bar after each dispatch completes (accumulates per session)
+  const onDispatchDone = (_sessionId: string, result: { totalInputTokens: number; totalOutputTokens: number }) => {
+    sessionInputTokens += result.totalInputTokens;
+    sessionOutputTokens += result.totalOutputTokens;
+    const display = formatTokenPair(sessionInputTokens, sessionOutputTokens);
+    layout.statusBar.updateSegment(4, display, null);
+    layout.tui.requestRender();
+    onTokensUsed?.(result.totalInputTokens, result.totalOutputTokens);
+  };
+
+  router.on(RouterEvent.AgentStart, onAgentStart);
+  router.on(RouterEvent.AgentToken, onAgentToken);
+  router.on(RouterEvent.AgentTool, onAgentTool);
+  router.on(RouterEvent.AgentDone, onAgentDone);
+  router.on(RouterEvent.Done, onDispatchDone);
+  router.on(RouterEvent.Error, onDispatchError);
 
   // Return cleanup function
   return () => {
     stopToolSpinner();
-    router.off("dispatch:agent:start", onAgentStart);
-    router.off("dispatch:agent:token", onAgentToken);
-    router.off("dispatch:agent:tool", onAgentTool);
-    router.off("dispatch:agent:done", onAgentDone);
-    router.off("dispatch:error", onDispatchError);
+    router.off(RouterEvent.AgentStart, onAgentStart);
+    router.off(RouterEvent.AgentToken, onAgentToken);
+    router.off(RouterEvent.AgentTool, onAgentTool);
+    router.off(RouterEvent.AgentDone, onAgentDone);
+    router.off(RouterEvent.Done, onDispatchDone);
+    router.off(RouterEvent.Error, onDispatchError);
   };
 }
 
@@ -422,9 +439,8 @@ function wireSessionEvents(
   layout: AppLayout,
 ): () => void {
   const onTokensUpdated = (_sessionId: string, tokens: { input?: number; output?: number }) => {
-    const total = (tokens.input ?? 0) + (tokens.output ?? 0);
-    const display = total > 0 ? formatTokenCount(total) : "";
-    layout.statusBar.updateSegment(4, display, ctp.overlay0);
+    const display = formatTokenPair(tokens.input ?? 0, tokens.output ?? 0);
+    layout.statusBar.updateSegment(4, display, null);
     layout.tui.requestRender();
   };
 
@@ -433,12 +449,12 @@ function wireSessionEvents(
     layout.tui.requestRender();
   };
 
-  sessionMgr.on("cost:updated", onTokensUpdated);
-  sessionMgr.on("message:added", onMessageAdded);
+  sessionMgr.on(SessionEvent.CostUpdated, onTokensUpdated);
+  sessionMgr.on(SessionEvent.MessageAdded, onMessageAdded);
 
   return () => {
-    sessionMgr.off("cost:updated", onTokensUpdated);
-    sessionMgr.off("message:added", onMessageAdded);
+    sessionMgr.off(SessionEvent.CostUpdated, onTokensUpdated);
+    sessionMgr.off(SessionEvent.MessageAdded, onMessageAdded);
   };
 }
 
@@ -459,8 +475,8 @@ async function handleWithRouter(
     const detector = new ClarificationDetector();
     const clarification = detector.detect(text, {});
     if (clarification?.severity === "ask") {
-      ctx.addMessage("system", ctp.yellow(`\u2753 ${clarification.questions[0]}`));
-      layout.statusBar.updateSegment(3, "idle", ctp.overlay0);
+      ctx.addMessage("system", defaultTheme.warning(`\u2753 ${clarification.questions[0]}`));
+      layout.statusBar.updateSegment(3, "idle", defaultTheme.dim);
       layout.tui.requestRender();
       return;
     }
@@ -468,14 +484,14 @@ async function handleWithRouter(
     // Clarification module not available — proceed without it
   }
 
-  layout.statusBar.updateSegment(3, "routing...", ctp.teal);
+  layout.statusBar.updateSegment(3, "routing...", defaultTheme.accent);
   layout.tui.requestRender();
 
   const result = await router.route(session.id, text);
 
   if (result.isErr()) {
     ctx.addMessage("error", `Error: ${result.error.type}`);
-    layout.statusBar.updateSegment(3, "idle", ctp.overlay0);
+    layout.statusBar.updateSegment(3, "idle", defaultTheme.dim);
     layout.tui.requestRender();
     return;
   }
@@ -505,12 +521,7 @@ async function handleWithRouter(
     // else: response was already streamed token-by-token via dispatch:agent:token
   }
 
-  layout.statusBar.updateSegment(3, "idle", ctp.overlay0);
-
-  // Update token display
-  const tokenInfo = session.tokens;
-  const totalTokens = (tokenInfo.input ?? 0) + (tokenInfo.output ?? 0);
-  layout.statusBar.updateSegment(4, totalTokens > 0 ? formatTokenCount(totalTokens) : "", ctp.overlay0);
+  layout.statusBar.updateSegment(3, "idle", defaultTheme.dim);
   layout.tui.requestRender();
 }
 
@@ -523,7 +534,7 @@ async function handleChatFallback(
   layout: AppLayout,
   ctx: { addMessage: (role: string, content: string) => void },
 ): Promise<void> {
-  layout.statusBar.updateSegment(3, "thinking...", ctp.teal);
+  layout.statusBar.updateSegment(3, "thinking...", defaultTheme.accent);
   layout.tui.requestRender();
 
   try {
@@ -555,19 +566,19 @@ async function handleChatFallback(
       setConnectionState({ ...connState, status: "error" }, { force: true });
     }
 
-    const lines: string[] = [`\u2717 ${opError.userMessage}`];
+    const lines: string[] = [`${ICONS.error} ${opError.userMessage}`];
     if (opError.quickFixes.length > 0) {
       lines.push("");
       for (const fix of opError.quickFixes) {
         if (fix.command) lines.push(`  ${fix.command.padEnd(35)} ${fix.description}`);
-        else lines.push(`  \u2022 ${fix.description}`);
+        else lines.push(`  ${ICONS.bullet} ${fix.description}`);
       }
     }
     lines.push("");
     lines.push("  Type /error for technical details");
     ctx.addMessage("error", lines.join("\n"));
   } finally {
-    layout.statusBar.updateSegment(3, "idle", ctp.overlay0);
+    layout.statusBar.updateSegment(3, "idle", defaultTheme.dim);
     layout.tui.requestRender();
   }
 }
@@ -807,14 +818,14 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
           const connState = getConnectionState();
           if (connState.status === "no_key") {
             if (!ctx.configState?.hasProvider) {
-              msgCtx.addMessage("system", "\u26a0 No provider configured. Run /setup to set up your AI provider.");
+              msgCtx.addMessage("system", `${ICONS.warning} No provider configured. Run /setup to set up your AI provider.`);
             } else {
-              msgCtx.addMessage("system", "\u26a0 No API key found. Run /settings to configure your provider.");
+              msgCtx.addMessage("system", `${ICONS.warning} No API key found. Run /settings to configure your provider.`);
             }
             break;
           }
           if (connState.status === "auth_failed" && !ctx.router) {
-            msgCtx.addMessage("system", "\u26a0 API key invalid. Run /settings to update your credentials.");
+            msgCtx.addMessage("system", `${ICONS.warning} API key invalid. Run /settings to update your credentials.`);
             break;
           }
           // "ready", "connecting", "connected", "offline" — all allow sending
@@ -916,27 +927,27 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
     const title = `OpenPawl v${VERSION}`;
     const titlePad = Math.max(0, Math.floor((termWidth - title.length) / 2));
     lines.push("");
-    lines.push(" ".repeat(titlePad) + bold(ctp.mauve(title)));
+    lines.push(" ".repeat(titlePad) + bold(defaultTheme.primary(title)));
 
     const tagline = "Your AI team, one prompt away.";
     const tagPad = Math.max(0, Math.floor((termWidth - tagline.length) / 2));
-    lines.push(ctp.overlay0(" ".repeat(tagPad) + tagline));
+    lines.push(defaultTheme.dim(" ".repeat(tagPad) + tagline));
     lines.push("");
 
     // Command table — two sections stacked vertically, centered as a block
     const cmdPad = 12; // align descriptions after longest command
     const allItems: ([string, string] | null)[] = [
-      [ctp.blue("/help"), "Show commands"],
-      [ctp.blue("/settings"), "Configure provider"],
-      [ctp.blue("/agents"), "List agents"],
-      [ctp.peach("!command"), "Run shell command"],
-      [ctp.blue("@file"), "Reference a file"],
+      [defaultTheme.info("/help"), "Show commands"],
+      [defaultTheme.info("/settings"), "Configure provider"],
+      [defaultTheme.info("/agents"), "List agents"],
+      [defaultTheme.warning("!command"), "Run shell command"],
+      [defaultTheme.info("@file"), "Reference a file"],
       null, // blank line separator
-      [ctp.blue("@coder"), "Coder"],
-      [ctp.blue("@reviewer"), "Reviewer"],
-      [ctp.blue("@planner"), "Planner"],
-      [ctp.blue("@tester"), "Tester"],
-      [ctp.blue("@debugger"), "Debugger"],
+      [defaultTheme.info("@coder"), "Coder"],
+      [defaultTheme.info("@reviewer"), "Reviewer"],
+      [defaultTheme.info("@planner"), "Planner"],
+      [defaultTheme.info("@tester"), "Tester"],
+      [defaultTheme.info("@debugger"), "Debugger"],
     ];
 
     const tableLines: string[] = [];
@@ -945,7 +956,7 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
       const [cmd, desc] = item;
       const cmdVis = visibleWidth(cmd);
       const gap = " ".repeat(Math.max(2, cmdPad - cmdVis));
-      tableLines.push(`${cmd}${gap}${ctp.subtext0(desc)}`);
+      tableLines.push(`${cmd}${gap}${defaultTheme.dim(desc)}`);
     }
 
     // Center the table block
@@ -959,7 +970,7 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
     lines.push("");
     const tip = "Use /sessions to view previous conversations.";
     const tipPad = Math.max(0, Math.floor((termWidth - tip.length) / 2));
-    lines.push(" ".repeat(tipPad) + ctp.overlay0(tip));
+    lines.push(" ".repeat(tipPad) + defaultTheme.dim(tip));
     lines.push("");
 
     return lines.join("\n");
@@ -987,13 +998,13 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
 
   // Status bar segments: provider | connection | mode | state | cost
   layout.statusBar.setSegments([
-    { text: "no provider", color: ctp.subtext1 },
-    { text: "\u25cb not configured", color: ctp.red },
-    { text: "\u25c6 DEF", color: ctp.mauve },
-    { text: "idle", color: ctp.overlay0 },
-    { text: "", color: ctp.overlay0 },
+    { text: "no provider", color: defaultTheme.secondary },
+    { text: `${DOT_SYMBOL.empty} not configured`, color: defaultTheme.error },
+    { text: `${ICONS.diamond} default`, color: defaultTheme.primary },
+    { text: "idle", color: defaultTheme.dim },
+    { text: "", color: defaultTheme.dim },
   ]);
-  layout.statusBar.setRightText(ctp.overlay0("/help"));
+  layout.statusBar.setRightText(defaultTheme.dim("/help"));
 
   // ── Workspace config overlay ──────────────────────────────────────
   _mark("workspace detection start");
@@ -1006,7 +1017,7 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
         setWorkspaceOverlay(wsConfig as Record<string, unknown>);
       }
       const info = getWorkspaceInfo();
-      layout.statusBar.setRightText(ctp.overlay0(`\ud83d\udcc1 ${info.projectName}  /help`));
+      layout.statusBar.setRightText(defaultTheme.dim(`\ud83d\udcc1 ${info.projectName}  /help`));
     }
   }
 
@@ -1032,16 +1043,22 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
 
   // Wire connection state changes to status bar
   const colorMap = {
-    green: ctp.green,
-    red: ctp.red,
-    yellow: ctp.yellow,
-    blue: ctp.sapphire,
-    dim: ctp.overlay0,
+    green: defaultTheme.success,
+    red: defaultTheme.error,
+    yellow: defaultTheme.warning,
+    blue: defaultTheme.info,
+    dim: defaultTheme.dim,
   };
   const updateStatusFromConnection = (state: { status: ConnectionStatus; providerName: string }) => {
     const display = getStatusDisplay(state.status);
     if (state.providerName) {
-      layout.statusBar.updateSegment(0, state.providerName, ctp.subtext1);
+      // Include active model in the provider segment
+      const model = getProviderActiveModel();
+      const modelShort = model && model.length > 20 ? model.slice(0, 18) + "\u2026" : model;
+      const providerDisplay = model
+        ? `${state.providerName} ${ICONS.diamond} ${modelShort}`
+        : state.providerName;
+      layout.statusBar.updateSegment(0, providerDisplay, defaultTheme.secondary);
     }
     layout.statusBar.updateSegment(1, display.text, colorMap[display.colorKey]);
     layout.tui.requestRender();
@@ -1049,6 +1066,23 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
   onConnectionChange(updateStatusFromConnection);
   // Apply initial state to status bar
   updateStatusFromConnection(getConnectionState());
+
+  // ── Sync status bar when provider/model changes in settings ──────────
+  {
+    const { onProviderConfigChange } = await import("../core/provider-config.js");
+    const { resetGlobalProviderManager } = await import("../providers/provider-factory.js");
+    onProviderConfigChange((event) => {
+      // Reset cached provider chain so next LLM call uses new provider
+      resetGlobalProviderManager();
+      // Update status bar: segment 0 = "provider ◆ model"
+      const modelShort = event.model.length > 20 ? event.model.slice(0, 18) + "\u2026" : event.model;
+      const providerDisplay = event.model
+        ? `${event.provider} ${ICONS.diamond} ${modelShort}`
+        : event.provider || "no provider";
+      layout.statusBar.updateSegment(0, providerDisplay, defaultTheme.secondary);
+      layout.tui.requestRender();
+    });
+  }
 
   // Set minimal configState for guards (will be fully populated by tier 2)
   ctx.configState = {
@@ -1146,7 +1180,7 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
   const updateModeDisplay = () => {
     const info = modeSystem.getModeInfo();
     // Auto-accept mode uses yellow (visual warning), others use mauve
-    const modeColor = info.mode === "auto-accept" ? ctp.yellow : ctp.mauve;
+    const modeColor = info.mode === "auto-accept" ? defaultTheme.warning : defaultTheme.primary;
     layout.statusBar.updateSegment(2, `${info.icon} ${info.shortName}`, modeColor);
     layout.tui.requestRender();
   };
@@ -1388,7 +1422,7 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
     async execute(_args, msgCtx) {
       const ok = await layout.messages.copyLastResponse();
       if (ok) {
-        msgCtx.addMessage("system", ctp.green("\u2713 Copied to clipboard"));
+        msgCtx.addMessage("system", defaultTheme.success(`${ICONS.success} Copied to clipboard`));
       } else {
         msgCtx.addMessage("system", "No agent response to copy.");
       }
@@ -1424,10 +1458,10 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
 
   // Brief flash notification (e.g., "Copied!") — shows in status bar, auto-clears
   let flashTimer: ReturnType<typeof setTimeout> | null = null;
-  const defaultRightText = ctp.overlay0("/help");
+  const defaultRightText = defaultTheme.dim("/help");
   layout.tui.onFlashMessage = (msg: string) => {
     if (flashTimer) clearTimeout(flashTimer);
-    layout.statusBar.setRightText(ctp.green(`\u2713 ${msg}`));
+    layout.statusBar.setRightText(defaultTheme.success(`${ICONS.success} ${msg}`));
     layout.tui.requestRender();
     flashTimer = setTimeout(() => {
       layout.statusBar.setRightText(defaultRightText);
@@ -1670,7 +1704,7 @@ function showPlanConfirmation(
   const lines = [
     "",
     separator({ width: Math.min(40, termW - 8), label: "Plan ready", padding: 4 }),
-    `    Execute this plan? ${ctp.green("[Y]es")}  ${ctp.overlay1("[N]o (keep planning)")}  ${ctp.overlay1("[E]dit (refine)")}`,
+    `    Execute this plan? ${defaultTheme.success("[Y]es")}  ${defaultTheme.muted("[N]o (keep planning)")}  ${defaultTheme.muted("[E]dit (refine)")}`,
     "",
   ];
   layout.tui.setInteractiveView(lines);
@@ -1699,7 +1733,7 @@ function showPlanConfirmation(
         // Show brief status in chat
         layout.messages.addMessage({
           role: "system",
-          content: ctp.green("\u25a3 Executing plan..."),
+          content: defaultTheme.success(`${ICONS.planMode} Executing plan...`),
           timestamp: new Date(),
         });
         layout.tui.requestRender();
@@ -1886,7 +1920,7 @@ function registerSessionCommands(
             `**Session:** ${state.id}`,
             `**Title:** ${state.title}`,
             `**Messages:** ${state.messageCount}`,
-            `**Tokens:** ${formatTokenCount(state.totalInputTokens + state.totalOutputTokens)}`,
+            `**Tokens:** ${formatTokens(state.totalInputTokens + state.totalOutputTokens)}`,
             `**Created:** ${state.createdAt}`,
             `**Updated:** ${state.updatedAt}`,
             `**Workspace:** ${state.workingDirectory}`,
@@ -1979,7 +2013,7 @@ async function initSessionRouter(
     toolExecutor = new ToolExecutor(reg, new PermissionResolver());
 
     // Wire tool confirmation: show inline prompt for dangerous tools
-    toolExecutor.on("tool:confirmation_needed", ({ toolName, input, riskLevel, approve, reject }: {
+    toolExecutor.on(ToolEvent.ConfirmationNeeded, ({ toolName, input, riskLevel, approve, reject }: {
       toolName: string; input: unknown; riskLevel: string; category: string;
       approve: (always?: boolean) => void; reject: () => void;
     }) => {
@@ -2005,29 +2039,29 @@ async function initSessionRouter(
         handleKey: (event) => {
           if (event.type === "char" && !event.ctrl) {
             const ch = event.char.toLowerCase();
-            if (ch === "y") { resolve("\u2713 Approved", ctp.green, () => approve()); return true; }
-            if (ch === "n") { resolve("\u2717 Denied", ctp.red, () => reject()); return true; }
-            if (ch === "!") { resolve("\u2713 Always approved for session", ctp.green, () => approve(true)); return true; }
+            if (ch === "y") { resolve(`${ICONS.success} Approved`, defaultTheme.success, () => approve()); return true; }
+            if (ch === "n") { resolve(`${ICONS.error} Denied`, defaultTheme.error, () => reject()); return true; }
+            if (ch === "!") { resolve(`${ICONS.success} Always approved for session`, defaultTheme.success, () => approve(true)); return true; }
           }
-          if (event.type === "escape") { resolve("\u2717 Denied", ctp.red, () => reject()); return true; }
+          if (event.type === "escape") { resolve(`${ICONS.error} Denied`, defaultTheme.error, () => reject()); return true; }
           return true;
         },
       });
     });
 
     // Wire ToolExecutor lifecycle events to status bar
-    toolExecutor.on("tool:start", (_id: string, toolName: string) => {
+    toolExecutor.on(ToolEvent.Start, (_id: string, toolName: string) => {
       // Remove resolved approval message — live tool view now shows spinner
       layout.messages.removeLastByTag("tool-approval");
-      layout.statusBar.updateSegment(3, `${toolName}...`, ctp.teal);
+      layout.statusBar.updateSegment(3, `${toolName}...`, defaultTheme.accent);
       layout.tui.requestRender();
     });
-    toolExecutor.on("tool:done", (_id: string, toolName: string) => {
-      layout.statusBar.updateSegment(3, `${toolName} done`, ctp.green);
+    toolExecutor.on(ToolEvent.Done, (_id: string, toolName: string) => {
+      layout.statusBar.updateSegment(3, `${toolName} done`, defaultTheme.success);
       layout.tui.requestRender();
     });
-    toolExecutor.on("tool:error", (_id: string, toolName: string) => {
-      layout.statusBar.updateSegment(3, `${toolName} failed`, ctp.red);
+    toolExecutor.on(ToolEvent.Error, (_id: string, toolName: string) => {
+      layout.statusBar.updateSegment(3, `${toolName} failed`, defaultTheme.error);
       layout.tui.requestRender();
     });
   } catch {
@@ -2124,9 +2158,9 @@ async function initSessionRouter(
     onContextUpdate: (utilization, level) => {
       layout.statusBar.updateSegment(3,
         level === "normal" ? "idle" : `ctx: ${utilization}%`,
-        level === "emergency" || level === "critical" ? ctp.red
-          : level === "high" || level === "warning" ? ctp.yellow
-          : ctp.overlay0,
+        level === "emergency" || level === "critical" ? defaultTheme.error
+          : level === "high" || level === "warning" ? defaultTheme.warning
+          : defaultTheme.dim,
       );
       layout.tui.requestRender();
     },
@@ -2148,10 +2182,10 @@ async function initSessionRouter(
 
   // Now that the router exists, wire the emitters to it.
   tokenEmitter.emit = (agentId: string, token: string) => {
-    ctx.router?.emit("dispatch:agent:token", ctx.chatSession?.id ?? "", agentId, token);
+    ctx.router?.emit(RouterEvent.AgentToken, ctx.chatSession?.id ?? "", agentId, token);
   };
   toolEmitter.emit = (agentId: string, toolName: string, status: string, details?: Record<string, unknown>) => {
-    ctx.router?.emit("dispatch:agent:tool", ctx.chatSession?.id ?? "", agentId, toolName, status, details);
+    ctx.router?.emit(RouterEvent.AgentTool, ctx.chatSession?.id ?? "", agentId, toolName, status, details);
   };
 
 
@@ -2161,20 +2195,20 @@ async function initSessionRouter(
     const latencyTracker = new LatencyTracker();
     let activeRequestTracker: ReturnType<typeof latencyTracker.startRequest> | null = null;
 
-    ctx.router.on("dispatch:agent:start", (sessionId: string, agentId: string) => {
+    ctx.router.on(RouterEvent.AgentStart, (sessionId: string, agentId: string) => {
       activeRequestTracker = latencyTracker.startRequest(sessionId, agentId);
       activeRequestTracker.markSubmitted();
       activeRequestTracker.markRequestSent();
     });
 
     // First token → record TTFT
-    ctx.router.on("dispatch:agent:token", () => {
+    ctx.router.on(RouterEvent.AgentToken, () => {
       if (activeRequestTracker) {
         activeRequestTracker.markFirstToken();
       }
     });
 
-    ctx.router.on("dispatch:agent:done", (sessionId: string, _agentId: string, result: { outputTokens?: number }) => {
+    ctx.router.on(RouterEvent.AgentDone, (sessionId: string, _agentId: string, result: { outputTokens?: number }) => {
       if (activeRequestTracker) {
         activeRequestTracker.markComplete(result.outputTokens ?? 0);
         latencyTracker.recordMetrics(sessionId, activeRequestTracker.getMetrics());
@@ -2190,7 +2224,7 @@ async function initSessionRouter(
     const { ErrorPresenter } = await import("../recovery/error-presenter.js");
     const errorPresenter = new ErrorPresenter();
 
-    ctx.router.on("dispatch:error", (_sessionId: string, error: unknown) => {
+    ctx.router.on(RouterEvent.Error, (_sessionId: string, error: unknown) => {
       const presented = errorPresenter.present(error);
       const lines = errorPresenter.formatForChat(presented);
       layout.messages.addMessage({
@@ -2223,6 +2257,9 @@ async function initSessionRouter(
   }, () => {
     // Queue drain callback: process next queued prompt
     ctx.onQueueDrain?.();
+  }, (input, output) => {
+    // Track token usage in session state for persistence
+    ctx.chatSession?.addTokenUsage("default", input, output);
   });
   ctx.cleanupSession = wireSessionEvents(ctx.sessionMgr, layout);
 
@@ -2274,10 +2311,10 @@ function registerRouterCommands(
       const contentLines = [...panelSection("Built-in")];
       for (const a of agents) {
         const colorFn = getAgentColor(a.id);
-        contentLines.push(labelValue("@" + a.id, a.description, { labelWidth: 16, labelColor: colorFn, valueColor: ctp.overlay1, gap: 1 }));
+        contentLines.push(labelValue("@" + a.id, a.description, { labelWidth: 16, labelColor: colorFn, valueColor: defaultTheme.muted, gap: 1 }));
       }
       contentLines.push("");
-      contentLines.push(ctp.overlay0("Use @agent in your prompt to route directly."));
+      contentLines.push(defaultTheme.dim("Use @agent in your prompt to route directly."));
       const panel = renderPanel({ title: "Agents", footer: "Press any key to close" }, contentLines);
       ctx.addMessage("system", panel.join("\n"));
     },

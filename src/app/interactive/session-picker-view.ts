@@ -5,11 +5,13 @@
 import type { KeyEvent } from "../../tui/core/input.js";
 import type { TUI } from "../../tui/core/tui.js";
 import { InteractiveView } from "./base-view.js";
-import { ctp } from "../../tui/themes/default.js";
 import { separator } from "../../tui/primitives/separator.js";
 import { renderConfirmPrompt } from "../../tui/primitives/confirm.js";
+import { ICONS } from "../../tui/constants/icons.js";
 import type { SessionListItem } from "../../session/session-state.js";
 import { ScrollableFilterList } from "../../tui/components/scrollable-filter-list.js";
+import { formatRelativeTime } from "../../utils/formatters.js";
+import { handleConfirmationKey } from "../../tui/core/navigation.js";
 
 export interface SessionPickerResult {
   action: "resume" | "new" | "delete" | "clear-all" | "cancel";
@@ -79,17 +81,13 @@ export class SessionPickerView extends InteractiveView {
   protected handleCustomKey(event: KeyEvent): boolean {
     // Clear All confirmation: intercept y/n/Esc
     if (this.confirmingClearAll) {
-      if (event.type === "char" && event.char === "y" && !event.ctrl) {
+      const result = handleConfirmationKey(event);
+      if (result === "confirm") {
         this.onResult({ action: "clear-all" });
         this.deactivate();
         return true;
       }
-      if (event.type === "char" && event.char === "n" && !event.ctrl) {
-        this.confirmingClearAll = false;
-        this.render();
-        return true;
-      }
-      if (event.type === "escape") {
+      if (result === "cancel") {
         this.confirmingClearAll = false;
         this.render();
         return true;
@@ -162,7 +160,7 @@ export class SessionPickerView extends InteractiveView {
       }).replace(/\x1b\[[0-9;]*m/g, ""); // footer is styled by panel, strip ANSI
     }
     const filterHint = this.filterEnabled ? " \u00b7 Type to filter" : "";
-    return `\u2191\u2193 navigate  Enter select  d delete${filterHint}  Esc cancel`;
+    return `${ICONS.arrowUp}${ICONS.arrowDown} navigate  Enter select  d delete${filterHint}  Esc cancel`;
   }
 
   private renderSessionItem(s: SessionListItem, selected: boolean): string {
@@ -172,16 +170,17 @@ export class SessionPickerView extends InteractiveView {
 
     // Delete-confirming item: show in red
     if (this.confirmingDelete === s.id) {
-      return `    ${ctp.mauve("\u276f ")}${ctp.red(title)}  ${ctp.red("press Enter to delete")}`;
+      return `    ${t.primary("\u276f ")}${t.error(title)}  ${t.error("press Enter to delete")}`;
     }
 
-    const cursor = selected ? ctp.mauve("\u276f ") : "  ";
-    const label = selected ? ctp.text(title) : ctp.overlay1(title);
+    const cursor = selected ? t.primary("\u276f ") : "  ";
+    const label = selected ? t.secondary(title) : t.muted(title);
     const metaStr = "  " + t.dim(meta);
     return `    ${cursor}${label}${metaStr}`;
   }
 
   protected renderLines(): string[] {
+    const t = this.theme;
     const width = this.tui.getTerminal().columns;
     const innerW = Math.min(70, width - 10);
 
@@ -200,21 +199,21 @@ export class SessionPickerView extends InteractiveView {
       result.push(separator({ width: Math.min(40, innerW), padding: 4 }));
     }
     const isNewSelected = this.selectedIndex === newSessionIndex;
-    const cursor = isNewSelected ? ctp.mauve("\u276f ") : "  ";
-    const label = isNewSelected ? ctp.green("+  New session") : this.theme.dim("+  New session");
+    const cursor = isNewSelected ? t.primary("\u276f ") : "  ";
+    const label = isNewSelected ? t.success("+  New session") : this.theme.dim("+  New session");
     result.push(`    ${cursor}${label}`);
 
     // "Clear All Sessions" option
     if (this.showClearAll) {
       const clearAllIndex = newSessionIndex + 1;
       const isClearSelected = this.selectedIndex === clearAllIndex;
-      const clearCursor = isClearSelected ? ctp.mauve("\u276f ") : "  ";
+      const clearCursor = isClearSelected ? t.primary("\u276f ") : "  ";
       if (this.confirmingClearAll) {
-        result.push(`    ${clearCursor}${ctp.red(`\u26a0  Delete all ${this.clearableCount} sessions? y/n`)}`);
+        result.push(`    ${clearCursor}${t.error(`${ICONS.warning}  Delete all ${this.clearableCount} sessions? y/n`)}`);
       } else {
         const clearLabel = isClearSelected
-          ? ctp.red("\u26a0  Clear all sessions")
-          : this.theme.dim("\u26a0  Clear all sessions");
+          ? t.error(`${ICONS.warning}  Clear all sessions`)
+          : this.theme.dim(`${ICONS.warning}  Clear all sessions`);
         result.push(`    ${clearCursor}${clearLabel}`);
       }
     }
@@ -224,24 +223,5 @@ export class SessionPickerView extends InteractiveView {
   }
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-export function formatRelativeTime(isoString: string): string {
-  const now = Date.now();
-  const then = new Date(isoString).getTime();
-  const diffMs = now - then;
-  const diffSec = Math.floor(diffMs / 1000);
-
-  if (diffSec < 60) return "just now";
-  const diffMin = Math.floor(diffSec / 60);
-  if (diffMin < 60) return `${diffMin}m ago`;
-  const diffHr = Math.floor(diffMin / 60);
-  if (diffHr < 24) return `${diffHr}h ago`;
-  const diffDay = Math.floor(diffHr / 24);
-  if (diffDay === 1) return "yesterday";
-  if (diffDay < 7) return `${diffDay}d ago`;
-  const diffWeek = Math.floor(diffDay / 7);
-  if (diffWeek < 5) return `${diffWeek}w ago`;
-  const diffMonth = Math.floor(diffDay / 30);
-  return `${diffMonth}mo ago`;
-}
+// Re-export for backward compatibility
+export { formatRelativeTime } from "../../utils/formatters.js";

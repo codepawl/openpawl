@@ -2,7 +2,8 @@
  * /debate command — multi-perspective analysis with consensus synthesis.
  */
 import type { SlashCommand, CommandContext } from "../../tui/index.js";
-import { ctp } from "../../tui/themes/default.js";
+import { defaultTheme } from "../../tui/themes/default.js";
+import { ICONS } from "../../tui/constants/icons.js";
 
 export function createDebateCommand(): SlashCommand {
   return {
@@ -16,7 +17,7 @@ export function createDebateCommand(): SlashCommand {
         return;
       }
 
-      ctx.addMessage("system", ctp.overlay1(`Debating: ${question}`));
+      ctx.addMessage("system", defaultTheme.muted(`Debating: ${question}`));
       ctx.requestRender();
 
       try {
@@ -28,7 +29,7 @@ export function createDebateCommand(): SlashCommand {
               // Streaming — handled below when result is ready
             }
             if (event.stage === "synthesizing" && !event.content) {
-              ctx.addMessage("system", ctp.overlay1("Synthesizing consensus..."));
+              ctx.addMessage("system", defaultTheme.muted("Synthesizing consensus..."));
               ctx.requestRender();
             }
           },
@@ -36,24 +37,24 @@ export function createDebateCommand(): SlashCommand {
 
         // Render each perspective
         for (const p of result.perspectives) {
-          const header = ctp.blue(`┌ ${p.name} (${p.description}) ┐`);
+          const header = defaultTheme.info(`┌ ${p.name} (${p.description}) ┐`);
           ctx.addMessage("system", `${header}\n${p.response}`);
         }
 
         // Render consensus
-        const consensusLines: string[] = [ctp.yellow("── Consensus ──")];
+        const consensusLines: string[] = [defaultTheme.warning("── Consensus ──")];
         for (const point of result.consensus) {
-          const icon = point.type === "agreement" ? "✓" : point.type === "disagreement" ? "⚡" : "💡";
+          const icon = point.type === "agreement" ? ICONS.success : point.type === "disagreement" ? ICONS.bolt : "💡";
           const label = point.type.charAt(0).toUpperCase() + point.type.slice(1);
           consensusLines.push(`${icon} ${label}: ${point.summary}`);
         }
         consensusLines.push("");
         consensusLines.push(
-          ctp.green(`Recommendation (${Math.round(result.recommendation.confidence * 100)}% confidence):`),
+          defaultTheme.success(`Recommendation (${Math.round(result.recommendation.confidence * 100)}% confidence):`),
         );
         consensusLines.push(result.recommendation.summary);
         consensusLines.push("");
-        consensusLines.push(ctp.overlay0(result.recommendation.reasoning));
+        consensusLines.push(defaultTheme.dim(result.recommendation.reasoning));
 
         ctx.addMessage("system", consensusLines.join("\n"));
         ctx.requestRender();

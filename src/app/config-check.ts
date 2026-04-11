@@ -33,7 +33,9 @@ export function checkConfigInstant(): { hasProvider: boolean; providerName: stri
       const raw = JSON.parse(readFileSync(cfgPath, "utf-8"));
       const providers = raw?.providers;
       if (Array.isArray(providers) && providers.length > 0) {
-        const first = providers[0];
+        // Prefer activeProvider entry, fall back to first in array
+        const activeId = raw?.activeProvider;
+        const first = (activeId && providers.find((p: Record<string, unknown>) => p?.type === activeId)) || providers[0];
         const type = first?.type ?? "";
         const name = first?.name ?? type;
         // Check inline API key or hasCredential flag

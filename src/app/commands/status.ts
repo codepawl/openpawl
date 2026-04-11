@@ -2,6 +2,7 @@
  * /status command — show provider and team status.
  */
 import type { SlashCommand } from "../../tui/index.js";
+import { formatBytes } from "../../utils/formatters.js";
 
 export function createStatusCommand(): SlashCommand {
   return {
@@ -35,8 +36,8 @@ export function createStatusCommand(): SlashCommand {
 
       const mem = process.memoryUsage();
       lines.push("", "**System:**");
-      lines.push(`  RSS: ${(mem.rss / 1024 / 1024).toFixed(1)} MB`);
-      lines.push(`  Heap: ${(mem.heapUsed / 1024 / 1024).toFixed(1)} / ${(mem.heapTotal / 1024 / 1024).toFixed(1)} MB`);
+      lines.push(`  RSS: ${formatBytes(mem.rss)}`);
+      lines.push(`  Heap: ${formatBytes(mem.heapUsed)} / ${formatBytes(mem.heapTotal)}`);
 
       ctx.addMessage("system", lines.join("\n"));
     },

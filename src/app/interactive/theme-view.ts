@@ -7,7 +7,7 @@ import type { KeyEvent } from "../../tui/core/input.js";
 import type { TUI } from "../../tui/core/tui.js";
 import { InteractiveView } from "./base-view.js";
 import { getThemeEngine } from "../../tui/themes/theme-engine.js";
-import { ctp } from "../../tui/themes/default.js";
+import { ICONS } from "../../tui/constants/icons.js";
 import { ScrollableFilterList } from "../../tui/components/scrollable-filter-list.js";
 
 interface ThemeItem {
@@ -108,18 +108,18 @@ export class ThemeView extends InteractiveView {
 
   protected override getPanelFooter(): string {
     if (this.previewingId) {
-      return "Enter confirm \u00b7 Esc revert \u00b7 \u2191\u2193 cancel preview";
+      return `Enter confirm \u00b7 Esc revert \u00b7 ${ICONS.arrowUp}${ICONS.arrowDown} cancel preview`;
     }
-    return "\u2191\u2193 navigate \u00b7 Enter preview \u00b7 Type to filter \u00b7 Esc close";
+    return `${ICONS.arrowUp}${ICONS.arrowDown} navigate \u00b7 Enter preview \u00b7 Type to filter \u00b7 Esc close`;
   }
 
   private renderThemeItem(item: ThemeItem, selected: boolean): string {
     const t = this.theme;
     const isCurrent = item.id === this.currentId;
     const isPreviewing = item.id === this.previewingId;
-    const cursor = selected ? ctp.mauve("\u25b8 ") : "  ";
-    const current = isCurrent ? ctp.green("  \u2190 current") : "";
-    const preview = isPreviewing ? t.warning("  \u25c6 previewing") : "";
+    const cursor = selected ? t.primary(`${ICONS.cursor} `) : "  ";
+    const current = isCurrent ? t.success("  \u2190 current") : "";
+    const preview = isPreviewing ? t.warning(`  ${ICONS.diamond} previewing`) : "";
     const variant = item.variant === "light" ? t.dim(" (light)") : t.dim(" (dark)");
     const label = selected ? t.bold(item.name) : item.name;
     return `      ${cursor}${label}${variant}${current}${preview}`;
@@ -144,7 +144,7 @@ export class ThemeView extends InteractiveView {
       const name = previewItem?.name ?? this.previewingId;
       lines.push(`    ${t.success("Like this theme?")} ${t.dim("Press Enter again to confirm")} ${t.bold(name)}`);
     } else {
-      lines.push(ctp.overlay0("    /theme <name> to switch directly"));
+      lines.push(t.dim("    /theme <name> to switch directly"));
     }
     lines.push("");
     return lines;

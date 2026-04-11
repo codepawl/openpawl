@@ -13,6 +13,9 @@
  */
 
 import pc from "picocolors";
+import { ICONS } from "../tui/constants/icons.js";
+import { formatDuration } from "../utils/formatters.js";
+import { SprintEvent, ToolEvent } from "../router/event-types.js";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { writeFileSync, mkdirSync } from "node:fs";
@@ -71,9 +74,6 @@ function parseArgs(args: string[]): HeadlessOptions {
   return { goal, runs, mode, workdir };
 }
 
-function formatMs(ms: number): string {
-  return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`;
-}
 
 /** Convert goal text to a filesystem-safe slug. */
 function goalSlug(goal: string): string {
@@ -129,7 +129,7 @@ export async function runHeadless(args: string[]): Promise<void> {
   const toolExec = new ToolExecutor(toolReg, new PermissionResolver());
 
   // Auto-approve tool confirmations in headless mode
-  toolExec.on("tool:confirmation_needed", ({ approve }: { approve: (always?: boolean) => void }) => {
+  toolExec.on(ToolEvent.ConfirmationNeeded, ({ approve }: { approve: (always?: boolean) => void }) => {
     approve();
   });
 
@@ -152,7 +152,7 @@ export async function runHeadless(args: string[]): Promise<void> {
     const runDuration = Date.now() - runStart;
     console.log("");
     console.log(pc.dim("─".repeat(60)));
-    console.log(`Total: ${pc.bold(formatMs(runDuration))}`);
+    console.log(`Total: ${pc.bold(formatDuration(runDuration))}`);
   }
 
   // Restore original cwd
@@ -187,15 +187,15 @@ async function runSprint(
   let taskTokens = 0;
   let taskStart = 0;
 
-  runner.on("sprint:planning", () => {
+  runner.on(SprintEvent.Planning, () => {
     process.stdout.write(`  ${pc.cyan("[planner]")} planning tasks...`);
     taskStart = Date.now();
     taskTokens = 0;
   });
 
-  runner.on("sprint:plan", ({ tasks }) => {
+  runner.on(SprintEvent.Plan, ({ tasks }) => {
     const elapsed = Date.now() - taskStart;
-    process.stdout.write(` ${pc.dim("\u2192")} ${pc.green(`${tasks.length} tasks`)} (${formatMs(elapsed)})\n`);
+    process.stdout.write(` ${pc.dim("\u2192")} ${pc.green(`${tasks.length} tasks`)} (${formatDuration(elapsed)})\n`);
     console.log("");
     for (let i = 0; i < tasks.length; i++) {
       console.log(`  ${pc.dim(`${i + 1}.`)} ${tasks[i]!.description.slice(0, 80)}`);
@@ -203,51 +203,51 @@ async function runSprint(
     console.log("");
   });
 
-  runner.on("sprint:round:start", ({ round, tasks }) => {
+  runner.on(SprintEvent.RoundStart, ({ round, tasks }) => {
     if (tasks.length > 1) {
       console.log(`  ${pc.bold(`[round ${round} \u2014 ${tasks.length} tasks in parallel]`)}`);
     }
   });
 
-  runner.on("sprint:round:complete", ({ round, duration }) => {
-    console.log(`  ${pc.dim(`[round ${round} complete: ${formatMs(duration)}]`)}`);
+  runner.on(SprintEvent.RoundComplete, ({ round, duration }) => {
+    console.log(`  ${pc.dim(`[round ${round} complete: ${formatDuration(duration)}]`)}`);
     console.log("");
   });
 
-  runner.on("sprint:task:start", ({ task, agentName }) => {
+  runner.on(SprintEvent.TaskStart, ({ task, agentName }) => {
     taskTokens = 0;
     taskStart = Date.now();
     process.stdout.write(`  ${pc.cyan(`[${agentName}]`)} ${task.description.slice(0, 60)}`);
   });
 
-  runner.on("sprint:agent:token", () => {
+  runner.on(SprintEvent.AgentToken, () => {
     taskTokens++;
   });
 
-  runner.on("sprint:agent:tool", ({ toolName, status }) => {
+  runner.on(SprintEvent.AgentTool, ({ toolName, status }) => {
     if (status === "running") {
       process.stdout.write(`\n    ${pc.dim(`tool: ${toolName}`)}`);
     } else if (status === "completed") {
-      process.stdout.write(pc.dim(" \u2713"));
+      process.stdout.write(pc.dim(` ${ICONS.success}`));
     } else if (status === "failed") {
-      process.stdout.write(pc.red(" \u2717"));
+      process.stdout.write(pc.red(` ${ICONS.error}`));
     }
   });
 
-  runner.on("sprint:task:complete", ({ task }) => {
+  runner.on(SprintEvent.TaskComplete, ({ task }) => {
     const elapsed = Date.now() - taskStart;
     const status = task.status === "completed" ? pc.green("done")
       : task.status === "failed" ? pc.red("failed")
       : pc.yellow("incomplete");
-    process.stdout.write(` ${pc.dim("\u2192")} ${status} (${formatMs(elapsed)}, ${taskTokens} tokens)\n`);
+    process.stdout.write(` ${pc.dim(ICONS.arrow)} ${status} (${formatDuration(elapsed)}, ${taskTokens} tokens)\n`);
   });
 
-  runner.on("sprint:warning", ({ warning }) => {
-    console.log(`  ${pc.yellow("\u26a0")} ${warning}`);
+  runner.on(SprintEvent.Warning, ({ warning }) => {
+    console.log(`  ${pc.yellow(ICONS.warning)} ${warning}`);
   });
 
-  runner.on("sprint:error", ({ error }) => {
-    console.error(`  ${pc.red("\u2717")} ${error.message}`);
+  runner.on(SprintEvent.Error, ({ error }) => {
+    console.error(`  ${pc.red(ICONS.error)} ${error.message}`);
   });
 
   const result = await runner.run(goal);
@@ -257,7 +257,7 @@ async function runSprint(
   console.log(
     `Tasks: ${result.completedTasks}/${result.tasks.length} completed | ` +
     `Failed: ${result.failedTasks} | ` +
-    `Duration: ${formatMs(result.duration)}`,
+    `Duration: ${formatDuration(result.duration)}`,
   );
 }
 
@@ -286,7 +286,7 @@ async function runChat(
         if (currentAgent) {
           const elapsed = Date.now() - (agentStartTimes.get(currentAgent) ?? Date.now());
           process.stdout.write(
-            ` ${pc.dim("\u2192")} ${pc.green("done")} (${formatMs(elapsed)}, ${tokenCount} tokens)\n`,
+            ` ${pc.dim("\u2192")} ${pc.green("done")} (${formatDuration(elapsed)}, ${tokenCount} tokens)\n`,
           );
         }
         currentAgent = agentId;
@@ -300,9 +300,9 @@ async function runChat(
       if (status === "running") {
         process.stdout.write(`\n    ${pc.dim(`tool: ${toolName}`)}`);
       } else if (status === "completed") {
-        process.stdout.write(pc.dim(" \u2713"));
+        process.stdout.write(pc.dim(` ${ICONS.success}`));
       } else if (status === "failed") {
-        process.stdout.write(pc.red(" \u2717"));
+        process.stdout.write(pc.red(` ${ICONS.error}`));
       }
     },
     getToolSchemas: (toolNames) => toolReg.exportForLLM(toolNames),
@@ -334,7 +334,7 @@ async function runChat(
   if (currentAgent) {
     const elapsed = Date.now() - (agentStartTimes.get(currentAgent) ?? Date.now());
     process.stdout.write(
-      ` ${pc.dim("\u2192")} ${pc.green("done")} (${formatMs(elapsed)}, ${tokenCount} tokens)\n`,
+      ` ${pc.dim("\u2192")} ${pc.green("done")} (${formatDuration(elapsed)}, ${tokenCount} tokens)\n`,
     );
   }
 

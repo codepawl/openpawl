@@ -9,6 +9,7 @@ import { InteractiveView } from "./base-view.js";
 import { getProviderRegistry } from "../../providers/provider-registry.js";
 import { ScrollableFilterList } from "../../tui/components/scrollable-filter-list.js";
 import { handleTextInput, handleFilterInput } from "../../tui/components/input-handler.js";
+import { ICONS } from "../../tui/constants/icons.js";
 import {
   getActiveProviderName,
   getActiveModel,
@@ -63,7 +64,7 @@ export class SettingsView extends InteractiveView {
     this.selectList = new ScrollableFilterList<string>({
       renderItem: (opt, index, selected) => {
         const t = this.theme;
-        return `  \u2502  ${selected ? t.primary("\u25b8 " + opt) : "  " + opt}`;
+        return `  \u2502  ${selected ? t.primary(`${ICONS.cursor} ` + opt) : "  " + opt}`;
       },
       filterFn: (opt, query) => opt.toLowerCase().includes(query.toLowerCase()),
       emptyMessage: "No matches",
@@ -319,16 +320,16 @@ export class SettingsView extends InteractiveView {
     return true;
   }
 
-  protected override getPanelTitle(): string { return "\u2699 Settings"; }
+  protected override getPanelTitle(): string { return `${ICONS.gear} Settings`; }
   protected override getPanelFooter(): string {
     if (this.editing) {
       const field = FIELDS[this.selectedIndex];
       if (field?.type === "select") {
-        return "\u2191\u2193 navigate \u00b7 Type to filter \u00b7 Enter select \u00b7 Esc back";
+        return `${ICONS.arrowUp}${ICONS.arrowDown} navigate \u00b7 Type to filter \u00b7 Enter select \u00b7 Esc back`;
       }
       return "Enter save \u00b7 Esc cancel";
     }
-    return "\u2191\u2193 navigate \u00b7 Enter edit \u00b7 Esc close";
+    return `${ICONS.arrowUp}${ICONS.arrowDown} navigate \u00b7 Enter edit \u00b7 Esc close`;
   }
 
   protected renderLines(): string[] {
@@ -343,7 +344,7 @@ export class SettingsView extends InteractiveView {
       const rawValue = disabled ? "" : (this.values.get(field.key) ?? "");
       const value = rawValue || "(not set)";
       const status = this.connectionStatus.get(field.key);
-      const statusStr = status === "ok" ? t.success(" \u2713") : status === "fail" ? t.error(" \u2717") : "";
+      const statusStr = status === "ok" ? t.success(` ${ICONS.success}`) : status === "fail" ? t.error(` ${ICONS.error}`) : "";
 
       if (isSelected && this.editing) {
         if (field.type === "select") {
@@ -362,19 +363,19 @@ export class SettingsView extends InteractiveView {
           lines.push(`  ${"─".repeat(35)}`);
         } else {
           const display = field.type === "password"
-            ? "\u2022".repeat(this.editBuffer.length)
+            ? ICONS.bullet.repeat(this.editBuffer.length)
             : this.editBuffer;
           const before = display.slice(0, this.editCursor);
           const after = display.slice(this.editCursor);
           lines.push(`  \u270e ${t.bold(field.label)} ${"─".repeat(30)}`);
-          lines.push(`  \u2502  ${before}${t.primary("\u2588")}${after}`);
+          lines.push(`  \u2502  ${before}${t.primary(ICONS.block)}${after}`);
           if (field.type === "password") lines.push(`  \u2502  ${t.dim("(input is masked)")}`);
           if (this.editError) lines.push(`  \u2502  ${t.error(this.editError)}`);
           lines.push(`  ${"─".repeat(35)}`);
         }
       } else {
 
-        const cursor = isSelected ? "\u25b8" : "\u2502";
+        const cursor = isSelected ? ICONS.cursor : "\u2502";
         const label = field.label.padEnd(16);
         const displayValue = this.maskDisplay(field.key, value).padEnd(18);
         const desc = t.dim(field.description);
@@ -446,6 +447,10 @@ export class SettingsView extends InteractiveView {
         setActiveProvider(value);
         this.values.set(key, value);
 
+        // Reset cached provider manager so LLM calls use the new provider
+        const { resetGlobalProviderManager } = await import("../../providers/provider-factory.js");
+        resetGlobalProviderManager();
+
         // Reset model to default for the new provider
         const defaultModel = DEFAULT_MODELS[value] ?? "";
         this.values.set("model", defaultModel);
@@ -459,12 +464,14 @@ export class SettingsView extends InteractiveView {
         } else {
           this.goToField("model", true);
         }
-        // Skip the health check below since we'll do it after apikey/model
         return;
       } else if (key === "model") {
         // Write through unified provider-config
         setActiveModel(value);
         this.values.set(key, value);
+        // Reset cached provider manager so LLM calls use the new model
+        const { resetGlobalProviderManager } = await import("../../providers/provider-factory.js");
+        resetGlobalProviderManager();
       } else if (key === "apikey") {
         // Write to providers[] entry in global config via registry
         const provider = this.values.get("provider");

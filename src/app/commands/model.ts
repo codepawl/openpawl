@@ -5,6 +5,8 @@
  */
 import type { SlashCommand } from "../../tui/index.js";
 import { ModelView } from "../interactive/model-view.js";
+import { DOT_SYMBOL } from "../../tui/components/status-indicator.js";
+import { ICONS } from "../../tui/constants/icons.js";
 
 export function createModelCommand(): SlashCommand {
   return {
@@ -20,7 +22,7 @@ export function createModelCommand(): SlashCommand {
       if (sub === "refresh") {
         const { invalidateModelCache } = await import("../../providers/model-discovery.js");
         invalidateModelCache();
-        ctx.addMessage("system", "\u2713 Model cache cleared. Next /model will re-discover.");
+        ctx.addMessage("system", `${ICONS.success} Model cache cleared. Next /model will re-discover.`);
         return;
       }
 
@@ -35,7 +37,7 @@ export function createModelCommand(): SlashCommand {
             async (model) => {
               const { setActiveModel } = await import("../../core/provider-config.js");
               setActiveModel(model);
-              ctx.addMessage("system", `\u2713 Switched to ${model}`);
+              ctx.addMessage("system", `${ICONS.success} Switched to ${model}`);
             },
             () => { /* closed */ },
           );
@@ -47,12 +49,12 @@ export function createModelCommand(): SlashCommand {
         const { discoverModels, getCurrentModel } = await import("../../providers/model-discovery.js");
         const result = await discoverModels();
         const current = getCurrentModel();
-        const lines: string[] = ["\u26a1 Models", ""];
+        const lines: string[] = [`${ICONS.bolt} Models`, ""];
 
         // Available models grouped by provider
         const available = result.models.filter((m) => m.status === "available");
         if (available.length > 0) {
-          lines.push("  \u25cf Available:");
+          lines.push(`  ${DOT_SYMBOL.filled} Available:`);
           let lastProvider = "";
           for (const m of available) {
             if (m.provider !== lastProvider) {
@@ -68,7 +70,7 @@ export function createModelCommand(): SlashCommand {
         const notConfigured = result.providers.filter((p) => p.status === "not_configured" || p.modelCount === 0);
         if (notConfigured.length > 0) {
           lines.push("");
-          lines.push("  \u25cb Not configured:");
+          lines.push(`  ${DOT_SYMBOL.empty} Not configured:`);
           for (const p of notConfigured) {
             lines.push(`    ${p.name}  /settings to add`);
           }
@@ -111,7 +113,7 @@ export function createModelCommand(): SlashCommand {
       setActiveModel(match.model);
 
       const via = match.provider !== modelName ? ` via ${match.provider}` : "";
-      ctx.addMessage("system", `\u2713 Switched to ${match.model}${via}`);
+      ctx.addMessage("system", `${ICONS.success} Switched to ${match.model}${via}`);
     },
   };
 }

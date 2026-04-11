@@ -13,6 +13,7 @@ import { InteractiveView } from "./base-view.js";
 import { renderPanel } from "../../tui/components/panel.js";
 import { ScrollableFilterList } from "../../tui/components/scrollable-filter-list.js";
 import { handleTextInput } from "../../tui/components/input-handler.js";
+import { ICONS } from "../../tui/constants/icons.js";
 import { detectProviders } from "../../providers/detect.js";
 import { getProviderMeta } from "../../providers/provider-catalog.js";
 import { getProviderRegistry } from "../../providers/provider-registry.js";
@@ -73,7 +74,7 @@ export class SetupWizardView extends InteractiveView {
     this.modelList = new ScrollableFilterList<string>({
       renderItem: (model, _index, selected) => {
         const t = this.theme;
-        const cursor = selected ? t.primary("\u25b8") : t.dim("\u2502");
+        const cursor = selected ? t.primary(ICONS.cursor) : t.dim("\u2502");
         return `  ${cursor} ${selected ? t.bold(model) : model}`;
       },
       filterFn: (model, query) => model.toLowerCase().includes(query.toLowerCase()),
@@ -165,11 +166,11 @@ export class SetupWizardView extends InteractiveView {
 
   protected override getPanelFooter(): string {
     switch (this.step) {
-      case WizardStep.PROVIDER: return this.loading ? "Scanning..." : "↑↓ navigate · Enter select · Type to filter · Esc close";
+      case WizardStep.PROVIDER: return this.loading ? "Scanning..." : `${ICONS.arrowUp}${ICONS.arrowDown} navigate · Enter select · Type to filter · Esc close`;
       case WizardStep.DEVICE_AUTH: return "Waiting for authorization... · Esc cancel";
       case WizardStep.OAUTH_AUTH: return "Waiting for browser login... · Esc cancel";
       case WizardStep.API_KEY: return "Type key, Enter to validate · Esc back";
-      case WizardStep.MODEL: return "↑↓ navigate · Enter select · Type to filter · Esc back";
+      case WizardStep.MODEL: return `${ICONS.arrowUp}${ICONS.arrowDown} navigate · Enter select · Type to filter · Esc back`;
       case WizardStep.CONFIRM: return "Enter save · Esc back";
     }
   }
@@ -313,10 +314,10 @@ export class SetupWizardView extends InteractiveView {
       lines.push(`  ${"─".repeat(40)}`);
     }
 
-    const cursor = selected ? t.primary("\u25b8") : t.dim("\u2502");
+    const cursor = selected ? t.primary(ICONS.cursor) : t.dim("\u2502");
     const hint = item.hint ? t.dim(` \u2014 ${item.hint}`) : "";
     if (item.detected) {
-      lines.push(`  ${cursor} ${t.success("\u2713")} ${selected ? t.bold(item.label) : item.label}${hint}`);
+      lines.push(`  ${cursor} ${t.success(ICONS.success)} ${selected ? t.bold(item.label) : item.label}${hint}`);
     } else {
       lines.push(`  ${cursor}   ${selected ? t.bold(item.label) : item.label}${hint}`);
     }
@@ -440,7 +441,7 @@ export class SetupWizardView extends InteractiveView {
       lines.push("");
       lines.push(`  ${t.dim("Waiting for authorization...")}`);
     } else if (this.deviceError) {
-      lines.push(`  ${t.error("✗ " + this.deviceError)}`);
+      lines.push(`  ${t.error(ICONS.error + " " + this.deviceError)}`);
       lines.push("");
       lines.push(`  ${t.dim("Press Esc to go back")}`);
     }
@@ -509,7 +510,7 @@ export class SetupWizardView extends InteractiveView {
     if (this.loading) {
       lines.push(`  ${t.dim(this.loadingText)}`);
     } else if (this.oauthError) {
-      lines.push(`  ${t.error("✗ " + this.oauthError)}`);
+      lines.push(`  ${t.error(ICONS.error + " " + this.oauthError)}`);
       lines.push("");
       lines.push(`  ${t.dim("Press Esc to go back")}`);
     } else {
@@ -628,7 +629,7 @@ export class SetupWizardView extends InteractiveView {
     lines.push("");
 
     if (this.envKeySource) {
-      lines.push(`  ${t.success("✓")} API key found in environment`);
+      lines.push(`  ${t.success(ICONS.success)} API key found in environment`);
       lines.push(`    ${t.dim("Source:")} ${t.bold(this.envKeySource)}`);
       lines.push(`    ${t.dim("Value:")}  ${maskCredential(this.apiKey)}`);
       lines.push("");
@@ -645,16 +646,16 @@ export class SetupWizardView extends InteractiveView {
         lines.push(`  ${t.dim("Get one at:")} ${t.primary(meta.keyUrl)}`);
       }
       lines.push("");
-      const display = "•".repeat(this.editBuffer.length);
+      const display = ICONS.bullet.repeat(this.editBuffer.length);
       const before = display.slice(0, this.editCursor);
       const after = display.slice(this.editCursor);
-      lines.push(`  ${t.dim("Key:")} ${before}${t.primary("█")}${after}`);
+      lines.push(`  ${t.dim("Key:")} ${before}${t.primary(ICONS.block)}${after}`);
       lines.push(`        ${t.dim("(input is masked)")}`);
     }
 
     if (this.validationError) {
       lines.push("");
-      lines.push(`  ${t.error("✗ " + this.validationError)}`);
+      lines.push(`  ${t.error(ICONS.error + " " + this.validationError)}`);
     }
 
     lines.push("");
@@ -782,9 +783,9 @@ export class SetupWizardView extends InteractiveView {
     lines.push("");
 
     if (this.healthLatency > 0) {
-      lines.push(`  ${t.success("✓")} Connection verified (${this.healthLatency}ms)`);
+      lines.push(`  ${t.success(ICONS.success)} Connection verified (${this.healthLatency}ms)`);
       if (this.validationWarning) {
-        lines.push(`  ${t.warning("⚠")} ${this.validationWarning}`);
+        lines.push(`  ${t.warning(ICONS.warning)} ${this.validationWarning}`);
       }
     } else {
       lines.push(`  ${t.dim("Connection will be verified on first use")}`);

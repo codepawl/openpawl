@@ -5,6 +5,7 @@
 import type { KeyEvent } from "../../tui/core/input.js";
 import type { TUI } from "../../tui/core/tui.js";
 import { InteractiveView } from "./base-view.js";
+import { ICONS } from "../../tui/constants/icons.js";
 
 interface ModeOption {
   name: string;
@@ -49,8 +50,8 @@ export class ModeView extends InteractiveView {
     return true;
   }
 
-  protected override getPanelTitle(): string { return "\u26a1 Execution Mode"; }
-  protected override getPanelFooter(): string { return "\u2191\u2193 navigate \u00b7 Enter select \u00b7 Esc close"; }
+  protected override getPanelTitle(): string { return `${ICONS.bolt} Execution Mode`; }
+  protected override getPanelFooter(): string { return `${ICONS.arrowUp}${ICONS.arrowDown} navigate \u00b7 Enter select \u00b7 Esc close`; }
 
   protected renderLines(): string[] {
     const t = this.theme;
@@ -60,7 +61,7 @@ export class ModeView extends InteractiveView {
       const mode = MODES[i]!;
       const isSelected = i === this.selectedIndex;
       const isCurrent = mode.name === this.currentMode;
-      const cursor = isSelected ? t.primary("\u25b8 ") : "  ";
+      const cursor = isSelected ? t.primary(`${ICONS.cursor} `) : "  ";
       const name = mode.name.padEnd(14);
       const current = isCurrent ? t.success("(current)") : "";
 

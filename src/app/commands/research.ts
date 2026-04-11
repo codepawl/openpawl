@@ -10,7 +10,8 @@
  *   /research report            Show final report
  */
 import type { SlashCommand, CommandContext } from "../../tui/index.js";
-import { ctp } from "../../tui/themes/default.js";
+import { defaultTheme } from "../../tui/themes/default.js";
+import { ICONS } from "../../tui/constants/icons.js";
 import type { ResearchRunner } from "../../research/runner.js";
 import type { ResearchConfig } from "../../research/types.js";
 
@@ -79,14 +80,14 @@ async function startResearch(description: string, ctx: CommandContext): Promise<
   };
 
   ctx.addMessage("system", [
-    ctp.blue(`Starting research: ${description}`),
+    defaultTheme.info(`Starting research: ${description}`),
     "",
     `  Metric: ${config.metric.command}`,
     `  Scope: ${config.change.scope.join(", ")}`,
     `  Max iterations: ${config.constraints.maxIterations}`,
     `  Branch: research/${config.name.replace(/[^a-zA-Z0-9-]/g, "-").toLowerCase()}`,
     "",
-    ctp.overlay0("Use /research status, /research pause, /research stop"),
+    defaultTheme.dim("Use /research status, /research pause, /research stop"),
   ].join("\n"));
   ctx.requestRender();
 
@@ -96,15 +97,15 @@ async function startResearch(description: string, ctx: CommandContext): Promise<
     activeRunner = new ResearchRunner(config, (event) => {
       switch (event.type) {
         case "started":
-          ctx.addMessage("system", ctp.green(`Baseline: ${event.baseline}`));
+          ctx.addMessage("system", defaultTheme.success(`Baseline: ${event.baseline}`));
           ctx.requestRender();
           break;
         case "iteration_end": {
           const it = event.iteration;
-          const icon = it.kept ? ctp.green("✓") : ctp.red("✗");
+          const icon = it.kept ? defaultTheme.success(ICONS.success) : defaultTheme.error(ICONS.error);
           const delta = it.delta > 0 ? `+${it.delta}` : String(it.delta);
           ctx.addMessage("system",
-            `${icon} #${it.index}: ${it.description} (${it.scoreBefore}→${it.scoreAfter}, ${delta})`,
+            `${icon} #${it.index}: ${it.description} (${it.scoreBefore}${ICONS.arrow}${it.scoreAfter}, ${delta})`,
           );
           ctx.requestRender();
           break;
@@ -113,12 +114,12 @@ async function startResearch(description: string, ctx: CommandContext): Promise<
         case "stopped": {
           const r = event.result;
           ctx.addMessage("system", [
-            ctp.blue("── Research Complete ──"),
-            `Baseline: ${r.baseline} → Final: ${r.finalScore}`,
+            defaultTheme.info("── Research Complete ──"),
+            `Baseline: ${r.baseline} ${ICONS.arrow} Final: ${r.finalScore}`,
             `Iterations: ${r.totalIterations} (${r.keptChanges} kept, ${r.revertedChanges} reverted)`,
             `Duration: ${Math.round(r.durationMs / 60_000)}m`,
             "",
-            ctp.overlay0("Use /research report for full details"),
+            defaultTheme.dim("Use /research report for full details"),
           ].join("\n"));
           ctx.requestRender();
           activeRunner = null;
@@ -154,7 +155,7 @@ function showStatus(ctx: CommandContext): void {
   const improvement = state.bestScore - state.baseline;
 
   ctx.addMessage("system", [
-    ctp.blue(`── Research: ${state.config.name} ──`),
+    defaultTheme.info(`── Research: ${state.config.name} ──`),
     `Status: ${state.status}`,
     `Branch: ${state.branch}`,
     `Baseline: ${state.baseline} → Best: ${state.bestScore} (${improvement > 0 ? "+" : ""}${improvement})`,
@@ -170,7 +171,7 @@ function pauseResearch(ctx: CommandContext): void {
     return;
   }
   activeRunner.pause();
-  ctx.addMessage("system", ctp.yellow("Research paused. Use /research resume to continue."));
+  ctx.addMessage("system", defaultTheme.warning("Research paused. Use /research resume to continue."));
 }
 
 function resumeResearch(ctx: CommandContext): void {
@@ -179,7 +180,7 @@ function resumeResearch(ctx: CommandContext): void {
     return;
   }
   activeRunner.resume();
-  ctx.addMessage("system", ctp.green("Research resumed."));
+  ctx.addMessage("system", defaultTheme.success("Research resumed."));
 }
 
 function stopResearch(ctx: CommandContext): void {

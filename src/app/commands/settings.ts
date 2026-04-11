@@ -104,6 +104,7 @@ async function updateSetting(key: string, value: string, ctx: { addMessage: (rol
   if ("error" in result) {
     ctx.addMessage("error", result.error);
   } else {
-    ctx.addMessage("system", `\u2713 ${key} updated to ${maskSensitive(key, value)} (${result.source})`);
+    const { ICONS } = await import("../../tui/constants/icons.js");
+    ctx.addMessage("system", `${ICONS.success} ${key} updated to ${maskSensitive(key, value)} (${result.source})`);
   }
 }

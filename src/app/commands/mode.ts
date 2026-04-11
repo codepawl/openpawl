@@ -5,6 +5,7 @@
  */
 import type { SlashCommand } from "../../tui/index.js";
 import { ModeView } from "../interactive/mode-view.js";
+import { ICONS } from "../../tui/constants/icons.js";
 
 const VALID_MODES = ["auto", "ask", "build", "brainstorm", "loop-hell"];
 
@@ -30,7 +31,7 @@ export function createModeCommand(): SlashCommand {
               if ("error" in result) {
                 ctx.addMessage("error", result.error);
               } else {
-                ctx.addMessage("system", `\u2713 Mode switched to ${mode}`);
+                ctx.addMessage("system", `${ICONS.success} Mode switched to ${mode}`);
               }
             },
             () => { /* closed */ },
@@ -65,7 +66,7 @@ export function createModeCommand(): SlashCommand {
       if ("error" in result) {
         ctx.addMessage("error", result.error);
       } else {
-        ctx.addMessage("system", `\u2713 Mode switched to ${mode}`);
+        ctx.addMessage("system", `${ICONS.success} Mode switched to ${mode}`);
       }
     },
   };

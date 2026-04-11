@@ -7,8 +7,9 @@ import type { TUI } from "../../tui/core/tui.js";
 import { InteractiveView } from "./base-view.js";
 import { SettingsView } from "./settings-view.js";
 import { discoverModels, getCurrentModel, type DiscoveredModel, type ProviderStatus } from "../../providers/model-discovery.js";
-import { ctp } from "../../tui/themes/default.js";
 import { ScrollableFilterList } from "../../tui/components/scrollable-filter-list.js";
+import { statusDot, createSpinner, type InlineSpinner } from "../../tui/components/status-indicator.js";
+import { ICONS } from "../../tui/constants/icons.js";
 
 interface ModelItem {
   model: DiscoveredModel;
@@ -23,6 +24,7 @@ export class ModelView extends InteractiveView {
   private providerStatuses: ProviderStatus[] = [];
   private loading = true;
   private list: ScrollableFilterList<ModelItem>;
+  private spinner: InlineSpinner | null = null;
 
   constructor(tui: TUI, currentModel: string, onSelect: (model: string) => void, onClose: () => void) {
     super(tui, onClose);
@@ -47,8 +49,15 @@ export class ModelView extends InteractiveView {
     void this.loadModels();
   }
 
+  override deactivate(): void {
+    this.spinner?.stop();
+    this.spinner = null;
+    super.deactivate();
+  }
+
   private async loadModels(forceRefresh = false): Promise<void> {
     this.loading = true;
+    this.spinner = createSpinner();
     this.render();
 
     const result = await discoverModels(forceRefresh);
@@ -67,6 +76,8 @@ export class ModelView extends InteractiveView {
     }
 
     this.loading = false;
+    this.spinner?.stop();
+    this.spinner = null;
     this.render();
   }
 
@@ -108,18 +119,35 @@ export class ModelView extends InteractiveView {
     return true;
   }
 
-  protected override getPanelTitle(): string { return "\u26a1 Models"; }
-  protected override getPanelFooter(): string { return "\u2191\u2193 navigate \u00b7 Enter select \u00b7 r refresh \u00b7 Type to filter \u00b7 Esc close"; }
+  protected override getPanelTitle(): string { return `${ICONS.bolt} Models`; }
+  protected override getPanelFooter(): string { return `${ICONS.arrowUp}${ICONS.arrowDown} navigate \u00b7 Enter select \u00b7 r refresh \u00b7 Type to filter \u00b7 Esc close`; }
 
-  private renderModelItem(item: ModelItem, _index: number, selected: boolean): string[] {
+  private renderModelItem(item: ModelItem, index: number, selected: boolean): string[] {
     const t = this.theme;
     const m = item.model;
+    const lines: string[] = [];
+
+    // Provider group header when provider changes
+    const filtered = this.list.getFilteredItems(this.filterText);
+    const prev = index > 0 ? filtered[index - 1] : undefined;
+    if (!prev || prev.model.provider !== m.provider) {
+      if (index > 0) lines.push(""); // spacer between groups
+      const providerStatus = this.providerStatuses.find((p) => p.id === m.provider);
+      const activeTag = providerStatus?.isActive ? t.success(` ${ICONS.success} active`) : "";
+      const dotKind = providerStatus?.status === "connected" ? "active" as const
+        : providerStatus?.status === "configured" ? "configured" as const
+        : "unconfigured" as const;
+      const statusIcon = statusDot(dotKind);
+      lines.push(`    ${statusIcon} ${t.secondary(m.provider)}${activeTag}`);
+    }
+
     const isCurrent = m.model === this.currentModel;
-    const cursor = selected ? ctp.mauve("\u25b8 ") : "  ";
-    const current = isCurrent ? ctp.green("  \u2190 current") : "";
+    const cursor = selected ? t.primary(`${ICONS.cursor} `) : "  ";
+    const current = isCurrent ? t.success("  \u2190 current") : "";
     const ctxInfo = m.contextWindow ? t.dim(` ${Math.round(m.contextWindow / 1000)}k ctx`) : "";
     const label = selected ? t.bold(m.displayName) : m.displayName;
-    return [`      ${cursor}${label}${ctxInfo}${current}`];
+    lines.push(`      ${cursor}${label}${ctxInfo}${current}`);
+    return lines;
   }
 
   protected renderLines(): string[] {
@@ -127,19 +155,20 @@ export class ModelView extends InteractiveView {
     const lines: string[] = [];
 
     if (this.loading) {
-      lines.push(`    ${ctp.teal("\u25d0")} Discovering available models...`);
+      const spin = this.spinner?.frame() ?? statusDot("connecting");
+      lines.push(`    ${spin} Discovering available models...`);
       lines.push("");
       return lines;
     }
 
     if (this.items.length === 0) {
-      lines.push(`    ${ctp.overlay1("No models available.")}`);
+      lines.push(`    ${t.muted("No models available.")}`);
       lines.push("");
       const addSelected = this.isAddProviderSelected();
-      const addCursor = addSelected ? ctp.mauve("\u25b8 ") : "  ";
+      const addCursor = addSelected ? t.primary(`${ICONS.cursor} `) : "  ";
       const addLabel = addSelected
-        ? t.bold(ctp.overlay1("+ Add provider..."))
-        : ctp.overlay0("+ Add provider...");
+        ? t.bold(t.muted("+ Add provider..."))
+        : t.dim("+ Add provider...");
       lines.push(`      ${addCursor}${addLabel}`);
       lines.push("");
       return lines;
@@ -154,27 +183,27 @@ export class ModelView extends InteractiveView {
     });
     lines.push(...listLines);
 
-    // Show unconfigured providers
-    const unconfigured = this.providerStatuses.filter((p) => p.status === "not_configured" || (p.modelCount === 0 && p.status !== "connected"));
+    // Show unconfigured providers (only those not in config at all)
+    const unconfigured = this.providerStatuses.filter((p) => p.status === "not_configured");
     if (unconfigured.length > 0) {
       lines.push("");
-      lines.push(`    ${ctp.overlay0("Not configured:")}`);
+      lines.push(`    ${t.dim("Not configured:")}`);
       for (const p of unconfigured) {
-        lines.push(`      ${ctp.surface2("\u25cb")} ${ctp.overlay0(p.name)}  ${ctp.overlay0("/settings to add")}`);
+        lines.push(`      ${statusDot("unconfigured")} ${t.dim(p.name)}  ${t.dim("/settings to add")}`);
       }
     }
 
     // "Add provider..." action item
     lines.push("");
     const addSelected = this.isAddProviderSelected();
-    const addCursor = addSelected ? ctp.mauve("\u25b8 ") : "  ";
+    const addCursor = addSelected ? t.primary(`${ICONS.cursor} `) : "  ";
     const addLabel = addSelected
-      ? t.bold(ctp.overlay1("+ Add provider..."))
-      : ctp.overlay0("+ Add provider...");
+      ? t.bold(t.muted("+ Add provider..."))
+      : t.dim("+ Add provider...");
     lines.push(`      ${addCursor}${addLabel}`);
 
     lines.push("");
-    lines.push(ctp.overlay0("    /model <name> for any model \u00b7 /settings to add providers"));
+    lines.push(t.dim("    /model <name> for any model \u00b7 /settings to add providers"));
     lines.push("");
     return lines;
   }
