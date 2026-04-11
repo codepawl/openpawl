@@ -102,8 +102,17 @@ export async function callLLM(
   }
   finishTotal();
 
+  const text = chunks.join("");
+  // Estimate tokens if provider didn't return usage (e.g. ollama streaming)
+  if (usage.input === 0 && usage.output === 0 && text.length > 0) {
+    usage = {
+      input: Math.ceil((prompt.length + (effectiveSystemPrompt?.length ?? 0)) / 4),
+      output: Math.ceil(text.length / 4),
+    };
+  }
+
   return {
-    text: chunks.join(""),
+    text,
     toolCalls: [],
     usage,
   };
@@ -212,6 +221,16 @@ export async function callLLMWithMessages(
   finishTotal();
 
   const text = chunks.join("");
+
+  // Estimate tokens if provider didn't return usage (e.g. ollama streaming)
+  if (usage.input === 0 && usage.output === 0 && (text.length > 0 || chatMessages.length > 0)) {
+    let inputChars = (effectiveSystemPrompt?.length ?? 0);
+    for (const m of chatMessages) inputChars += (m.content?.length ?? 0);
+    usage = {
+      input: Math.ceil(inputChars / 4),
+      output: Math.ceil(text.length / 4),
+    };
+  }
 
   // Prefer native tool calls from provider, fallback to text parsing
   let toolCalls: ToolCall[] = [];

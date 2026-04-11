@@ -4,6 +4,7 @@
  */
 
 import pc from "picocolors";
+import { ICONS } from "../tui/constants/icons.js";
 import { logger } from "../core/logger.js";
 import { isCancel, select, text } from "@clack/prompts";
 import type { ThinkSession, ThinkRecommendation, ThinkRound } from "../think/types.js";
@@ -17,10 +18,10 @@ function renderRecommendation(rec: ThinkRecommendation): void {
   logger.plain(`  ${rec.reasoning}`);
   logger.plain(`${pc.bold("Tradeoffs:")}`);
   for (const pro of rec.tradeoffs.pros) {
-    logger.plain(`  ${pc.green("✓")} ${pro}`);
+    logger.plain(`  ${pc.green(ICONS.success)} ${pro}`);
   }
   for (const con of rec.tradeoffs.cons) {
-    logger.plain(`  ${pc.red("✗")} ${con}`);
+    logger.plain(`  ${pc.red(ICONS.error)} ${con}`);
   }
   logger.plain(pc.dim("━".repeat(55)));
 }

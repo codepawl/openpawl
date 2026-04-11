@@ -22,6 +22,7 @@ import type { ClassifierLLM } from "./intent-classifier.js";
 import { AgentResolver } from "./agent-resolver.js";
 import { Dispatcher } from "./dispatch-strategy.js";
 import type { AgentRunner } from "./dispatch-strategy.js";
+import { RouterEvent, DISPATCH_EVENTS } from "./event-types.js";
 import { parseMentions } from "./mention-parser.js";
 import type { SessionManager } from "../session/index.js";
 
@@ -92,11 +93,7 @@ export class PromptRouter extends EventEmitter {
     this.dispatcher = new Dispatcher(this.registry, agentRunner);
 
     // Forward dispatcher events
-    for (const event of [
-      "dispatch:start", "dispatch:agent:start", "dispatch:agent:token",
-      "dispatch:agent:tool", "dispatch:agent:done", "dispatch:done",
-      "dispatch:error", "dispatch:abort",
-    ]) {
+    for (const event of DISPATCH_EVENTS) {
       this.dispatcher.on(event, (...args: unknown[]) => {
         this.emit(event, ...args);
       });
@@ -186,7 +183,7 @@ export class PromptRouter extends EventEmitter {
 
     // 6. Show routing decision if debug mode
     if (this.config.showRoutingDecision) {
-      this.emit("router:decision", sessionId, decision, intent);
+      this.emit(RouterEvent.Decision, sessionId, decision, intent);
     }
 
     // 7. Confirmation gate
@@ -339,7 +336,7 @@ export class PromptRouter extends EventEmitter {
 
   private async handleClear(_sessionId: string): Promise<Result<string, RouterError>> {
     // The TUI layer will handle actual screen clearing
-    this.emit("command:clear");
+    this.emit(RouterEvent.CommandClear);
     return ok("Display cleared.");
   }
 
@@ -365,7 +362,7 @@ export class PromptRouter extends EventEmitter {
       return ok(`Context: ${before.estimatedTokens.toLocaleString()} tokens (${before.utilizationPercent}% — ${before.level}). No compaction needed.`);
     }
 
-    this.emit("command:compact");
+    this.emit(RouterEvent.CommandCompact);
     return ok([
       `Compacted: ${result.strategy}`,
       `  Before: ${result.beforeTokens.toLocaleString()} tokens`,
@@ -380,7 +377,7 @@ export class PromptRouter extends EventEmitter {
       return ok("Current model: (use provider default)\nUsage: /model <model-name>");
     }
     // Model switching would integrate with resolveModelForAgent
-    this.emit("command:model", args);
+    this.emit(RouterEvent.CommandModel, args);
     return ok(`Model switched to: ${args}`);
   }
 
@@ -395,7 +392,7 @@ export class PromptRouter extends EventEmitter {
 
   private async handleExport(_sessionId: string, args: string): Promise<Result<string, RouterError>> {
     const exportPath = args || "session-export.md";
-    this.emit("command:export", exportPath);
+    this.emit(RouterEvent.CommandExport, exportPath);
     return ok(`Session export requested: ${exportPath}`);
   }
 

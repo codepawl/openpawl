@@ -3,6 +3,7 @@
  * via callLLMMultiTurn. Keeps SprintRunner itself testable (no LLM dep).
  */
 import { SprintRunner } from "./sprint-runner.js";
+import { SprintEvent } from "../router/event-types.js";
 import { callLLMMultiTurn } from "../engine/llm.js";
 import { getProjectContext } from "../context/project-context.js";
 import type { AgentRegistry } from "../router/agent-registry.js";
@@ -62,7 +63,7 @@ export function createSprintRunner(opts: CreateSprintRunnerOptions): SprintRunne
           const startTime = Date.now();
 
           this.recordToolCall(name);
-          this.emit("sprint:agent:tool", {
+          this.emit(SprintEvent.AgentTool, {
             agentName,
             toolName: name,
             status: "running",
@@ -79,7 +80,7 @@ export function createSprintRunner(opts: CreateSprintRunnerOptions): SprintRunne
           const duration = Date.now() - startTime;
 
           if (result.isOk()) {
-            this.emit("sprint:agent:tool", {
+            this.emit(SprintEvent.AgentTool, {
               agentName,
               toolName: name,
               status: "completed",
@@ -89,7 +90,7 @@ export function createSprintRunner(opts: CreateSprintRunnerOptions): SprintRunne
           }
 
           const errMsg = `${result.error.type} — ${result.error.toolName}`;
-          this.emit("sprint:agent:tool", {
+          this.emit(SprintEvent.AgentTool, {
             agentName,
             toolName: name,
             status: "failed",
@@ -98,7 +99,7 @@ export function createSprintRunner(opts: CreateSprintRunnerOptions): SprintRunne
           return `Error: ${errMsg}`;
         },
         onChunk: (token) => {
-          this.emit("sprint:agent:token", { agentName, token });
+          this.emit(SprintEvent.AgentToken, { agentName, token });
         },
         signal: runOpts.signal,
         maxTurns: 10,

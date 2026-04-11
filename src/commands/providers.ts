@@ -30,9 +30,11 @@ import { handleCancel } from "../onboard/setup-flow.js";
 import { getGlobalProviderManager } from "../providers/provider-factory.js";
 import { logger } from "../core/logger.js";
 import pc from "picocolors";
+import { ICONS } from "../tui/constants/icons.js";
 import { fetchModelsForProvider } from "../providers/model-fetcher.js";
 import { getCachedModels, setCachedModels } from "../providers/model-cache.js";
 import { detectProviders } from "../providers/detect.js";
+import { DOT_SYMBOL } from "../tui/components/status-indicator.js";
 
 export async function runProvidersCommand(args: string[]): Promise<void> {
   const sub = args[0];
@@ -98,11 +100,11 @@ export async function listProviders(): Promise<void> {
 
       let status: string;
       if (isActive) {
-        status = pc.green("\u25cf active");
+        status = pc.green(`${DOT_SYMBOL.filled} active`);
       } else if (hasKey || noKeyNeeded) {
-        status = pc.dim("\u25cb configured");
+        status = pc.dim(`${DOT_SYMBOL.empty} configured`);
       } else {
-        status = pc.yellow("\u25cb no API key");
+        status = pc.yellow(`${DOT_SYMBOL.empty} no API key`);
       }
 
       logger.plain(`  ${name} ${type} ${model} ${status}`);
@@ -118,8 +120,8 @@ export async function listProviders(): Promise<void> {
       const model = "(none)".padEnd(18);
       const isActive = ep.type === activeProvider;
       const status = isActive
-        ? pc.green("\u25cf active (env)")
-        : pc.dim("\u25cb from env");
+        ? pc.green(`${DOT_SYMBOL.filled} active (env)`)
+        : pc.dim(`${DOT_SYMBOL.empty} from env`);
       logger.plain(`  ${name} ${type} ${model} ${status}`);
     }
   }
@@ -158,9 +160,9 @@ async function testProviders(): Promise<void> {
 
     if (ok) {
       healthy++;
-      logger.plain(`  ${pc.green("✓")} ${pc.bold(provider.name)}  connected (${latency}ms)`);
+      logger.plain(`  ${pc.green(ICONS.success)} ${pc.bold(provider.name)}  connected (${latency}ms)`);
     } else {
-      logger.plain(`  ${pc.red("✗")} ${pc.bold(provider.name)}  unreachable`);
+      logger.plain(`  ${pc.red(ICONS.error)} ${pc.bold(provider.name)}  unreachable`);
     }
   }
 
@@ -204,7 +206,7 @@ async function removeProvider(args: string[]): Promise<void> {
   }
 
   getProviderRegistry().removeConfig(entry.type);
-  logger.plain(`${pc.green("\u2713")} Provider ${pc.bold(entry.name ?? entry.type)} removed.`);
+  logger.plain(`${pc.green(ICONS.success)} Provider ${pc.bold(entry.name ?? entry.type)} removed.`);
 }
 
 // ── Add provider ─────────────────────────────────────────────────────────
@@ -371,7 +373,7 @@ export async function addProvider(args: string[]): Promise<void> {
     }
   }
 
-  logger.plain(`\n${pc.green("\u2713")} Provider ${pc.bold(meta.name)} added successfully.`);
+  logger.plain(`\n${pc.green(ICONS.success)} Provider ${pc.bold(meta.name)} added successfully.`);
   if (entry.model) logger.plain(`  Model: ${entry.model}`);
   logger.plain(pc.dim("  Run: openpawl providers test"));
 }

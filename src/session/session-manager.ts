@@ -7,6 +7,7 @@
 
 import { EventEmitter } from "node:events";
 import { Result, ok, err } from "neverthrow";
+import { SessionEvent } from "../router/event-types.js";
 import type {
   SessionStatus,
   SessionMessage,
@@ -88,7 +89,7 @@ export class SessionManager extends EventEmitter {
       // Run crash recovery (best-effort)
       const { recovered } = await this.recovery.recoverAll();
       for (const id of recovered) {
-        this.emit("session:recovered", id);
+        this.emit(SessionEvent.Recovered, id);
       }
 
       // Start periodic checkpoint
@@ -154,7 +155,7 @@ export class SessionManager extends EventEmitter {
     const saveResult = await this.store.save(session);
     if (saveResult.isErr()) return err(saveResult.error);
 
-    this.emit("session:created", session.id);
+    this.emit(SessionEvent.Created, session.id);
     return ok(session);
   }
 
@@ -177,7 +178,7 @@ export class SessionManager extends EventEmitter {
     const saveResult = await this.store.save(session);
     if (saveResult.isErr()) return err(saveResult.error);
 
-    this.emit("session:resumed", session.id);
+    this.emit(SessionEvent.Resumed, session.id);
     return ok(session);
   }
 
@@ -209,7 +210,7 @@ export class SessionManager extends EventEmitter {
       await this.store.saveCheckpoint(session);
       this.activeSessions.delete(sessionId);
       this.clearIdleTimer(sessionId);
-      this.emit("session:archived", sessionId);
+      this.emit(SessionEvent.Archived, sessionId);
       return ok(undefined);
     }
 
@@ -222,7 +223,7 @@ export class SessionManager extends EventEmitter {
     const saveResult = await this.store.save(loaded);
     if (saveResult.isErr()) return err(saveResult.error);
 
-    this.emit("session:archived", sessionId);
+    this.emit(SessionEvent.Archived, sessionId);
     return ok(undefined);
   }
 
@@ -268,7 +269,7 @@ export class SessionManager extends EventEmitter {
 
     const message = session.addMessage({ role: "user", content });
     this.resetIdleTimer(sessionId);
-    this.emit("message:added", sessionId, message);
+    this.emit(SessionEvent.MessageAdded, sessionId, message);
     return ok(message);
   }
 
@@ -282,7 +283,7 @@ export class SessionManager extends EventEmitter {
 
     const message = session.addMessage({ role: "assistant", content, agentId });
     this.resetIdleTimer(sessionId);
-    this.emit("message:added", sessionId, message);
+    this.emit(SessionEvent.MessageAdded, sessionId, message);
     return ok(message);
   }
 
@@ -295,7 +296,7 @@ export class SessionManager extends EventEmitter {
         await this.store.save(session);
         await this.store.saveCheckpoint(session);
         session.markClean();
-        this.emit("checkpoint:saved", id);
+        this.emit(SessionEvent.CheckpointSaved, id);
       }
     }
   }
@@ -307,7 +308,7 @@ export class SessionManager extends EventEmitter {
       const session = this.activeSessions.get(sessionId);
       if (session && session.status === "active") {
         session.setStatus("idle");
-        this.emit("session:idle", sessionId);
+        this.emit(SessionEvent.Idle, sessionId);
       }
     }, this.config.idleTimeoutMinutes * 60_000);
 

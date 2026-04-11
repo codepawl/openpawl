@@ -3,6 +3,7 @@
  */
 
 import type { ResearchResult } from "./types.js";
+import { ICONS } from "../tui/constants/icons.js";
 
 export function generateReport(result: ResearchResult): string {
   const durationMin = Math.round(result.durationMs / 60_000);
@@ -24,9 +25,9 @@ export function generateReport(result: ResearchResult): string {
   ];
 
   for (const it of result.iterations) {
-    const status = it.kept ? "✓" : "✗";
+    const status = it.kept ? ICONS.success : ICONS.error;
     const delta = it.delta > 0 ? `+${it.delta}` : String(it.delta);
-    lines.push(`${status} #${it.index}: ${it.description} (${it.scoreBefore}→${it.scoreAfter}, ${delta})`);
+    lines.push(`${status} #${it.index}: ${it.description} (${it.scoreBefore}${ICONS.arrow}${it.scoreAfter}, ${delta})`);
     if (it.reason) lines.push(`  Reason: ${it.reason}`);
   }
 

@@ -18,6 +18,7 @@ import type {
   RouterError,
 } from "./router-types.js";
 import { AgentRegistry } from "./agent-registry.js";
+import { RouterEvent } from "./event-types.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -67,7 +68,7 @@ export class Dispatcher extends EventEmitter {
 
   /** Expose the emitter so the LLM runner can emit token events during streaming. */
   emitToken(agentId: string, token: string): void {
-    this.emit("dispatch:agent:token", this.currentSessionId, agentId, token);
+    this.emit(RouterEvent.AgentToken, this.currentSessionId, agentId, token);
   }
 
   async dispatch(
@@ -78,7 +79,7 @@ export class Dispatcher extends EventEmitter {
   ): Promise<Result<DispatchResult, RouterError>> {
     this.currentSessionId = sessionId;
     this.currentSessionHistory = sessionHistory ?? [];
-    this.emit("dispatch:start", sessionId, decision);
+    this.emit(RouterEvent.Start, sessionId, decision);
 
     const finishPipeline = profileStart("total_pipeline", `dispatch_${decision.strategy}`, { agents: decision.agents });
     const controller = new AbortController();
@@ -108,7 +109,7 @@ export class Dispatcher extends EventEmitter {
       }
 
       finishPipeline();
-      this.emit("dispatch:done", sessionId, result);
+      this.emit(RouterEvent.Done, sessionId, result);
       return ok(result);
     } catch (e) {
       finishPipeline();
@@ -117,7 +118,7 @@ export class Dispatcher extends EventEmitter {
         agentId: "unknown",
         cause: e instanceof Error ? e.message : String(e),
       };
-      this.emit("dispatch:error", sessionId, error);
+      this.emit(RouterEvent.Error, sessionId, error);
       return err(error);
     } finally {
       this.abortControllers.delete(sessionId);
@@ -128,7 +129,7 @@ export class Dispatcher extends EventEmitter {
     const controller = this.abortControllers.get(sessionId);
     if (controller) {
       controller.abort();
-      this.emit("dispatch:abort", sessionId);
+      this.emit(RouterEvent.Abort, sessionId);
     }
   }
 
@@ -262,7 +263,7 @@ export class Dispatcher extends EventEmitter {
       return makeFailedResult(assignment.agentId, `Agent "${assignment.agentId}" not found`);
     }
 
-    this.emit("dispatch:agent:start", sessionId, assignment.agentId);
+    this.emit(RouterEvent.AgentStart, sessionId, assignment.agentId);
 
     // Build full system prompt: identity prefix + agent-specific instructions
     const identity = buildIdentityPrefix(agent.name, assignment.model);
@@ -282,7 +283,7 @@ export class Dispatcher extends EventEmitter {
     );
     result.duration = Date.now() - startTime;
 
-    this.emit("dispatch:agent:done", sessionId, assignment.agentId, result);
+    this.emit(RouterEvent.AgentDone, sessionId, assignment.agentId, result);
     return result;
   }
 }

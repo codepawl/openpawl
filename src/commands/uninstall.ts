@@ -6,6 +6,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { execSync } from "node:child_process";
+import { ICONS } from "../tui/constants/icons.js";
 import { createInterface } from "node:readline";
 import pc from "picocolors";
 
@@ -72,7 +73,7 @@ export async function runUninstall(args: string[]): Promise<void> {
   // Remove ~/.openpawl/
   if (dirExists) {
     await rm(OPENPAWL_DIR, { recursive: true, force: true });
-    console.log(`  ${pc.green("✓")} Removed ${OPENPAWL_DIR}`);
+    console.log(`  ${pc.green(ICONS.success)} Removed ${OPENPAWL_DIR}`);
   }
 
   // Guide package removal

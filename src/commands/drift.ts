@@ -3,6 +3,7 @@
  */
 
 import pc from "picocolors";
+import { ICONS } from "../tui/constants/icons.js";
 import { logger } from "../core/logger.js";
 import { detectDrift } from "../drift/detector.js";
 import type { DriftResult } from "../drift/types.js";
@@ -33,11 +34,11 @@ async function loadDecisions(): Promise<import("../journal/types.js").Decision[]
 
 function renderDriftResult(result: DriftResult, verbose: boolean): void {
   if (!result.hasDrift) {
-    logger.plain(pc.green("✓ No conflicts with past decisions."));
+    logger.plain(pc.green(`${ICONS.success} No conflicts with past decisions.`));
     return;
   }
 
-  const icon = result.severity === "hard" ? "🚨" : "⚠";
+  const icon = result.severity === "hard" ? "🚨" : ICONS.warning;
   const label = result.severity === "hard" ? "Strong drift detected" : "Drift detected";
 
   logger.plain(

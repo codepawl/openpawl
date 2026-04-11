@@ -18,6 +18,7 @@ import { searchableSelect, clampSelectOptions } from "../../utils/searchable-sel
 import { fetchModelsForProvider } from "../../providers/model-fetcher.js";
 import { getCachedModels, setCachedModels } from "../../providers/model-cache.js";
 import { logger } from "../../core/logger.js";
+import { ICONS } from "../../tui/constants/icons.js";
 
 
 export interface WizardState {
@@ -163,7 +164,7 @@ async function promptProviderEntry(): Promise<ProviderConfigEntry> {
         if (!reachable) {
             console.log([
                 "",
-                `  ${pc.yellow("\u26a0")} Ollama is not running at ${entry.baseURL}`,
+                `  ${pc.yellow(ICONS.warning)} Ollama is not running at ${entry.baseURL}`,
                 "",
                 `  To install Ollama:`,
                 `    1. Download from: ${pc.green("https://ollama.ai/download")}`,
@@ -224,9 +225,9 @@ async function promptProviderEntry(): Promise<ProviderConfigEntry> {
         } else {
             const validation = validateApiKeyFormat(variant, apiKey.trim());
             if (validation.valid) {
-                console.log(`  ${pc.green("\u2713")} Key format looks good`);
+                console.log(`  ${pc.green(ICONS.success)} Key format looks good`);
             } else {
-                console.log(`  ${pc.yellow("\u26a0")} ${validation.hint}`);
+                console.log(`  ${pc.yellow(ICONS.warning)} ${validation.hint}`);
                 const proceed = handleCancel(
                     await confirm({ message: "This key format doesn't look right. Use it anyway?", initialValue: true }),
                 ) as boolean;
@@ -257,7 +258,7 @@ async function promptProviderEntry(): Promise<ProviderConfigEntry> {
                 if (!accepted) { cancel("Cancelled."); process.exit(0); }
             }
 
-            console.log(`  ${pc.yellow("\u26a0")} OAuth flow not yet implemented in CLI.`);
+            console.log(`  ${pc.yellow(ICONS.warning)} OAuth flow not yet implemented in CLI.`);
             console.log(`  ${pc.dim("Workaround: use API key instead.")}`);
         } else {
             // Standard API key flow
@@ -288,9 +289,9 @@ async function promptProviderEntry(): Promise<ProviderConfigEntry> {
             } else {
                 const validation = validateApiKeyFormat("gemini", apiKey.trim());
                 if (validation.valid) {
-                    console.log(`  ${pc.green("\u2713")} Key format looks good`);
+                    console.log(`  ${pc.green(ICONS.success)} Key format looks good`);
                 } else {
-                    console.log(`  ${pc.yellow("\u26a0")} ${validation.hint}`);
+                    console.log(`  ${pc.yellow(ICONS.warning)} ${validation.hint}`);
                     const proceed = handleCancel(
                         await confirm({ message: "This key format doesn't look right. Use it anyway?", initialValue: true }),
                     ) as boolean;
@@ -369,9 +370,9 @@ async function promptProviderEntry(): Promise<ProviderConfigEntry> {
             // Validate format
             const validation = validateApiKeyFormat(providerType, apiKey.trim());
             if (validation.valid) {
-                console.log(`  ${pc.green("\u2713")} Key format looks good`);
+                console.log(`  ${pc.green(ICONS.success)} Key format looks good`);
             } else {
-                console.log(`  ${pc.yellow("\u26a0")} ${validation.hint}`);
+                console.log(`  ${pc.yellow(ICONS.warning)} ${validation.hint}`);
                 const proceed = handleCancel(
                     await confirm({
                         message: "This key format doesn't look right. Use it anyway?",

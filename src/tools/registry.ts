@@ -5,6 +5,7 @@
 
 import { EventEmitter } from "node:events";
 import { Result, ok, err } from "neverthrow";
+import { ToolEvent } from "../router/event-types.js";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import type {
   ToolDefinition,
@@ -26,7 +27,7 @@ export class ToolRegistry extends EventEmitter {
       return err({ type: "validation_failed", toolName: tool.name, errors: [`Tool "${tool.name}" already registered`] });
     }
     this.tools.set(tool.name, tool);
-    this.emit("tool:registered", tool.name);
+    this.emit(ToolEvent.Registered, tool.name);
     return ok(undefined);
   }
 
@@ -34,7 +35,7 @@ export class ToolRegistry extends EventEmitter {
     for (const tool of tools) {
       // Allow overwrite in batch registration (for re-registration)
       this.tools.set(tool.name, tool);
-      this.emit("tool:registered", tool.name);
+      this.emit(ToolEvent.Registered, tool.name);
     }
     return ok(undefined);
   }
@@ -44,7 +45,7 @@ export class ToolRegistry extends EventEmitter {
       return err({ type: "not_found", toolName });
     }
     this.tools.delete(toolName);
-    this.emit("tool:unregistered", toolName);
+    this.emit(ToolEvent.Unregistered, toolName);
     return ok(undefined);
   }
 

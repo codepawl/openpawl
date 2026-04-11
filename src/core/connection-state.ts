@@ -13,6 +13,7 @@
 
 import { writeFileSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
+import { DOT_SYMBOL } from "../tui/components/status-indicator.js";
 import { homedir } from "node:os";
 
 export type ConnectionStatus =
@@ -105,12 +106,12 @@ export function onConnectionChange(fn: Listener): () => void {
 /** Status bar display info for each connection state. */
 export function getStatusDisplay(status: ConnectionStatus): { text: string; colorKey: "green" | "red" | "yellow" | "blue" | "dim" } {
   switch (status) {
-    case "no_key":      return { text: "\u25cb no API key", colorKey: "red" };
-    case "ready":       return { text: "\u25cf ready", colorKey: "blue" };
-    case "connecting":  return { text: "\u25d0 connecting\u2026", colorKey: "dim" };
-    case "connected":   return { text: "\u25cf connected", colorKey: "green" };
-    case "auth_failed": return { text: "\u25cf auth failed", colorKey: "red" };
-    case "offline":     return { text: "\u25cf offline", colorKey: "yellow" };
-    case "error":       return { text: "\u25cf error", colorKey: "red" };
+    case "no_key":      return { text: `${DOT_SYMBOL.empty} no API key`, colorKey: "red" };
+    case "ready":       return { text: `${DOT_SYMBOL.filled} ready`, colorKey: "blue" };
+    case "connecting":  return { text: `${DOT_SYMBOL.half} connecting\u2026`, colorKey: "dim" };
+    case "connected":   return { text: `${DOT_SYMBOL.filled} connected`, colorKey: "green" };
+    case "auth_failed": return { text: `${DOT_SYMBOL.filled} auth failed`, colorKey: "red" };
+    case "offline":     return { text: `${DOT_SYMBOL.filled} offline`, colorKey: "yellow" };
+    case "error":       return { text: `${DOT_SYMBOL.filled} error`, colorKey: "red" };
   }
 }

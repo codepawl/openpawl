@@ -4,6 +4,7 @@
  */
 
 import type { RecoverableError, ErrorCategory, RecoveryStrategy, ErrorContext } from "./types.js";
+import { ICONS } from "../tui/constants/icons.js";
 
 export class ErrorPresenter {
   present(error: unknown, context?: ErrorContext): RecoverableError {
@@ -22,7 +23,7 @@ export class ErrorPresenter {
   }
 
   formatForChat(error: RecoverableError): string[] {
-    const icon = error.recoverable ? "⚠" : "✗";
+    const icon = error.recoverable ? ICONS.warning : ICONS.error;
     const lines = [`  ${icon} ${error.userMessage}`];
     if (error.actionHint) lines.push(`    ${error.actionHint}`);
     return lines;

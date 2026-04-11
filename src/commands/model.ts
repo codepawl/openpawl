@@ -12,6 +12,7 @@
  */
 
 import pc from "picocolors";
+import { ICONS } from "../tui/constants/icons.js";
 import { cancel, isCancel, note, select, text } from "@clack/prompts";
 import { clampSelectOptions } from "../utils/searchable-select.js";
 import { logger } from "../core/logger.js";
@@ -317,11 +318,11 @@ async function runModelRefresh(args: string[]): Promise<void> {
       await setCachedModels(entry.type, ids);
       const count = result.models.length;
       const suffix = count > 50 ? ` (showing top 50)` : "";
-      logger.plain(`  ${pc.green("\u2713")} ${entry.type.padEnd(16)} ${count} models fetched${suffix}`);
+      logger.plain(`  ${pc.green(ICONS.success)} ${entry.type.padEnd(16)} ${count} models fetched${suffix}`);
     } else if (result.source === "fallback" && !result.error) {
       logger.plain(`  ${pc.dim("-")} ${entry.type.padEnd(16)} ${pc.dim("Skipped (cloud credentials)")}`);
     } else {
-      logger.plain(`  ${pc.red("\u2717")} ${entry.type.padEnd(16)} ${pc.dim(result.error ?? "No models found")}`);
+      logger.plain(`  ${pc.red(ICONS.error)} ${entry.type.padEnd(16)} ${pc.dim(result.error ?? "No models found")}`);
     }
   }
 

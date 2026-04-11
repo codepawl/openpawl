@@ -5,6 +5,7 @@
 
 import type { AsyncThinkJob } from "./async-types.js";
 import { AsyncThinkJobStore } from "./job-store.js";
+import { ICONS } from "../tui/constants/icons.js";
 
 interface SlackBlock {
   type: string;
@@ -55,8 +56,8 @@ export function formatSlackThinkResult(job: AsyncThinkJob): Record<string, unkno
       },
     });
 
-    const pros = rec.tradeoffs.pros.map((p) => `${"\u2713"} ${truncate(p, 80)}`).join("\n");
-    const cons = rec.tradeoffs.cons.map((c) => `${"\u2717"} ${truncate(c, 80)}`).join("\n");
+    const pros = rec.tradeoffs.pros.map((p) => `${ICONS.success} ${truncate(p, 80)}`).join("\n");
+    const cons = rec.tradeoffs.cons.map((c) => `${ICONS.error} ${truncate(c, 80)}`).join("\n");
     if (pros || cons) {
       blocks.push({
         type: "section",

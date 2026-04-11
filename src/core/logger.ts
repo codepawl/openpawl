@@ -4,6 +4,7 @@
  */
 
 import pc from "picocolors";
+import { ICONS } from "../tui/constants/icons.js";
 
 const SEP = " | ";
 
@@ -57,7 +58,7 @@ export const logger = {
 
   warn(message: string): void {
     if (_muted) return;
-    console.warn(formatLineWithIcon("⚠", "WARN", pc.yellow, message));
+    console.warn(formatLineWithIcon(ICONS.warning, "WARN", pc.yellow, message));
   },
 
   error(message: string): void {

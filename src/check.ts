@@ -8,6 +8,7 @@ import path from "node:path";
 
 import { intro, note, outro, spinner } from "@clack/prompts";
 import pc from "picocolors";
+import { ICONS } from "./tui/constants/icons.js";
 
 import { logger } from "./core/logger.js";
 import { getGlobalProviderManager } from "./providers/provider-factory.js";
@@ -29,9 +30,9 @@ export async function runCheck(_args: string[]): Promise<void> {
   const nodeVersion = process.version;
   const nodeMajor = parseInt(nodeVersion.slice(1).split(".")[0], 10);
   if (nodeMajor >= 20) {
-    lines.push(`  ${pc.green("✓")}  Node.js      ${nodeVersion} ${pc.dim("(required: >=20)")}`);
+    lines.push(`  ${pc.green(ICONS.success)}  Node.js      ${nodeVersion} ${pc.dim("(required: >=20)")}`);
   } else {
-    lines.push(`  ${pc.red("✗")}  Node.js      ${nodeVersion} ${pc.red("(required: >=20)")}`);
+    lines.push(`  ${pc.red(ICONS.error)}  Node.js      ${nodeVersion} ${pc.red("(required: >=20)")}`);
     issues.push("Node.js version must be >= 20");
   }
 
@@ -45,41 +46,41 @@ export async function runCheck(_args: string[]): Promise<void> {
       const result = validateConfig(raw);
       if (result.success) {
         const providerCount = result.data.providers?.length ?? 0;
-        lines.push(`  ${pc.green("✓")}  Config       ~/.openpawl/config.json ${pc.dim(`(${providerCount} provider${providerCount !== 1 ? "s" : ""})`)}`);
+        lines.push(`  ${pc.green(ICONS.success)}  Config       ~/.openpawl/config.json ${pc.dim(`(${providerCount} provider${providerCount !== 1 ? "s" : ""})`)}`);
 
         // Show new config sections
         const d = result.data.dashboard;
         const dashPort = d?.port ?? result.data.dashboardPort ?? 9001;
         const dashPersist = d?.persistent !== false;
         const dashAutoOpen = d?.autoOpen === true;
-        lines.push(`  ${pc.green("✓")}  Dashboard    port ${dashPort}, ${dashPersist ? "persistent" : "session-scoped"}${dashAutoOpen ? ", auto-open" : ""}`);
+        lines.push(`  ${pc.green(ICONS.success)}  Dashboard    port ${dashPort}, ${dashPersist ? "persistent" : "session-scoped"}${dashAutoOpen ? ", auto-open" : ""}`);
 
         const w = result.data.work;
         const workInteractive = w?.interactive !== false;
-        lines.push(`  ${pc.green("✓")}  Work         interactive ${workInteractive ? "on" : "off"}`);
+        lines.push(`  ${pc.green(ICONS.success)}  Work         interactive ${workInteractive ? "on" : "off"}`);
 
         const t = result.data.timeouts;
         const firstChunk = t?.firstChunkMs ?? 15000;
         const requestMs = t?.requestMs ?? 60000;
-        lines.push(`  ${pc.green("✓")}  Timeouts     firstChunk: ${(firstChunk / 1000).toFixed(0)}s, request: ${(requestMs / 1000).toFixed(0)}s`);
+        lines.push(`  ${pc.green(ICONS.success)}  Timeouts     firstChunk: ${(firstChunk / 1000).toFixed(0)}s, request: ${(requestMs / 1000).toFixed(0)}s`);
       } else {
-        lines.push(`  ${pc.yellow("⚠")}  Config       ~/.openpawl/config.json ${pc.yellow("(validation warnings)")}`);
+        lines.push(`  ${pc.yellow(ICONS.warning)}  Config       ~/.openpawl/config.json ${pc.yellow("(validation warnings)")}`);
         for (const err of result.errors.slice(0, 3)) {
           lines.push(`    ${pc.dim("  " + err)}`);
         }
       }
     } catch {
-      lines.push(`  ${pc.yellow("⚠")}  Config       ~/.openpawl/config.json ${pc.yellow("(could not parse)")}`);
+      lines.push(`  ${pc.yellow(ICONS.warning)}  Config       ~/.openpawl/config.json ${pc.yellow("(could not parse)")}`);
     }
   } else {
-    lines.push(`  ${pc.red("✗")}  Config       ${pc.dim("Not found")}`);
+    lines.push(`  ${pc.red(ICONS.error)}  Config       ${pc.dim("Not found")}`);
     issues.push("No config file. Run: openpawl setup");
   }
 
   // Memory directory
   const memoryDir = path.join(os.homedir(), ".openpawl", "memory");
   if (existsSync(memoryDir)) {
-    lines.push(`  ${pc.green("✓")}  Memory DB    ~/.openpawl/memory/`);
+    lines.push(`  ${pc.green(ICONS.success)}  Memory DB    ~/.openpawl/memory/`);
   } else {
     lines.push(`  ${pc.dim("-")}  Memory DB    ${pc.dim("Not initialized (created on first run)")}`);
   }
@@ -92,7 +93,7 @@ export async function runCheck(_args: string[]): Promise<void> {
   const providers = manager.getProviders();
 
   if (providers.length === 0) {
-    lines.push(`    ${pc.red("✗")}  No providers configured`);
+    lines.push(`    ${pc.red(ICONS.error)}  No providers configured`);
     issues.push("No AI provider configured\n     Fix: Run openpawl setup\n       Or: export ANTHROPIC_API_KEY=sk-ant-...");
   } else {
     const s = canRenderSpinner ? spinner() : null;
@@ -109,9 +110,9 @@ export async function runCheck(_args: string[]): Promise<void> {
       const latency = Date.now() - start;
 
       if (ok) {
-        lines.push(`    ${pc.green("✓")}  ${provider.name.padEnd(12)} API key valid ${pc.dim(`(${latency}ms)`)}`);
+        lines.push(`    ${pc.green(ICONS.success)}  ${provider.name.padEnd(12)} API key valid ${pc.dim(`(${latency}ms)`)}`);
       } else {
-        lines.push(`    ${pc.red("✗")}  ${provider.name.padEnd(12)} ${pc.red("unreachable or invalid key")}`);
+        lines.push(`    ${pc.red(ICONS.error)}  ${provider.name.padEnd(12)} ${pc.red("unreachable or invalid key")}`);
         issues.push(`Provider ${provider.name} is not reachable. Check your API key and connection.`);
       }
     }
@@ -140,13 +141,13 @@ export async function runCheck(_args: string[]): Promise<void> {
     runtime.dispose();
 
     if (result.exports === 42) {
-      lines.push(`    ${pc.green("✓")}  V8 isolate   ${pc.dim("secure-exec ready")}`);
+      lines.push(`    ${pc.green(ICONS.success)}  V8 isolate   ${pc.dim("secure-exec ready")}`);
     } else {
-      lines.push(`    ${pc.yellow("⚠")}  V8 isolate   ${pc.dim("unexpected result")}`);
+      lines.push(`    ${pc.yellow(ICONS.warning)}  V8 isolate   ${pc.dim("unexpected result")}`);
       issues.push("Sandbox V8 isolate returned unexpected result");
     }
   } catch (err) {
-    lines.push(`    ${pc.red("✗")}  V8 isolate   ${pc.red("unavailable")}`);
+    lines.push(`    ${pc.red(ICONS.error)}  V8 isolate   ${pc.red("unavailable")}`);
     issues.push("Sandbox V8 isolate unavailable. Run: bun install secure-exec");
     if (err instanceof Error) {
       lines.push(`    ${pc.dim("              " + err.message)}`);
@@ -158,7 +159,7 @@ export async function runCheck(_args: string[]): Promise<void> {
   lines.push("  Observability:");
   const hasLangfuse = !!(process.env.LANGFUSE_SECRET_KEY && process.env.LANGFUSE_PUBLIC_KEY);
   if (hasLangfuse) {
-    lines.push(`    ${pc.green("✓")}  Langfuse     ${pc.dim("Tracing active")}`);
+    lines.push(`    ${pc.green(ICONS.success)}  Langfuse     ${pc.dim("Tracing active")}`);
   } else {
     lines.push(`    ${pc.dim("-")}  Langfuse     ${pc.dim("Not configured (optional)")}`);
     lines.push(`    ${pc.dim("              Set LANGFUSE_SECRET_KEY + LANGFUSE_PUBLIC_KEY to enable")}`);
@@ -169,12 +170,12 @@ export async function runCheck(_args: string[]): Promise<void> {
   lines.push("  " + pc.dim("─".repeat(40)));
 
   if (issues.length === 0) {
-    lines.push(`  ${pc.green("✓")}  Ready to use`);
+    lines.push(`  ${pc.green(ICONS.success)}  Ready to use`);
     lines.push("");
     lines.push(`  Quick start:`);
     lines.push(`    ${pc.cyan('openpawl work --goal "your goal here"')}`);
   } else {
-    lines.push(`  ${pc.red("✗")}  Not ready — ${issues.length} issue(s) found`);
+    lines.push(`  ${pc.red(ICONS.error)}  Not ready — ${issues.length} issue(s) found`);
     lines.push("");
     for (const issue of issues) {
       lines.push(`  ${pc.yellow("Issue:")} ${issue}`);

@@ -4,6 +4,7 @@
 
 import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
+import { ToolEvent } from "../router/event-types.js";
 import { Result, ok, err } from "neverthrow";
 import type {
   ToolOutput,
@@ -83,7 +84,7 @@ export class ToolExecutor extends EventEmitter {
       context.abortSignal.addEventListener("abort", () => abortController.abort(), { once: true });
     }
 
-    this.emit("tool:start", executionId, toolName, context.agentId);
+    this.emit(ToolEvent.Start, executionId, toolName, context.agentId);
 
     try {
       const result = await Promise.race([
@@ -94,7 +95,7 @@ export class ToolExecutor extends EventEmitter {
       this.activeAbortControllers.delete(executionId);
 
       if (result.isErr()) {
-        this.emit("tool:error", executionId, toolName, result.error);
+        this.emit(ToolEvent.Error, executionId, toolName, result.error);
         return result;
       }
 
@@ -104,17 +105,17 @@ export class ToolExecutor extends EventEmitter {
         output.summary = truncateForSummary(output.summary, output.fullOutput);
       }
 
-      this.emit("tool:done", executionId, toolName, output);
+      this.emit(ToolEvent.Done, executionId, toolName, output);
       return ok(output);
     } catch (e) {
       this.activeAbortControllers.delete(executionId);
       if (abortController.signal.aborted) {
         const toolErr: ToolError = { type: "aborted", toolName };
-        this.emit("tool:error", executionId, toolName, toolErr);
+        this.emit(ToolEvent.Error, executionId, toolName, toolErr);
         return err(toolErr);
       }
       const toolErr: ToolError = { type: "execution_failed", toolName, cause: String(e) };
-      this.emit("tool:error", executionId, toolName, toolErr);
+      this.emit(ToolEvent.Error, executionId, toolName, toolErr);
       return err(toolErr);
     }
   }
@@ -139,13 +140,13 @@ export class ToolExecutor extends EventEmitter {
     input: unknown,
   ): Promise<"denied" | "once" | "always"> {
     // If nobody is listening for confirmations, auto-approve
-    if (this.listenerCount("tool:confirmation_needed") === 0) {
+    if (this.listenerCount(ToolEvent.ConfirmationNeeded) === 0) {
       return "once";
     }
 
     const tool = this.registry.get(toolName);
     return new Promise<"denied" | "once" | "always">((resolve) => {
-      this.emit("tool:confirmation_needed", {
+      this.emit(ToolEvent.ConfirmationNeeded, {
         toolName,
         agentId,
         input,
@@ -161,7 +162,7 @@ export class ToolExecutor extends EventEmitter {
     const controller = this.activeAbortControllers.get(executionId);
     if (controller) {
       controller.abort();
-      this.emit("tool:aborted", executionId);
+      this.emit(ToolEvent.Aborted, executionId);
     }
   }
 

@@ -4,6 +4,7 @@
  */
 
 import pc from "picocolors";
+import { ICONS } from "../tui/constants/icons.js";
 import { logger } from "../core/logger.js";
 
 const SEP = "━".repeat(49);
@@ -130,7 +131,7 @@ function stepExecution(): void {
 
   for (const t of tasks) {
     const confStr = (t.conf * 100).toFixed(0) + "%";
-    const icon = t.status === "completed" ? green("✓") : red("✗");
+    const icon = t.status === "completed" ? green(ICONS.success) : red(ICONS.error);
     const confColor = t.conf > 0.7 ? green(confStr) : red(confStr);
     out(`  ${icon} Task ${t.id}: ${t.desc}`);
     out(`    ${dim(t.agent)}  confidence: ${confColor}`);
