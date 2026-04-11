@@ -235,6 +235,14 @@ function formatToolPermissionResolved(toolName: string, riskLevel: string, resul
 // Wire PromptRouter dispatch events → TUI message display
 // ---------------------------------------------------------------------------
 
+interface RouterEventWiring {
+  cleanup: () => void;
+  /** Cancel the current in-flight dispatch. Returns true if something was cancelled. */
+  cancelStreaming: () => boolean;
+  /** Whether an agent is currently streaming tokens. */
+  isStreaming: () => boolean;
+}
+
 function wireRouterEvents(
   router: PromptRouter,
   layout: AppLayout,
@@ -242,12 +250,13 @@ function wireRouterEvents(
   onPlanReady?: () => void,
   onQueueDrain?: () => void,
   onTokensUsed?: (input: number, output: number) => void,
-): () => void {
+): RouterEventWiring {
   let streamingForAgent: string | null = null;
   let streamedContent = "";
   let tokenFilter: ToolCallTokenFilter | null = null;
   let sessionInputTokens = 0;
   let sessionOutputTokens = 0;
+  let activeSessionId: string | null = null;
   const thinking = new ThinkingIndicator();
   let thinkingMsgAdded = false;
 
@@ -260,7 +269,8 @@ function wireRouterEvents(
     }
   };
 
-  const onAgentStart = (_sessionId: string, agentId: string) => {
+  const onAgentStart = (sessionId: string, agentId: string) => {
+    activeSessionId = sessionId;
     streamingForAgent = agentId;
     streamedContent = "";
     layout.messages.clearToolCalls();
@@ -289,7 +299,7 @@ function wireRouterEvents(
     });
     thinkingMsgAdded = true;
 
-    layout.statusBar.updateSegment(3, `${agentDisplayName(agentId)} thinking...`, defaultTheme.accent);
+    layout.statusBar.updateSegment(3, `${agentDisplayName(agentId)} thinking... ${defaultTheme.dim("(Esc to cancel)")}`, defaultTheme.accent);
     layout.tui.requestRender();
   };
 
@@ -300,7 +310,7 @@ function wireRouterEvents(
       thinkingMsgAdded = false;
       // Clear the thinking text — streaming content will replace it
       layout.messages.replaceLast("");
-      layout.statusBar.updateSegment(3, `${agentDisplayName(agentId)} working...`, defaultTheme.accent);
+      layout.statusBar.updateSegment(3, `${agentDisplayName(agentId)} working... ${defaultTheme.dim("(Esc)")}`, defaultTheme.accent);
     }
     if (streamingForAgent !== agentId || !layout.messages.isLastAgentMessage()) {
       // New agent started streaming, or last message is no longer the agent's
@@ -363,6 +373,7 @@ function wireRouterEvents(
     if (responseText && agentId !== "system") {
       onAssistantResponse?.(agentId, responseText);
     }
+    activeSessionId = null;
     streamingForAgent = null;
     streamedContent = "";
     tokenFilter?.flush();
@@ -384,7 +395,11 @@ function wireRouterEvents(
     onQueueDrain?.();
   };
 
-  const onDispatchError = (_sessionId: string, error: { type: string }) => {
+  const onDispatchError = (_sessionId: string, error: { type: string; cause?: string }) => {
+    // Skip error display if this was a user-initiated cancel (already handled by cancelStreaming)
+    if (!activeSessionId && error.cause?.includes("aborted")) return;
+
+    activeSessionId = null;
     streamingForAgent = null;
     tokenFilter?.flush();
     tokenFilter = null;
@@ -411,6 +426,34 @@ function wireRouterEvents(
     onTokensUsed?.(result.totalInputTokens, result.totalOutputTokens);
   };
 
+  const cancelStreaming = (): boolean => {
+    if (!activeSessionId) return false;
+    const sid = activeSessionId;
+
+    // Abort the dispatch (propagates to LLM stream, tool executor, child processes)
+    router.abort(sid);
+
+    // Append cancellation indicator to partial response
+    if (streamingForAgent) {
+      tokenFilter?.flush();
+      layout.messages.appendToLast(`\n\n${defaultTheme.dim("\u238b Cancelled")}`);
+    }
+
+    // Clean up streaming state
+    activeSessionId = null;
+    streamingForAgent = null;
+    streamedContent = "";
+    tokenFilter = null;
+    thinking.stop();
+    thinkingMsgAdded = false;
+    stopToolSpinner();
+    layout.messages.bakeToolCalls();
+    layout.statusBar.updateSegment(3, "idle", defaultTheme.dim);
+    layout.tui.requestRender();
+
+    return true;
+  };
+
   router.on(RouterEvent.AgentStart, onAgentStart);
   router.on(RouterEvent.AgentToken, onAgentToken);
   router.on(RouterEvent.AgentTool, onAgentTool);
@@ -418,15 +461,18 @@ function wireRouterEvents(
   router.on(RouterEvent.Done, onDispatchDone);
   router.on(RouterEvent.Error, onDispatchError);
 
-  // Return cleanup function
-  return () => {
-    stopToolSpinner();
-    router.off(RouterEvent.AgentStart, onAgentStart);
-    router.off(RouterEvent.AgentToken, onAgentToken);
-    router.off(RouterEvent.AgentTool, onAgentTool);
-    router.off(RouterEvent.AgentDone, onAgentDone);
-    router.off(RouterEvent.Done, onDispatchDone);
-    router.off(RouterEvent.Error, onDispatchError);
+  return {
+    cleanup: () => {
+      stopToolSpinner();
+      router.off(RouterEvent.AgentStart, onAgentStart);
+      router.off(RouterEvent.AgentToken, onAgentToken);
+      router.off(RouterEvent.AgentTool, onAgentTool);
+      router.off(RouterEvent.AgentDone, onAgentDone);
+      router.off(RouterEvent.Done, onDispatchDone);
+      router.off(RouterEvent.Error, onDispatchError);
+    },
+    cancelStreaming,
+    isStreaming: () => streamingForAgent !== null,
   };
 }
 
@@ -490,6 +536,8 @@ async function handleWithRouter(
   const result = await router.route(session.id, text);
 
   if (result.isErr()) {
+    // Don't show error for user-initiated cancellations
+    if ("cause" in result.error && result.error.cause?.includes("aborted")) return;
     ctx.addMessage("error", `Error: ${result.error.type}`);
     layout.statusBar.updateSegment(3, "idle", defaultTheme.dim);
     layout.tui.requestRender();
@@ -618,7 +666,7 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
     sessionMgr: null as SessionManager | null,
     router: null as PromptRouter | null,
     chatSession: null as Session | null,
-    cleanupRouter: null as (() => void) | null,
+    cleanupRouter: null as RouterEventWiring | null,
     cleanupSession: null as (() => void) | null,
     doomLoopDetector: null as { reset: () => void } | null,
     toolOutputHandler: null as { cleanup: () => Promise<void> } | null,
@@ -905,8 +953,15 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
   // Wire queue drain to ctx so initSessionRouter can pass it to wireRouterEvents
   ctx.onQueueDrain = () => void processNextFromQueue();
 
-  // TUI abort handler — clear queue on Esc/Ctrl+C if messages are queued
+  // TUI abort handler — cancel streaming or clear queue on Esc/Ctrl+C
   layout.tui.onAbort = () => {
+    // Priority 1: cancel active streaming
+    if (ctx.cleanupRouter?.isStreaming()) {
+      ctx.cleanupRouter.cancelStreaming();
+      agentBusy = false;
+      return true;
+    }
+    // Priority 2: clear queued prompts
     if (promptQueue.length > 0) {
       layout.messages.removePendingMessages();
       promptQueue.length = 0;
@@ -1568,7 +1623,7 @@ export async function launchTUI(opts?: LaunchOptions): Promise<void> {
     // Remaining cleanup in parallel
     try {
       await Promise.allSettled([
-        Promise.resolve(ctx.cleanupRouter?.()),
+        Promise.resolve(ctx.cleanupRouter?.cleanup()),
         Promise.resolve(ctx.cleanupSession?.()),
         ctx.router?.shutdown().catch(() => {}),
         ctx.toolOutputHandler?.cleanup().catch(() => {}),
@@ -1968,7 +2023,7 @@ async function initSessionRouter(
     sessionMgr: SessionManager | null;
     router: PromptRouter | null;
     chatSession: Session | null;
-    cleanupRouter: (() => void) | null;
+    cleanupRouter: RouterEventWiring | null;
     cleanupSession: (() => void) | null;
     doomLoopDetector: { reset: () => void } | null;
     toolOutputHandler: { cleanup: () => Promise<void> } | null;

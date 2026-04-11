@@ -115,6 +115,11 @@ export class PromptRouter extends EventEmitter {
     ]);
   }
 
+  /** Abort any in-flight dispatch for the given session. */
+  abort(sessionId: string): void {
+    this.dispatcher.abort(sessionId);
+  }
+
   // ═══════════════════════════════════════════════════════════════════════════
   // MAIN ENTRY POINT
   // ═══════════════════════════════════════════════════════════════════════════
