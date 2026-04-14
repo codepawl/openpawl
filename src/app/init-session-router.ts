@@ -5,7 +5,7 @@
 import { mark, printStartupTimings } from "./startup.js";
 import { formatToolPermissionPrompt, formatToolPermissionResolved } from "./tool-permission.js";
 import { wireRouterEvents, wireSessionEvents, type RouterEventWiring } from "./router-wiring.js";
-import { registerSessionCommands } from "./session-helpers.js";
+import { registerSessionCommands, replaySessionHistory } from "./session-helpers.js";
 import { createAutocompleteProvider } from "./autocomplete.js";
 import { ICONS } from "../tui/constants/icons.js";
 import { defaultTheme } from "../tui/themes/default.js";
@@ -341,12 +341,19 @@ export async function initSessionRouter(
     // ErrorPresenter not available
   }
 
-  // Always start fresh
+  // Try to resume latest session, fall back to creating a new one
   {
-    const createResult = await ctx.sessionMgr.create(process.cwd());
-    ctx.chatSession = createResult.isOk() ? createResult.value : null;
+    const resumeResult = await ctx.sessionMgr.resumeLatest();
+    if (resumeResult.isOk() && resumeResult.value) {
+      ctx.chatSession = resumeResult.value;
+      layout.messages.clear();
+      replaySessionHistory(ctx.chatSession, layout);
+    } else {
+      const createResult = await ctx.sessionMgr.create(process.cwd());
+      ctx.chatSession = createResult.isOk() ? createResult.value : null;
+    }
   }
-  mark("[bg] session created");
+  mark("[bg] session loaded");
 
   // Wire events
   ctx.cleanupRouter = wireRouterEvents(ctx.router, layout, (agentId, content) => {
