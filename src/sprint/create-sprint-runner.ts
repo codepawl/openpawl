@@ -88,11 +88,13 @@ export function createSprintRunner(opts: CreateSprintRunnerOptions): SprintRunne
           const duration = Date.now() - startTime;
 
           if (result.isOk()) {
+            const data = result.value.data as Record<string, unknown> | undefined;
+            const diff = data?.diff as import("../utils/diff.js").DiffResult | undefined;
             this.emit(SprintEvent.AgentTool, {
               agentName,
               toolName: name,
               status: "completed",
-              details: { executionId: execId, duration, outputSummary: result.value.summary.slice(0, 200), success: true },
+              details: { executionId: execId, duration, outputSummary: result.value.summary.slice(0, 200), success: true, diff },
             });
             return result.value.summary;
           }

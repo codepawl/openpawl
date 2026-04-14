@@ -1,7 +1,7 @@
 {
   "name": "openpawl",
   "version": "0.1.0",
-  "description": "Terminal-native AI workspace. You are the conductor.",
+  "description": "Your AI team for vibe coding. Multi-agent orchestration with memory, learning, and team templates.",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -11,11 +11,15 @@
   "homepage": "https://github.com/codepawl/openpawl",
   "keywords": [
     "ai",
-    "agents",
-    "cli",
+    "coding",
+    "agent",
+    "multi-agent",
+    "terminal",
+    "tui",
     "llm",
+    "orchestration",
     "team",
-    "orchestration"
+    "vibe-coding"
   ],
   "workspaces": [
     "src/web/client",
@@ -28,7 +32,10 @@
     "openpawl": "dist/cli.js"
   },
   "files": [
-    "dist"
+    "dist/",
+    "README.md",
+    "LICENSE",
+    "CLAUDE.md"
   ],
   "scripts": {
     "dev": "tsup --watch",
@@ -89,12 +96,6 @@
     "tsx": "^4.21.0",
     "typescript": "~5.9.3"
   },
-  "main": "eslint.config.js",
-  "directories": {
-    "doc": "docs",
-    "test": "tests"
-  },
-  "author": "",
   "bugs": {
     "url": "https://github.com/codepawl/openpawl/issues"
   }

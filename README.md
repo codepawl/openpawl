@@ -2,9 +2,12 @@
 
 **Your AI team for vibe coding. Stop prompting alone.**
 
+[![CI](https://github.com/codepawl/openpawl/actions/workflows/ci.yml/badge.svg)](https://github.com/codepawl/openpawl/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 [![Node.js >= 20](https://img.shields.io/badge/Node.js-%3E%3D%2020-339933?logo=node.js&logoColor=white)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
+[![Tests](https://img.shields.io/badge/tests-475_passing-brightgreen)](#)
+[![LOC](https://img.shields.io/badge/source-437_files%20·%2063.5k_LOC-informational)](#)
 
 OpenPawl orchestrates a team of specialized AI agents toward your goals — with memory, learning, and structure that persists across sessions.
 
@@ -44,61 +47,86 @@ curl -fsSL https://raw.githubusercontent.com/codepawl/openpawl/main/install.sh |
 
 ```bash
 openpawl setup                    # guided setup wizard
-openpawl work --goal "Build auth" # start a sprint
+openpawl                          # launch interactive TUI
 openpawl standup                  # daily summary
 openpawl think "SSE or WebSocket?" # rubber duck mode
 ```
 
-The dashboard opens automatically at `http://localhost:8000`. A rich terminal UI (TUI) is also available for keyboard-driven workflows.
+The bare `openpawl` command launches the interactive TUI with chat, sprint, and collab modes. For unattended runs:
+
+```bash
+openpawl run --headless --goal "Build auth" --mode sprint --runs 2
+```
 
 ---
 
 ## Features
 
+### Three Execution Modes
+
+| Mode | How it works | When to use |
+|------|-------------|-------------|
+| **Solo** | Single agent responds to prompts with tool calling | Quick tasks, chat, exploration |
+| **Collab** | Multi-agent chain (e.g. coder → reviewer → coder) | Code review, architecture, debugging |
+| **Sprint** | Planner breaks goal into tasks → parallel execution → post-mortem | Full features, multi-file changes |
+
+Switch modes with `Shift+Tab` in the TUI or `--mode` in headless.
+
 ### Team Orchestration
 
-11 specialized agents collaborate through a 12-node LangGraph pipeline: Coordinator, Worker Bot, Sprint Planner, System Designer, RFC Author, Post-Mortem Analyst, Retrospective, Memory Retrieval, Human Approval, Partial Approval, and Review Workflow. Independent tasks execute in parallel via the LangGraph Send API. Agents self-report confidence — uncertain work auto-routes to QA or rework. Good tasks get approved individually while bad ones go back.
+7 built-in agents (coder, reviewer, planner, tester, debugger, researcher, assistant) collaborate via native API tool calling. The planner decomposes goals into tasks, workers execute in parallel, and a post-mortem loop extracts lessons for future runs. Agents use keyword-based routing and confidence-gated delivery.
 
-Team composition is flexible: pick agents manually, let the system compose autonomously based on your goal, or use a pre-built template. You can build custom agents via `@openpawl/sdk` and plug them in. Agent profiles track performance across runs and inform routing decisions.
+Team composition is flexible: pick agents manually, let the system compose autonomously based on your goal, or use one of 5 built-in templates. Custom agents can be created and configured via `/agents` in the TUI. Agent profiles track performance across runs.
 
 ### Memory and Learning
 
-The team remembers everything across sessions. Success patterns get stored in LanceDB — future runs retrieve what worked. Failures feed a post-mortem loop so mistakes don't repeat. Every architectural decision is logged in a searchable decision journal. Global patterns persist across all sessions forever.
+The team remembers across sessions. Success patterns get stored in LanceDB — future runs retrieve what worked. Failures feed a post-mortem loop so mistakes don't repeat. Every architectural decision is logged in a searchable decision journal. Hebbian memory strengthens associations between concepts based on co-activation.
 
-### Solo Developer Tools
+### Developer Tools
 
 - **Session briefing** — "previously on OpenPawl" context every time you start
 - **Daily standup** — what was done, what's blocked, what's next
-- **Rubber duck mode** — structured debate from two perspectives without starting a sprint
+- **Rubber duck mode** — structured debate from multiple perspectives
 - **Drift detection** — flags when a new goal contradicts past decisions
 - **Goal clarity checker** — challenges vague goals before planning begins
 - **Context handoff** — auto-generates CONTEXT.md at session end
-- **Vibe coding score** — mirror showing how you collaborate with your team
-- **Async thinking** — submit a question before sleep, wake up to analysis
-- **Interactive chat** — conversational mode with your agent team
+- **Inline diffs** — colored unified diffs on file writes/edits in TUI and headless
+- **Post-mortem learning** — extracts lessons across runs, injects into future planning
+
+### Terminal UI
+
+- **Rich TUI** — keyboard navigation, Catppuccin Mocha theme, mouse support
+- **Escape to cancel** — stop any streaming response mid-flight
+- **Token counter** — live input/output token tracking in the status bar
+- **Type-to-filter** — filter in all list views (agents, templates, sessions)
+- **Centralized keybindings** — view and customize via `/hotkeys`
+- **Min terminal size handling** — graceful degradation on small terminals
+- **Context compression** — automatic compaction keeps context growth < 1x
 
 ### Observability and Control
 
-- **Real-time dashboard** — Kanban, Eisenhower matrix, live graph, cost tracking
-- **Terminal UI** — rich TUI with keyboard navigation, themes, and mouse support
 - **Audit trail** — full decision log exported as markdown
 - **Replay mode** — re-run any past session for debugging
 - **Agent heatmap** — find utilization bottlenecks across runs
 - **Cost forecasting** — estimate cost before a run starts
-- **Webhook approval** — Slack/email approval for unattended runs
-- **MCP server** — Model Context Protocol integration for external tool access
+- **Performance profiler** — opt-in timing breakdown of the full pipeline
+- **Headless mode** — `openpawl run --headless` with `--mode`, `--template`, `--workdir`, `--runs`
+- **Provider/model sync** — single source of truth across agents and modes
 
 ---
 
-## Template Marketplace
+## Team Templates
 
 Pre-built teams you can install and use immediately:
 
 ```bash
-openpawl templates browse
-openpawl templates install indie-hacker
-openpawl work --template indie-hacker --goal "Build auth system"
+openpawl templates browse                          # list available templates
+openpawl templates install indie-hacker             # install a template
+openpawl run --headless --template indie-hacker \
+  --goal "Build auth system"                        # use in headless mode
 ```
+
+Or use `/team` in the TUI to browse and switch templates interactively.
 
 | Template | Pipeline |
 |----------|----------|
@@ -114,88 +142,135 @@ Five seed templates ship offline. Community templates at [openpawl-templates](ht
 
 ## CLI Reference
 
+**Getting started:**
+
 | Command | Description |
 |---------|-------------|
 | `setup` | Guided setup wizard |
 | `check` | Verify setup is working |
-| `work` | Start a work session (`--runs N`, `--template <id>`) |
+| `demo` | Demo mode — see OpenPawl in action (no API key needed) |
+
+**Daily workflow:**
+
+| Command | Description |
+|---------|-------------|
+| `solo` | Interactive solo mode (single agent) |
+| `run` | Headless mode (`--headless --goal "..." --mode sprint\|solo\|collab --runs N --template <id> --workdir <path>`) |
 | `standup` | Daily standup summary |
 | `think` | Rubber duck mode — structured debate |
-| `chat` | Interactive chat with agent team |
 | `clarity` | Check goal clarity |
-| `config` | Manage configuration (get/set/unset) |
+
+**Team and providers:**
+
+| Command | Description |
+|---------|-------------|
+| `templates` | Browse, install, and manage team templates |
 | `model` | LLM selection: list, set, per-agent overrides |
 | `providers` | Configure and test LLM providers |
-| `web` | Start/stop/status dashboard server |
-| `templates` | Browse, install, publish marketplace templates |
-| `agent` | Manage custom agents |
+| `agent` | Add and manage custom agents |
+| `settings` | View and change settings |
+| `config` | Configuration management (get/set/unset) |
+
+**Memory and decisions:**
+
+| Command | Description |
+|---------|-------------|
 | `journal` | Decision journal: list, search, show, export |
-| `score` | Vibe coding score and trends |
+| `drift` | Detect goal vs decision conflicts |
+| `lessons` | Export lessons learned |
+| `handoff` | Generate or import CONTEXT.md |
+| `memory` | Global memory: health, promote, export |
+
+**History and analysis:**
+
+| Command | Description |
+|---------|-------------|
 | `replay` | Replay past sessions for debugging |
 | `audit` | Export audit trail |
-| `forecast` | Estimate run cost before execution |
 | `heatmap` | Agent utilization heatmap |
+| `forecast` | Estimate run cost before execution |
 | `diff` | Compare runs within or across sessions |
-| `memory` | Global memory: health, promote, export |
-| `cache` | Response cache management |
+| `score` | Vibe coding score and trends |
 | `profile` | Agent performance profiles |
-| `drift` | Detect goal vs decision conflicts |
-| `handoff` | Generate or import CONTEXT.md |
-| `lessons` | Export lessons learned |
 | `sessions` | Session management |
+
+**Utilities:**
+
+| Command | Description |
+|---------|-------------|
+| `cache` | Response cache management |
 | `logs` | View session and gateway logs |
-| `demo` | Demo mode (no API key needed) |
 | `clean` | Remove session data (preserves memory) |
 | `update` | Self-update to latest version |
 
+**TUI slash commands** (inside the interactive app):
+
+| Command | Description |
+|---------|-------------|
+| `/mode` | Switch between solo, collab, and sprint |
+| `/team` | Browse and switch team templates |
+| `/agents` | List and configure agents (CRUD) |
+| `/hotkeys` | View and customize keybindings |
+| `/debate` | Multi-perspective analysis |
+| `/research` | Deep research mode |
+| `/settings` | App settings |
+| `/status` | Provider and system status |
+| `/compact` | Toggle compact/expanded view |
+| `/setup` | Re-run setup wizard |
+
 ---
 
-## Agent Architecture
+## Architecture
 
 ```mermaid
 graph TD
-    A[Memory Retrieval] --> B[Sprint Planning]
-    B --> C[System Design]
-    C --> D[RFC Phase]
-    D --> E[Coordinator]
+    U[User Prompt] --> R[Prompt Router]
 
-    E --> W1[Worker]
-    E --> W2[Worker]
-    E --> W3[Worker]
+    R -->|solo| A1[Single Agent + Tools]
+    R -->|collab| CC[Agent Chain]
+    R -->|sprint| SP[Sprint Planner]
 
-    W1 --> CR[Confidence Router]
-    W2 --> CR
-    W3 --> CR
+    A1 --> LLM[LLM Multi-Turn Loop]
+    CC --> LLM
 
-    CR -->|High| AA[Auto Approve]
-    CR -->|Medium| QA[QA Loop]
-    CR -->|Low| ESC[Escalate]
+    SP --> T1[Task 1]
+    SP --> T2[Task 2]
+    SP --> T3[Task N]
 
-    AA --> PA[Partial Approval]
-    QA --> PA
-    ESC --> PA
+    T1 --> LLM
+    T2 --> LLM
+    T3 --> LLM
 
-    PA --> PM[Post-Mortem]
+    LLM --> TC[Tool Calls]
+    TC -->|file_write/edit| DIFF[Inline Diff]
+    TC -->|shell_exec| SH[Shell]
+    TC -->|web_search| WS[Web]
+
+    LLM --> PM[Post-Mortem]
     PM --> MS[(Memory Store)]
-    PA -->|Next cycle| E
+    MS -->|next run| SP
 ```
 
-12-node LangGraph pipeline. Workers execute in parallel via Send API. The confidence router auto-approves high-confidence work, loops uncertain tasks through QA, and escalates failures. Post-mortem extracts lessons into vector memory for future runs.
+Three execution modes share a common LLM multi-turn loop with native tool calling. Sprint mode parallelizes independent tasks. Post-mortem extracts lessons into LanceDB vector memory for future runs. Context compression keeps long conversations within token limits.
 
 ---
 
-## Dashboard
+## Comparison
 
-Real-time SSE dashboard at `localhost:8000`:
+| Feature | OpenPawl | Claude Code | OpenCode | Aider |
+|---------|----------|-------------|----------|-------|
+| Multi-agent orchestration | 3 modes (solo/collab/sprint) | Single agent | Single agent | Single agent |
+| Cross-session memory | LanceDB vector + hebbian | Per-project CLAUDE.md | None | Git-based |
+| Post-mortem learning | Extracts & injects lessons | None | None | None |
+| Team templates | 5 built-in + custom | None | None | None |
+| Inline file diffs | Colored unified diffs | Built-in | None | Git diff |
+| Decision journal | Searchable, drift detection | None | None | None |
+| Cost forecasting | 3 methods + learning curves | None | None | None |
+| Interactive TUI | Custom (Catppuccin, mouse) | Built-in | Bubbletea | Terminal |
+| Headless mode | `--mode`, `--template`, `--runs` | Non-interactive | CLI only | CLI only |
+| Agent heatmap | Utilization + bottleneck | None | None | None |
 
-- Kanban board with task pipeline
-- Eisenhower priority matrix
-- Live LangGraph node execution view
-- Summary cards: tasks, cost, confidence
-- Memory, replay, journal, heatmap, and score tabs
-- LLM request log with streaming progress
-- Interactive approval modal for human-in-the-loop
-- Light, dark, and system themes with custom palettes
+OpenPawl focuses on multi-agent workflows and persistent learning. For single-agent coding tasks, Claude Code and Aider are more mature. For a detailed feature comparison, see [docs/comparison.md](./docs/comparison.md).
 
 ---
 
@@ -203,18 +278,18 @@ Real-time SSE dashboard at `localhost:8000`:
 
 | Layer | Technology |
 |-------|------------|
-| Orchestration | LangGraph.js |
-| Web server | Fastify + SSE |
-| Frontend | React, Tailwind CSS, Vite |
-| Terminal UI | Custom TUI (ink-style) |
+| Runtime | Node.js >= 20, Bun |
+| Terminal UI | Custom TUI engine (Catppuccin Mocha theme) |
+| LLM engine | Native API tool calling, multi-turn streaming |
+| LLM providers | Anthropic, OpenAI, AWS Bedrock, Vertex AI, OpenRouter, Ollama |
 | Vector memory | LanceDB (embedded) |
-| LLM providers | Anthropic, OpenAI, AWS Bedrock, Vertex AI, OpenRouter |
+| Diff engine | LCS-based line diff (no external deps) |
 | Validation | Zod |
-| Build | tsup + bun |
-| Tests | Vitest |
-| CLI prompts | @clack/prompts |
+| Build | tsup + Vite (web client) |
+| Tests | Bun test runner (475 tests) |
+| JSON parsing | Safe JSON parser with recovery |
 
-Pure TypeScript / Node.js. No Python.
+Pure TypeScript (ESM). No Python. 437 source files, ~63.5k LOC.
 
 ---
 
@@ -224,18 +299,17 @@ Pure TypeScript / Node.js. No Python.
 bun install          # install dependencies
 bun run dev          # watch mode
 bun run build        # production build (tsup + web client)
-bun run typecheck    # type-check
-bun run test         # run tests (Vitest)
+bun run typecheck    # type-check (tsc --noEmit)
+bun run test         # run tests (bun test)
 bun run lint         # lint (eslint src/)
-bun run web          # start dashboard server
-bun run work         # start work session with dashboard
 ```
+
+Pre-commit hook runs typecheck → lint → tests automatically.
 
 ---
 
 ## Security
 
-- Dashboard has **no built-in auth** — bind to `127.0.0.1`
 - Config at `~/.openpawl/config.json` may contain API tokens
 - Agent output is untrusted — review before applying to production
 - Global memory at `~/.openpawl/memory/global.db` — back it up
@@ -252,6 +326,7 @@ See [SECURITY.md](./SECURITY.md) for vulnerability reporting.
 | [ARCHITECTURE.md](./docs/ARCHITECTURE.md) | System design |
 | [CUSTOM_AGENTS.md](./docs/CUSTOM_AGENTS.md) | Custom agent SDK guide |
 | [WEBHOOKS.md](./docs/WEBHOOKS.md) | Webhook event schemas |
+| [comparison.md](./docs/comparison.md) | Feature comparison with other tools |
 
 ---
 

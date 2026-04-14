@@ -20,6 +20,7 @@ export interface ToolCallDetails {
   duration?: number;
   outputSummary?: string;
   success?: boolean;
+  diff?: import("../utils/diff.js").DiffResult;
 }
 
 export interface LLMAgentRunnerOptions {
@@ -29,8 +30,8 @@ export interface LLMAgentRunnerOptions {
   getToolSchemas?: (toolNames: string[]) => ToolDef[];
   /** Get native tool definitions for API function calling. */
   getNativeTools?: (toolNames: string[]) => import("../providers/stream-types.js").NativeToolDefinition[];
-  /** Execute a tool and return the result as a string. */
-  executeTool?: (toolName: string, args: Record<string, unknown>) => Promise<string>;
+  /** Execute a tool and return the result as a string, optionally with diff metadata. */
+  executeTool?: (toolName: string, args: Record<string, unknown>) => Promise<string | { text: string; diff?: import("../utils/diff.js").DiffResult }>;
   /** Doom-loop detector — prevents repeated identical tool calls. */
   doomLoopDetector?: DoomLoopDetector;
   /** Tool output handler — summarizes large outputs and offloads to scratch files. */
@@ -136,7 +137,15 @@ export function createLLMAgentRunner(opts: LLMAgentRunnerOptions = {}): AgentRun
                 if (verdict.action === "warn") {
                   onToolCall?.(agentId, name, "running", { executionId: execId, inputSummary });
                   try {
-                    let result = await executeTool!(name, args);
+                    const rawResult = await executeTool!(name, args);
+                    let result: string;
+                    let diff: import("../utils/diff.js").DiffResult | undefined;
+                    if (typeof rawResult === "object" && rawResult !== null) {
+                      result = rawResult.text;
+                      diff = rawResult.diff;
+                    } else {
+                      result = rawResult;
+                    }
                     const alerts = injectionDetector.detect(result, "tool_output");
                     if (alerts.some((a) => a.severity === "critical")) {
                       result = "[BLOCKED: suspicious content detected in tool output]";
@@ -146,7 +155,7 @@ export function createLLMAgentRunner(opts: LLMAgentRunnerOptions = {}): AgentRun
                       result = summarized.content;
                     }
                     const duration = Date.now() - startTime;
-                    onToolCall?.(agentId, name, "completed", { executionId: execId, duration, outputSummary: result.slice(0, 200), success: true });
+                    onToolCall?.(agentId, name, "completed", { executionId: execId, duration, outputSummary: result.slice(0, 200), success: true, diff });
                     allToolCalls.push({ tool: name, input: JSON.stringify(args), output: result.slice(0, 200), duration, success: true });
                     return result + "\n\n" + verdict.message;
                   } catch (e) {
@@ -161,7 +170,15 @@ export function createLLMAgentRunner(opts: LLMAgentRunnerOptions = {}): AgentRun
 
               onToolCall?.(agentId, name, "running", { executionId: execId, inputSummary });
               try {
-                let result = await executeTool!(name, args);
+                const rawResult = await executeTool!(name, args);
+                let result: string;
+                let diff: import("../utils/diff.js").DiffResult | undefined;
+                if (typeof rawResult === "object" && rawResult !== null) {
+                  result = rawResult.text;
+                  diff = rawResult.diff;
+                } else {
+                  result = rawResult;
+                }
 
                 // Scan tool output for injection attempts before sending to LLM
                 const alerts = injectionDetector.detect(result, "tool_output");
@@ -176,7 +193,7 @@ export function createLLMAgentRunner(opts: LLMAgentRunnerOptions = {}): AgentRun
                 }
 
                 const duration = Date.now() - startTime;
-                onToolCall?.(agentId, name, "completed", { executionId: execId, duration, outputSummary: result.slice(0, 200), success: true });
+                onToolCall?.(agentId, name, "completed", { executionId: execId, duration, outputSummary: result.slice(0, 200), success: true, diff });
                 allToolCalls.push({ tool: name, input: JSON.stringify(args), output: result.slice(0, 200), duration, success: true });
                 return result;
               } catch (e) {

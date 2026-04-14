@@ -695,10 +695,10 @@ export class MessagesComponent implements Component {
   }
 
   /** Mark a tool call as completed or failed. */
-  completeToolCall(executionId: string, success: boolean, outputSummary: string, duration: number): void {
+  completeToolCall(executionId: string, success: boolean, outputSummary: string, duration: number, diff?: import("../../utils/diff.js").DiffResult): void {
     const view = this.activeToolCalls.get(executionId);
     if (!view) return;
-    view.complete({ success, summary: outputSummary, duration });
+    view.complete({ success, summary: outputSummary, duration, diff });
   }
 
   /** Advance all running tool call spinners (call from timer). */

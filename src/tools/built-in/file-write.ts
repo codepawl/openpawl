@@ -2,11 +2,12 @@
  * file_write — create or overwrite file with atomic writes.
  */
 
-import { writeFile, rename, mkdir } from "node:fs/promises";
+import { readFile, writeFile, rename, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { ok, err } from "neverthrow";
 import { resolveSafePath } from "../../core/sandbox.js";
+import { generateDiff } from "../../utils/diff.js";
 import type { ToolDefinition, ToolOutput } from "../types.js";
 
 const inputSchema = z.object({
@@ -39,6 +40,9 @@ export function createFileWriteTool(): ToolDefinition {
       }
 
       try {
+        // Read existing content for diff (null if new file)
+        const before = await readFile(resolved, "utf-8").catch(() => null);
+
         if (createDirs) {
           await mkdir(path.dirname(resolved), { recursive: true });
         }
@@ -49,10 +53,11 @@ export function createFileWriteTool(): ToolDefinition {
         await rename(tmpPath, resolved);
 
         const relPath = path.relative(context.workingDirectory, resolved);
+        const diff = generateDiff(before ?? "", content);
         const output: ToolOutput = {
           success: true,
-          data: { path: relPath, bytes: Buffer.byteLength(content) },
-          summary: `Wrote ${relPath} (${Buffer.byteLength(content)} bytes)`,
+          data: { path: relPath, bytes: Buffer.byteLength(content), diff },
+          summary: `Wrote ${relPath} (+${diff.added} -${diff.removed})`,
           filesModified: [resolved],
           duration: Date.now() - start,
         };

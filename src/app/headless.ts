@@ -290,11 +290,13 @@ async function runSprint(
     taskTokens++;
   });
 
-  runner.on(SprintEvent.AgentTool, ({ toolName, status }) => {
+  runner.on(SprintEvent.AgentTool, ({ toolName, status, details }: { toolName: string; status: string; details?: { diff?: { added: number; removed: number } } }) => {
     if (status === "running") {
       process.stdout.write(`\n    ${pc.dim(`tool: ${toolName}`)}`);
     } else if (status === "completed") {
-      process.stdout.write(pc.dim(` ${ICONS.success}`));
+      const diff = details?.diff;
+      const diffStr = diff ? ` ${pc.green(`+${diff.added}`)} ${pc.red(`-${diff.removed}`)}` : "";
+      process.stdout.write(pc.dim(` ${ICONS.success}`) + diffStr);
     } else if (status === "failed") {
       process.stdout.write(pc.red(` ${ICONS.error}`));
     }
@@ -399,11 +401,13 @@ async function runSolo(
       }
       tokenCount++;
     },
-    onToolCall: (_agentId, toolName, status) => {
+    onToolCall: (_agentId, toolName, status, details) => {
       if (status === "running") {
         process.stdout.write(`\n    ${pc.dim(`tool: ${toolName}`)}`);
       } else if (status === "completed") {
-        process.stdout.write(pc.dim(` ${ICONS.success}`));
+        const diff = details?.diff as { added: number; removed: number } | undefined;
+        const diffStr = diff ? ` ${pc.green(`+${diff.added}`)} ${pc.red(`-${diff.removed}`)}` : "";
+        process.stdout.write(pc.dim(` ${ICONS.success}`) + diffStr);
       } else if (status === "failed") {
         process.stdout.write(pc.red(` ${ICONS.error}`));
       }
@@ -417,7 +421,10 @@ async function runSolo(
         workingDirectory: process.cwd(),
       });
       if (result.isOk()) {
-        return result.value.fullOutput || JSON.stringify(result.value.data) || result.value.summary;
+        const text = result.value.fullOutput || JSON.stringify(result.value.data) || result.value.summary;
+        const data = result.value.data as Record<string, unknown> | undefined;
+        const diff = data?.diff as import("../utils/diff.js").DiffResult | undefined;
+        return diff ? { text, diff } : text;
       }
       const cause = "cause" in result.error ? `: ${result.error.cause}` : "";
       throw new Error(`${result.error.type}${cause}`);
@@ -517,11 +524,13 @@ async function runCollab(
       }
       tokenCount++;
     },
-    onToolCall: (_agentId, toolName, status) => {
+    onToolCall: (_agentId, toolName, status, details) => {
       if (status === "running") {
         process.stdout.write(`\n    ${pc.dim(`tool: ${toolName}`)}`);
       } else if (status === "completed") {
-        process.stdout.write(pc.dim(` ${ICONS.success}`));
+        const diff = details?.diff as { added: number; removed: number } | undefined;
+        const diffStr = diff ? ` ${pc.green(`+${diff.added}`)} ${pc.red(`-${diff.removed}`)}` : "";
+        process.stdout.write(pc.dim(` ${ICONS.success}`) + diffStr);
       } else if (status === "failed") {
         process.stdout.write(pc.red(` ${ICONS.error}`));
       }
@@ -535,7 +544,10 @@ async function runCollab(
         workingDirectory: process.cwd(),
       });
       if (result.isOk()) {
-        return result.value.fullOutput || JSON.stringify(result.value.data) || result.value.summary;
+        const text = result.value.fullOutput || JSON.stringify(result.value.data) || result.value.summary;
+        const data = result.value.data as Record<string, unknown> | undefined;
+        const diff = data?.diff as import("../utils/diff.js").DiffResult | undefined;
+        return diff ? { text, diff } : text;
       }
       const cause = "cause" in result.error ? `: ${result.error.cause}` : "";
       throw new Error(`${result.error.type}${cause}`);

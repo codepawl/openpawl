@@ -3,6 +3,7 @@
  * Shows spinner → result with collapsible output.
  */
 
+import type { DiffResult, DiffLine } from "../../utils/diff.js";
 import { defaultTheme, ctp } from "../themes/default.js";
 import { ICONS } from "../constants/icons.js";
 import { renderMoreLines } from "../utils/scroll-indicators.js";
@@ -18,6 +19,7 @@ export interface ToolCallViewState {
   fullOutput?: string;
   duration?: number;
   expanded: boolean;
+  diff?: DiffResult;
 }
 
 // Completed-tense verbs for each tool
@@ -48,7 +50,7 @@ export class ToolCallView {
 
   render(width: number): string[] {
     const lines: string[] = [];
-    const { status, inputSummary, duration, expanded, fullOutput, outputSummary } = this.state;
+    const { status, inputSummary, duration, expanded, fullOutput, outputSummary, diff } = this.state;
 
     const icon = this.getIcon();
     const iconColor = this.getIconColor();
@@ -56,15 +58,26 @@ export class ToolCallView {
     const target = inputSummary.slice(0, Math.min(50, width - 20));
     const durationStr = duration && duration > 100 ? ` ${formatDuration(duration)}` : "";
 
-    // Expand indicator
-    const canExpand = !!fullOutput && fullOutput.split("\n").length > 1;
+    // Diff counts (e.g., "(+45 -12)")
+    const diffCountStr = diff && (diff.added > 0 || diff.removed > 0)
+      ? ` ${ctp.green(`+${diff.added}`)} ${ctp.red(`-${diff.removed}`)}`
+      : "";
+
+    // Determine if diff block is expandable
+    const diffLineCount = diff?.lines.length ?? 0;
+    const hasDiffLines = diffLineCount > 0;
+    const autoShowDiff = hasDiffLines && diffLineCount <= 10;
+    const showDiff = autoShowDiff || (expanded && hasDiffLines);
+
+    // Expand indicator (diff or fullOutput)
+    const canExpand = (hasDiffLines && !autoShowDiff) || (!!fullOutput && fullOutput.split("\n").length > 1);
     const expandHint = canExpand
       ? (expanded ? `  ${ICONS.expand}` : `  ${ICONS.cursor}`)
       : "";
 
-    // Main line: "  ⠋ Reading README.md...  (0.2s)"
+    // Main line: "  ✓ Wrote src/server.ts +45 -12 (0.3s)"
     const suffix = status === "running" ? "..." : "";
-    const mainContent = `  ${iconColor(icon)} ${verb} ${target}${suffix}${durationStr}${expandHint}`;
+    const mainContent = `  ${iconColor(icon)} ${verb} ${target}${diffCountStr}${suffix}${durationStr}${expandHint}`;
     lines.push(mainContent);
 
     // Error summary (failed state)
@@ -72,8 +85,15 @@ export class ToolCallView {
       lines.push(`    ${defaultTheme.error(outputSummary.slice(0, width - 6))}`);
     }
 
-    // Expanded output
-    if (expanded && fullOutput) {
+    // Diff block (for file_write/file_edit)
+    if (showDiff && diff) {
+      for (const dl of diff.lines) {
+        lines.push(`  ${defaultTheme.dim("│")} ${renderDiffLine(dl)}`);
+      }
+    }
+
+    // Expanded output (non-diff tools, or if no diff lines)
+    if (expanded && fullOutput && !showDiff) {
       const outputLines = fullOutput.split("\n");
       const maxVisible = 25;
 
@@ -99,11 +119,12 @@ export class ToolCallView {
     this.state.progressMessage = message;
   }
 
-  complete(output: { success: boolean; summary: string; fullOutput?: string; duration: number }): void {
+  complete(output: { success: boolean; summary: string; fullOutput?: string; duration: number; diff?: DiffResult }): void {
     this.state.status = output.success ? "completed" : "failed";
     this.state.outputSummary = output.summary;
     this.state.fullOutput = output.fullOutput;
     this.state.duration = output.duration;
+    this.state.diff = output.diff;
   }
 
   abort(): void {
@@ -128,10 +149,14 @@ export class ToolCallView {
     const iconColor = this.getIconColor();
     const verb = this.getVerb();
     const target = this.state.inputSummary.slice(0, 50);
+    const { diff } = this.state;
+    const diffStr = diff && (diff.added > 0 || diff.removed > 0)
+      ? ` ${ctp.green(`+${diff.added}`)} ${ctp.red(`-${diff.removed}`)}`
+      : "";
     const dur = this.state.duration && this.state.duration > 100
       ? ` ${formatDuration(this.state.duration)}`
       : "";
-    return `${iconColor(icon)} ${verb} ${target}${dur}`;
+    return `${iconColor(icon)} ${verb} ${target}${diffStr}${dur}`;
   }
 
   private getIcon(): string {
@@ -171,4 +196,17 @@ function formatDuration(ms: number): string {
   // Tool calls show decimal seconds for precision
   const label = ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
   return defaultTheme.dim(`(${label})`);
+}
+
+function renderDiffLine(dl: DiffLine): string {
+  switch (dl.type) {
+    case "added":
+      return ctp.green(`+ ${dl.content}`);
+    case "removed":
+      return ctp.red(`- ${dl.content}`);
+    case "context":
+      return defaultTheme.dim(`  ${dl.content}`);
+    case "collapsed":
+      return defaultTheme.dim(`  ... ${dl.content} ...`);
+  }
 }

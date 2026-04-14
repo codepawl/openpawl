@@ -7,6 +7,7 @@ import path from "node:path";
 import { z } from "zod";
 import { ok, err } from "neverthrow";
 import { resolveSafePath } from "../../core/sandbox.js";
+import { generateDiff } from "../../utils/diff.js";
 import type { ToolDefinition, ToolOutput, ToolError } from "../types.js";
 
 const inputSchema = z.object({
@@ -64,10 +65,11 @@ export function createFileEditTool(): ToolDefinition {
         await rename(tmpPath, resolved);
 
         const relPath = path.relative(context.workingDirectory, resolved);
+        const diff = generateDiff(content, newContent);
         const output: ToolOutput = {
           success: true,
-          data: { path: relPath, searchLen: search.length, replaceLen: replacement.length },
-          summary: `Edited ${relPath}: replaced ${search.length} chars with ${replacement.length} chars`,
+          data: { path: relPath, searchLen: search.length, replaceLen: replacement.length, diff },
+          summary: `Edited ${relPath} (+${diff.added} -${diff.removed})`,
           filesModified: [resolved],
           duration: Date.now() - start,
         };
