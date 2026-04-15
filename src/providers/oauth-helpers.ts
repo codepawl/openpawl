@@ -20,8 +20,9 @@ export function startOAuthCallbackServer(
         resolve(code);
       } else {
         const error = url.searchParams.get("error") ?? "No code received";
+        const safeError = error.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
         res.writeHead(400, { "Content-Type": "text/html" });
-        res.end(`<html><body><h2>Error</h2><p>${error}</p></body></html>`);
+        res.end(`<html><body><h2>Error</h2><p>${safeError}</p></body></html>`);
         reject(new Error(error));
       }
       setTimeout(() => server.close(), 500);

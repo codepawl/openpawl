@@ -1510,7 +1510,7 @@
         const now = new Date().toLocaleTimeString("en-GB", { hour12: false });
         const el = document.createElement("div");
         el.className = "ev";
-        el.innerHTML = `<span class="ev-time">[${ts || now}]</span> <span class="${color}">${name}:</span> ${escapeHtml(msg)}`;
+        el.innerHTML = `<span class="ev-time">[${escapeHtml(ts || now)}]</span> <span class="${color}">${escapeHtml(name)}:</span> ${escapeHtml(msg)}`;
         feed.appendChild(el);
         if (feed.children.length > 200) feed.removeChild(feed.firstChild);
         feed.scrollTop = feed.scrollHeight;
@@ -1608,12 +1608,12 @@
         const outcome = summary.outcome || "unknown";
         const fs = summary.final_state || {};
         tr.innerHTML =
-          `<td>${gen}</td>` +
-          `<td class="outcome-${outcome}">${outcome.toUpperCase()}</td>` +
-          `<td>${fs.cycles_survived ?? summary.total_cycles ?? "-"}</td>` +
-          `<td>${fs.tasks_completed ?? "-"}</td>` +
-          `<td>${fs.tasks_failed ?? "-"}</td>` +
-          `<td>${summary.quality ?? "-"}</td>`;
+          `<td>${escapeHtml(String(gen))}</td>` +
+          `<td class="outcome-${escapeHtml(outcome)}">${escapeHtml(outcome.toUpperCase())}</td>` +
+          `<td>${escapeHtml(String(fs.cycles_survived ?? summary.total_cycles ?? "-"))}</td>` +
+          `<td>${escapeHtml(String(fs.tasks_completed ?? "-"))}</td>` +
+          `<td>${escapeHtml(String(fs.tasks_failed ?? "-"))}</td>` +
+          `<td>${escapeHtml(String(summary.quality ?? "-"))}</td>`;
         tbody.appendChild(tr);
       }
 
@@ -1864,7 +1864,7 @@
           const amEl = document.getElementById("agent-messages");
           if (amEl) {
             amEl.innerHTML = st.agent_messages.slice(-8).map((m) =>
-              `<div class="ev"><span class="d">[${m.timestamp || ""}]</span> <span class="c">${m.from_bot}:</span> ${escapeHtml(m.content)}</div>`
+              `<div class="ev"><span class="d">[${escapeHtml(m.timestamp || "")}]</span> <span class="c">${escapeHtml(m.from_bot || "")}:</span> ${escapeHtml(m.content)}</div>`
             ).join("");
             amEl.scrollTop = amEl.scrollHeight;
           }

@@ -32,8 +32,11 @@ function getNestedValue(obj: Record<string, unknown>, path: string): unknown {
   );
 }
 
+const BANNED_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
 function setNestedValue(obj: Record<string, unknown>, path: string, value: unknown): void {
   const keys = path.split(".");
+  if (keys.some((k) => BANNED_KEYS.has(k))) return;
   let target = obj;
   for (let i = 0; i < keys.length - 1; i++) {
     if (!target[keys[i]] || typeof target[keys[i]] !== "object") {
