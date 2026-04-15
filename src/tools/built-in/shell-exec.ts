@@ -53,13 +53,20 @@ export function createShellExecTool(): ToolDefinition {
         workDir = resolveSafePath(cwd, context.workingDirectory);
       }
 
+      // Rewrite absolute workspace paths embedded in the command string
+      // so agents can't create nested dirs like workdir/home/user/project/...
+      const escaped = workDir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const sanitizedCommand = command
+        .replace(new RegExp(escaped + "/", "g"), "")
+        .replace(new RegExp(escaped + "(?=[\\s;|&]|$)", "g"), ".");
+
       try {
         const { executeShell } = await import("../../app/shell.js");
 
         const chunks: string[] = [];
-        const result = await executeShell(command, (chunk) => {
+        const result = await executeShell(sanitizedCommand, (chunk) => {
           chunks.push(chunk);
-          context.onProgress?.(`Running: ${command.slice(0, 40)}...`);
+          context.onProgress?.(`Running: ${sanitizedCommand.slice(0, 40)}...`);
         }, {
           cwd: workDir,
           timeout,
@@ -70,7 +77,7 @@ export function createShellExecTool(): ToolDefinition {
         const output: ToolOutput = {
           success: result.exitCode === 0,
           data: { exitCode: result.exitCode, stdout: fullOutput },
-          summary: `Ran \`${command.slice(0, 60)}\` → exit ${result.exitCode} (${Date.now() - start}ms)`,
+          summary: `Ran \`${sanitizedCommand.slice(0, 60)}\` → exit ${result.exitCode} (${Date.now() - start}ms)`,
           fullOutput,
           duration: Date.now() - start,
         };

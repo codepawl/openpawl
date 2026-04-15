@@ -73,6 +73,10 @@ export function setupTuiCallbacks(
     return layout.messages.toggleCollapse(idx + 1);
   };
 
+  layout.tui.onToggleAllToolCalls = () => {
+    return layout.messages.toggleAllToolCalls();
+  };
+
   layout.tui.onScrollPositionChanged = (scrollOffset) => {
     if (scrollOffset === 0) {
       layout.divider.setLabel(null);

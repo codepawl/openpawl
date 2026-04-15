@@ -135,6 +135,10 @@ export class ToolCallView {
     this.state.expanded = !this.state.expanded;
   }
 
+  setExpanded(state: boolean): void {
+    this.state.expanded = state;
+  }
+
   advanceSpinner(): void {
     this.spinnerFrame++;
   }

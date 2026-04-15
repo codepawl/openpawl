@@ -44,6 +44,7 @@ export const ACTIONS = {
   "messages.scroll.prevPrompt": "Jump to previous user prompt",
   "messages.scroll.nextPrompt": "Jump to next user prompt",
   "messages.collapse.toggle": "Expand/collapse focused message",
+  "messages.toolCalls.toggleAll": "Expand/collapse all tool calls",
 
   // App
   "app.help": "Show help",

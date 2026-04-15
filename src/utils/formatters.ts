@@ -39,6 +39,49 @@ export function formatBytes(bytes: number): string {
 }
 
 /**
+ * Extract the key argument from tool call args for display.
+ * Prioritizes: path > command > pattern > url > first string arg.
+ */
+export function formatInputSummary(_toolName: string, args: Record<string, unknown>): string {
+  const path = args.path ?? args.file_path;
+  if (typeof path === "string") return path;
+  const command = args.command;
+  if (typeof command === "string") return command.length > 50 ? command.slice(0, 47) + "..." : command;
+  const pattern = args.pattern ?? args.query;
+  if (typeof pattern === "string") return `"${pattern.length > 40 ? pattern.slice(0, 37) + "..." : pattern}"`;
+  const url = args.url;
+  if (typeof url === "string") return url.length > 50 ? url.slice(0, 47) + "..." : url;
+  const keys = Object.keys(args);
+  if (keys.length === 0) return "";
+  const first = args[keys[0]!];
+  if (typeof first === "string") return first.length > 50 ? first.slice(0, 47) + "..." : first;
+  return JSON.stringify(args).slice(0, 50);
+}
+
+/**
+ * Truncate an inputSummary for compact display.
+ * Long paths → last 2 segments with "..." prefix.
+ * Caps at maxLen chars.
+ */
+export function formatToolTarget(inputSummary: string | undefined, maxLen = 40): string {
+  if (!inputSummary) return "";
+  const trimmed = inputSummary.trim();
+  if (trimmed.length === 0) return "";
+
+  // For paths: keep last 2 segments if too long
+  if (trimmed.includes("/") && trimmed.length > maxLen) {
+    const parts = trimmed.split("/");
+    const tail = parts.slice(-2).join("/");
+    const result = tail.length > maxLen ? tail.slice(-maxLen + 3) : `...${tail}`;
+    return result.length > maxLen ? result.slice(-maxLen) : result;
+  }
+
+  // Generic truncation
+  if (trimmed.length > maxLen) return trimmed.slice(0, maxLen - 3) + "...";
+  return trimmed;
+}
+
+/**
  * Format an ISO date string to a relative time label.
  * "just now", "5m ago", "2h ago", "yesterday", "3d ago", "1w ago", "2mo ago"
  */

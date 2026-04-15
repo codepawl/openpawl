@@ -283,21 +283,8 @@ export function createLLMAgentRunner(opts: LLMAgentRunnerOptions = {}): AgentRun
   };
 }
 
-function formatInputSummary(toolName: string, args: Record<string, unknown>): string {
-  const path = args.path ?? args.file_path;
-  if (typeof path === "string") return path;
-  const command = args.command;
-  if (typeof command === "string") return command.length > 50 ? command.slice(0, 47) + "..." : command;
-  const pattern = args.pattern ?? args.query;
-  if (typeof pattern === "string") return `"${pattern.length > 40 ? pattern.slice(0, 37) + "..." : pattern}"`;
-  const url = args.url;
-  if (typeof url === "string") return url.length > 50 ? url.slice(0, 47) + "..." : url;
-  const keys = Object.keys(args);
-  if (keys.length === 0) return "";
-  const first = args[keys[0]!];
-  if (typeof first === "string") return first.length > 50 ? first.slice(0, 47) + "..." : first;
-  return JSON.stringify(args).slice(0, 50);
-}
+// Re-export from shared formatters
+import { formatInputSummary } from "../utils/formatters.js";
 
 function makeResult(
   agentId: string,

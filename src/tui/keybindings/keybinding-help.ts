@@ -151,6 +151,7 @@ export function buildHelpSections(leaderBindings: LeaderBinding[], leaderCombo: 
       entries: [
         { key: "ctrl+p", description: "Command palette" },
         { key: "ctrl+,", description: "Settings" },
+        { key: "ctrl+t", description: "Expand/collapse all tool calls" },
         { key: "escape", description: "Abort / dismiss" },
         { key: "alt+t", description: "Toggle extended thinking" },
         { key: "alt+p", description: "Model picker" },

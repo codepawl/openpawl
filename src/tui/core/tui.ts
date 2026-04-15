@@ -97,6 +97,8 @@ export class TUI {
   onScrollToPrompt?: (direction: "prev" | "next") => number | null;
   /** Called when Ctrl+, or app.settings is triggered. */
   onOpenSettings?: () => void;
+  /** Called when Ctrl+t toggles all tool call details. */
+  onToggleAllToolCalls?: () => boolean;
   /** Called to toggle collapse on the message currently in view. */
   onToggleCollapse?: () => boolean;
   /** Called when scroll position changes. */
@@ -821,6 +823,12 @@ export class TUI {
     }
     if (action === "messages.collapse.toggle") {
       if (this.onToggleCollapse?.()) {
+        this.requestRender();
+      }
+      return true;
+    }
+    if (action === "messages.toolCalls.toggleAll") {
+      if (this.onToggleAllToolCalls?.()) {
         this.requestRender();
       }
       return true;

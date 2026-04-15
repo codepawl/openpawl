@@ -164,6 +164,8 @@ export class SprintRunner extends EventEmitter {
     startedAt: new Date().toISOString(),
     completedTasks: 0,
     failedTasks: 0,
+    inputTokens: 0,
+    outputTokens: 0,
   };
   private abortController: AbortController | null = null;
   private paused = false;
@@ -186,6 +188,8 @@ export class SprintRunner extends EventEmitter {
       startedAt: new Date().toISOString(),
       completedTasks: 0,
       failedTasks: 0,
+      inputTokens: 0,
+      outputTokens: 0,
     };
     this.emitTyped("sprint:start", { goal });
 
@@ -214,12 +218,19 @@ export class SprintRunner extends EventEmitter {
     this.emitTyped("sprint:planning", undefined);
     let planResponse: string;
     try {
-      planResponse = await profileMeasure("sprint_planning", goal.slice(0, 40), () =>
+      const raw = await profileMeasure("sprint_planning", goal.slice(0, 40), () =>
         this.runAgent("planner", {
           prompt: PLANNER_PROMPT(goal, options?.maxTasks ?? 10, this.teamContext, options?.lessons),
           signal: this.abortController!.signal,
         }),
       );
+      if (typeof raw === "string") {
+        planResponse = raw;
+      } else {
+        planResponse = raw.text;
+        this.state.inputTokens += raw.usage.input;
+        this.state.outputTokens += raw.usage.output;
+      }
     } catch (err) {
       this.state.phase = "stopped";
       const error = err instanceof Error ? err : new Error(String(err));
@@ -468,13 +479,21 @@ export class SprintRunner extends EventEmitter {
     this.emitTyped("sprint:task:start", { task, agentName });
 
     try {
-      const result = await profileMeasure("sprint_task", `task_${index + 1}_${agentName}`, () =>
+      const raw = await profileMeasure("sprint_task", `task_${index + 1}_${agentName}`, () =>
         this.runAgent(agentName, {
           prompt: TASK_PROMPT(task, this.state),
           signal: this.abortController!.signal,
         }),
       );
-      task.result = result;
+
+      // Extract text + usage from new return shape (backward-compat with plain string)
+      if (typeof raw === "string") {
+        task.result = raw;
+      } else {
+        task.result = raw.text;
+        this.state.inputTokens += raw.usage.input;
+        this.state.outputTokens += raw.usage.output;
+      }
 
       if (this.taskExpectsWrite(task) && !this.taskDidWrite(task)) {
         task.status = "incomplete";
@@ -541,7 +560,7 @@ export class SprintRunner extends EventEmitter {
   protected async runAgent(
     _agentName: string,
     _opts: { prompt: string; signal: AbortSignal },
-  ): Promise<string> {
+  ): Promise<string | { text: string; usage: { input: number; output: number } }> {
     throw new Error("runAgent must be wired to LLM before calling run()");
   }
 
@@ -602,6 +621,8 @@ export class SprintRunner extends EventEmitter {
       completedTasks: this.state.completedTasks,
       failedTasks: this.state.failedTasks,
       duration: Date.now() - startTime,
+      inputTokens: this.state.inputTokens,
+      outputTokens: this.state.outputTokens,
     };
   }
 

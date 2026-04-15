@@ -775,6 +775,18 @@ export class MessagesComponent implements Component {
     this.clearToolCalls();
   }
 
+  /** Toggle expand/collapse on all active tool calls. */
+  toggleAllToolCalls(): boolean {
+    if (this.activeToolCalls.size === 0) return false;
+    const anyCollapsed = [...this.activeToolCalls.values()].some(v => !v.isExpanded);
+    for (const view of this.activeToolCalls.values()) {
+      view.setExpanded(anyCollapsed);
+    }
+    this.renderCache.clear();
+    this.heightCache.clear();
+    return true;
+  }
+
   /** Remove all pending (queued) messages. */
   removePendingMessages(): void {
     this.messages = this.messages.filter(m => !m.pending);

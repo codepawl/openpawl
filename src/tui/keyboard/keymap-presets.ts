@@ -45,6 +45,7 @@ export const WINDOWS_KEYMAP: KeymapPreset = {
   "messages.scroll.prevPrompt": "ctrl+up",
   "messages.scroll.nextPrompt": "ctrl+down",
   "messages.collapse.toggle": "ctrl+e",
+  "messages.toolCalls.toggleAll": "ctrl+t",
 
   "app.help": "f1",
   "app.quit": "ctrl+d",

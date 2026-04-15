@@ -9,6 +9,7 @@ import { getProjectContext } from "../context/project-context.js";
 import type { AgentRegistry } from "../router/agent-registry.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { ToolExecutor } from "../tools/executor.js";
+import { formatInputSummary } from "../utils/formatters.js";
 
 export interface CreateSprintRunnerOptions {
   agents: AgentRegistry;
@@ -23,7 +24,9 @@ export function createSprintRunner(opts: CreateSprintRunnerOptions): SprintRunne
     protected override async runAgent(
       agentName: string,
       runOpts: { prompt: string; signal: AbortSignal },
-    ): Promise<string> {
+    ): Promise<{ text: string; usage: { input: number; output: number } }> {
+      // Capture cwd once at entry — avoids stale/racy process.cwd() in callbacks
+      const workingDirectory = process.cwd();
       const agent = this.agents.get(agentName);
       if (!agent) {
         throw new Error(`Unknown agent: ${agentName}`);
@@ -56,7 +59,7 @@ export function createSprintRunner(opts: CreateSprintRunnerOptions): SprintRunne
         const toolList = nativeTools
           .map((t) => `- ${t.function.name}: ${t.function.description}`)
           .join("\n");
-        systemPrompt += `\n\nTools:\n${toolList}\n\nWorking directory: ${process.cwd()}\nUse tools directly. Never ask the user to paste code or run commands.\nWhen you need multiple independent operations (reading files, listing directories, writing files that don't depend on each other), request them all in a single response.`;
+        systemPrompt += `\n\nTools:\n${toolList}\n\nWorking directory: ${workingDirectory}\nUse tools directly. Never ask the user to paste code or run commands.\nWhen you need multiple independent operations (reading files, listing directories, writing files that don't depend on each other), request them all in a single response.`;
       }
 
       const response = await callLLMMultiTurn({
@@ -67,7 +70,7 @@ export function createSprintRunner(opts: CreateSprintRunnerOptions): SprintRunne
           if (!toolExecutor) return "Tool execution not available";
 
           const execId = `sprint_tc_${Date.now()}`;
-          const inputSummary = `${name}(${JSON.stringify(args).slice(0, 100)})`;
+          const inputSummary = formatInputSummary(name, args as Record<string, unknown>);
           const startTime = Date.now();
 
           this.recordToolCall(name);
@@ -81,7 +84,7 @@ export function createSprintRunner(opts: CreateSprintRunnerOptions): SprintRunne
           const result = await toolExecutor.execute(name, args, {
             agentId: agentName,
             sessionId: "sprint",
-            workingDirectory: process.cwd(),
+            workingDirectory,
             abortSignal: runOpts.signal,
           });
 
@@ -115,7 +118,7 @@ export function createSprintRunner(opts: CreateSprintRunnerOptions): SprintRunne
         maxTurns: 10,
       });
 
-      return response.text;
+      return { text: response.text, usage: response.usage };
     }
   })(agents);
 }
