@@ -1,14 +1,19 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="512" height="436" viewBox="0 0 100 85">
-  <line x1="30" y1="18" x2="50" y2="58" stroke="#89b4fa" stroke-width="2" stroke-opacity="0.5"/>
-  <line x1="50" y1="10" x2="50" y2="58" stroke="#89b4fa" stroke-width="2" stroke-opacity="0.5"/>
-  <line x1="70" y1="18" x2="50" y2="58" stroke="#89b4fa" stroke-width="2" stroke-opacity="0.5"/>
-  <line x1="85" y1="38" x2="50" y2="58" stroke="#89b4fa" stroke-width="2" stroke-opacity="0.5"/>
-  <line x1="30" y1="18" x2="50" y2="10" stroke="#89b4fa" stroke-width="2" stroke-opacity="0.5"/>
-  <line x1="50" y1="10" x2="70" y2="18" stroke="#89b4fa" stroke-width="2" stroke-opacity="0.5"/>
-  <line x1="70" y1="18" x2="85" y2="38" stroke="#89b4fa" stroke-width="2" stroke-opacity="0.5"/>
-  <circle cx="30" cy="18" r="10" fill="#cba6f7" opacity="0.85"/>
-  <circle cx="50" cy="10" r="10" fill="#cba6f7" opacity="0.85"/>
-  <circle cx="70" cy="18" r="10" fill="#cba6f7" opacity="0.85"/>
-  <circle cx="85" cy="38" r="9" fill="#cba6f7" opacity="0.85"/>
-  <circle cx="50" cy="58" r="18" fill="#cba6f7"/>
+<svg width="500" height="500" viewBox="0 0 500 500" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g clip-path="url(#clip0_28_11)">
+<g clip-path="url(#clip1_28_11)">
+<rect y="-0.776764" width="500" height="500" rx="25" fill="white"/>
+<line x1="154.458" y1="244.456" x2="191.781" y2="207.133" stroke="black" stroke-width="35.1886" stroke-linecap="round"/>
+<line x1="191.781" y1="207.133" x2="154.458" y2="169.81" stroke="black" stroke-width="35.1886" stroke-linecap="round"/>
+<line x1="308.781" y1="207.008" x2="361.564" y2="207.008" stroke="black" stroke-width="35.1886" stroke-linecap="round"/>
+<circle cx="250.72" cy="310.815" r="26.3915" fill="black"/>
+</g>
+</g>
+<defs>
+<clipPath id="clip0_28_11">
+<rect width="500" height="500" fill="white"/>
+</clipPath>
+<clipPath id="clip1_28_11">
+<rect width="500" height="500" fill="white"/>
+</clipPath>
+</defs>
 </svg>
