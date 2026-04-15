@@ -46,7 +46,12 @@ export function createShellExecTool(): ToolDefinition {
         }
       }
 
-      const workDir = cwd ?? context.workingDirectory;
+      // Resolve LLM-supplied cwd through sandbox to prevent path nesting
+      let workDir = context.workingDirectory;
+      if (cwd) {
+        const { resolveSafePath } = await import("../../core/sandbox.js");
+        workDir = resolveSafePath(cwd, context.workingDirectory);
+      }
 
       try {
         const { executeShell } = await import("../../app/shell.js");

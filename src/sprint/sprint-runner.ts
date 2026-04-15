@@ -12,6 +12,7 @@ import { parseTasks } from "./task-parser.js";
 import { validatePlan, reorderSetupFirst } from "./plan-validator.js";
 import { profileMeasure } from "../telemetry/profiler.js";
 import { resolveModelForAgent } from "../core/model-config.js";
+import { debugLog, isDebugEnabled, truncateStr, TRUNCATION } from "../debug/logger.js";
 
 const PLANNER_PROMPT = (goal: string, maxTasks: number, teamContext?: SprintTeamContext, lessons?: string[]) => {
   let prompt =
@@ -39,7 +40,8 @@ const PLANNER_PROMPT = (goal: string, maxTasks: number, teamContext?: SprintTeam
     `4. NO ASSUMED LIBRARIES: Only use technologies explicitly mentioned in the goal. ` +
     `If the goal says PostgreSQL, use pg driver directly, not an ORM unless specified. ` +
     `If the goal doesn't specify a library for something, use the simplest built-in approach.\n` +
-    `5. SPECIFICITY: Each task must name the exact file path, what it should contain, and the technology to use.\n` +
+    `5. SPECIFICITY: Each task must name the exact file path relative to the working directory root, what it should contain, and the technology to use. ` +
+    `File paths must NOT include the project folder name — the agent's cwd is already inside it. Use "src/index.ts" NOT "my-project/src/index.ts".\n` +
     `6. TECH CONSTRAINTS: Every task description MUST repeat the specific technologies from the goal (database, framework, language, libraries). ` +
     `Example: "Implement auth routes using PostgreSQL for user storage, bcrypt for passwords, Zod for validation" — NOT just "Implement auth routes".\n` +
     `7. WORKER-READY: Each task must include enough detail for a coder to implement without re-reading the full plan: ` +
@@ -235,7 +237,17 @@ export class SprintRunner extends EventEmitter {
     this.state.tasks = parseTasks(planResponse);
 
     // Validate tasks — filter out questions and invalid entries
+    const _preFilterCount = this.state.tasks.length;
     this.state.tasks = filterInvalidTasks(this.state.tasks);
+    if (isDebugEnabled() && _preFilterCount !== this.state.tasks.length) {
+      debugLog("info", "sprint", "sprint:task_validation", {
+        data: {
+          beforeCount: _preFilterCount,
+          afterCount: this.state.tasks.length,
+          filtered: _preFilterCount - this.state.tasks.length,
+        },
+      });
+    }
     if (this.state.tasks.length === 0) {
       // All tasks were invalid (likely all questions) — treat as needs clarification
       this.state.phase = "stopped";
@@ -263,6 +275,17 @@ export class SprintRunner extends EventEmitter {
     const maxConcurrency = options?.maxConcurrency ?? 3;
     const tasks = this.state.tasks;
     const useParallel = tasks.length >= 3 && tasks.some((t) => t.dependsOn && t.dependsOn.length > 0);
+
+    // Debug: log task dependency graph and execution mode
+    if (isDebugEnabled()) {
+      const depGraph: Record<string, number[]> = {};
+      for (const t of tasks) {
+        depGraph[t.id] = t.dependsOn ?? [];
+      }
+      debugLog("info", "sprint", "sprint:dependency_graph", {
+        data: { depGraph, executionMode: useParallel ? "parallel" : "sequential", maxConcurrency },
+      });
+    }
 
     if (useParallel) {
       await this.executeParallel(tasks, maxConcurrency);
@@ -428,6 +451,18 @@ export class SprintRunner extends EventEmitter {
     this.state.currentTaskIndex = index;
     const agentName = this.assignAgent(task);
     task.assignedAgent = agentName;
+
+    // Debug: log task assignment
+    if (isDebugEnabled()) {
+      debugLog("info", "sprint", "sprint:task_assignment", {
+        data: {
+          taskId: task.id,
+          agent: agentName,
+          description: truncateStr(task.description, 100),
+          hasTemplate: !!this.teamContext,
+        },
+      });
+    }
     task.status = "in_progress";
     task.toolsCalled = [];
     this.emitTyped("sprint:task:start", { task, agentName });
@@ -468,6 +503,17 @@ export class SprintRunner extends EventEmitter {
   private async retryTask(task: SprintTask, index: number): Promise<void> {
     const origError = task.error ?? "unknown";
     const origDesc = task.description;
+
+    // Debug: log retry attempt
+    if (isDebugEnabled()) {
+      debugLog("info", "sprint", "sprint:task_retry", {
+        data: {
+          taskId: task.id,
+          originalError: truncateStr(origError, TRUNCATION.goalText),
+          taskIndex: index,
+        },
+      });
+    }
 
     // Reset task state
     task.status = "pending";

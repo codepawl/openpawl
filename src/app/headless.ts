@@ -18,7 +18,7 @@ import pc from "picocolors";
 import { ICONS } from "../tui/constants/icons.js";
 import { formatDuration } from "../utils/formatters.js";
 import { SprintEvent, ToolEvent } from "../router/event-types.js";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { writeFileSync, mkdirSync } from "node:fs";
 import { createSessionManager } from "../session/index.js";
@@ -64,7 +64,10 @@ function parseArgs(args: string[]): HeadlessOptions {
       else if (m === "chat") mode = "solo"; // backward compatibility
       else if (m === "team") mode = "collab"; // backward compatibility
     } else if (arg === "--workdir" && args[i + 1]) {
-      workdir = args[++i]!;
+      const raw = args[++i]!;
+      // Expand ~ to home directory (Node doesn't do this automatically)
+      const expanded = raw.startsWith("~") ? raw.replace(/^~/, homedir()) : raw;
+      workdir = resolve(expanded);
     } else if (arg === "--template" && args[i + 1]) {
       template = args[++i]!;
     } else if (arg === "--headless") {
@@ -149,6 +152,21 @@ export async function runHeadless(args: string[]): Promise<void> {
     approve();
   });
 
+  // Wire debug logging (opt-in via OPENPAWL_DEBUG=true)
+  if (process.env.OPENPAWL_DEBUG) {
+    const { setDebugSessionId } = await import("../debug/logger.js");
+    const { wireDebugToToolExecutor, logStartupInfo } = await import("../debug/wiring.js");
+    setDebugSessionId(effectiveMode);
+    wireDebugToToolExecutor(toolExec);
+    logStartupInfo({
+      mode: effectiveMode,
+      template: opts.template ?? undefined,
+      goal: opts.goal,
+      workdir: projectDir,
+      runs: opts.runs,
+    });
+  }
+
   let accumulatedLessons: string[] = [];
 
   for (let run = 0; run < opts.runs; run++) {
@@ -159,6 +177,16 @@ export async function runHeadless(args: string[]): Promise<void> {
     // Show lessons being applied
     if (accumulatedLessons.length > 0 && effectiveMode === "sprint") {
       console.log(pc.dim(`  [applying ${accumulatedLessons.length} lesson${accumulatedLessons.length === 1 ? "" : "s"} from previous run${accumulatedLessons.length === 1 ? "" : "s"}]`));
+      if (process.env.OPENPAWL_DEBUG) {
+        const { debugLog, truncateStr, TRUNCATION } = await import("../debug/logger.js");
+        debugLog("info", "sprint", "sprint:lesson_injection", {
+          data: {
+            run: run + 1,
+            lessonCount: accumulatedLessons.length,
+            lessons: accumulatedLessons.map((l) => truncateStr(l, TRUNCATION.lessonText)),
+          },
+        });
+      }
     }
 
     // Switch to the project directory for agent tool calls
@@ -222,6 +250,16 @@ export async function runHeadless(args: string[]): Promise<void> {
     console.log(`\n${pc.dim(`Profile report: ${reportPath}`)}`);
   }
 
+  // Close debug log
+  if (process.env.OPENPAWL_DEBUG) {
+    const { closeDebugLog, getDebugLogPath } = await import("../debug/logger.js");
+    const logPath = getDebugLogPath();
+    closeDebugLog();
+    if (logPath) {
+      console.log(`\n${pc.dim(`Debug log: ${logPath}`)}`);
+    }
+  }
+
   console.log(`\n${pc.dim(`Project files: ${projectDir}`)}`);
 
   await sessionMgr.shutdown();
@@ -238,6 +276,12 @@ async function runSprint(
 ): Promise<import("../sprint/types.js").SprintResult> {
   const agents = new AgentRegistry();
   const runner = createSprintRunner({ agents, toolRegistry: toolReg, toolExecutor: toolExec });
+
+  // Wire debug logging to sprint runner
+  if (process.env.OPENPAWL_DEBUG) {
+    const { wireDebugToSprintRunner } = await import("../debug/wiring.js");
+    wireDebugToSprintRunner(runner);
+  }
 
   let taskTokens = 0;
   let taskStart = 0;
@@ -438,6 +482,12 @@ async function runSolo(
     agentRunner,
   );
 
+  // Wire debug logging to router
+  if (process.env.OPENPAWL_DEBUG) {
+    const { wireDebugToRouter } = await import("../debug/wiring.js");
+    wireDebugToRouter(router);
+  }
+
   const result = await router.route(session.id, goal);
 
   // Finish last agent line
@@ -560,6 +610,12 @@ async function runCollab(
     null,
     agentRunner,
   );
+
+  // Wire debug logging to router
+  if (process.env.OPENPAWL_DEBUG) {
+    const { wireDebugToRouter } = await import("../debug/wiring.js");
+    wireDebugToRouter(router);
+  }
 
   const result = await router.route(session.id, goal, { appMode: "collab" });
 

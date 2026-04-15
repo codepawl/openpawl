@@ -16,7 +16,9 @@ export class SecurityError extends Error {
  * - Block traversal attempts that escape the workspace.
  */
 export function resolveSafePath(filename: string, workspaceDir: string): string {
-  const workspaceAbs = path.resolve(process.cwd(), workspaceDir);
+  const workspaceAbs = path.isAbsolute(workspaceDir)
+    ? workspaceDir
+    : path.resolve(process.cwd(), workspaceDir);
   const raw = filename.trim();
   const agentPath = raw.startsWith("/") ? raw.replace(/^\/+/, "") : raw;
   const candidateAbs = path.resolve(workspaceAbs, agentPath);
