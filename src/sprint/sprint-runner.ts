@@ -347,7 +347,7 @@ export class SprintRunner extends EventEmitter {
         task.status = "failed";
         task.error = "Skipped: dependency produced no output";
         this.state.failedTasks++;
-        this.emitTyped("sprint:task:complete", { task });
+        this.emitTyped("sprint:task:complete", { task, taskIndex: i + 1, totalTasks: this.state.tasks.length });
         continue;
       }
 
@@ -390,7 +390,7 @@ export class SprintRunner extends EventEmitter {
             task.status = "failed";
             task.error = "Skipped: dependency produced no output";
             this.state.failedTasks++;
-            this.emitTyped("sprint:task:complete", { task });
+            this.emitTyped("sprint:task:complete", { task, taskIndex: i + 1, totalTasks: tasks.length });
             continue;
           }
           // Dep failed but produced partial output — allow this task to attempt
@@ -489,7 +489,7 @@ export class SprintRunner extends EventEmitter {
       task.error = err instanceof Error ? err.message : String(err);
       this.state.failedTasks++;
     }
-    this.emitTyped("sprint:task:complete", { task });
+    this.emitTyped("sprint:task:complete", { task, taskIndex: index + 1, totalTasks: this.state.tasks.length });
   }
 
   /** Check if a failed task is worth retrying (not timeout, not skip, not abort). */

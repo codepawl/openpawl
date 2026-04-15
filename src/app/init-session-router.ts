@@ -341,10 +341,30 @@ export async function initSessionRouter(
     // ErrorPresenter not available
   }
 
-  // Always start fresh
+  // ── Wire Debug Logger — structured JSONL debug logs ─────────────
+  if (process.env.OPENPAWL_DEBUG) {
+    try {
+      const { setDebugSessionId } = await import("../debug/logger.js");
+      const { wireDebugToRouter, wireDebugToToolExecutor } = await import("../debug/wiring.js");
+      setDebugSessionId("tui");
+      wireDebugToRouter(ctx.router);
+      if (toolExecutor) {
+        wireDebugToToolExecutor(toolExecutor);
+      }
+    } catch {
+      // Debug logger not available
+    }
+  }
+
+  // Try to resume latest session in this workspace, fall back to creating fresh
   {
-    const createResult = await ctx.sessionMgr.create(process.cwd());
-    ctx.chatSession = createResult.isOk() ? createResult.value : null;
+    const resumeResult = await ctx.sessionMgr.resumeLatest();
+    if (resumeResult.isOk() && resumeResult.value) {
+      ctx.chatSession = resumeResult.value;
+    } else {
+      const createResult = await ctx.sessionMgr.create(process.cwd());
+      ctx.chatSession = createResult.isOk() ? createResult.value : null;
+    }
   }
   mark("[bg] session created");
 

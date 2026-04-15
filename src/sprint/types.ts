@@ -61,7 +61,7 @@ export interface SprintEventMap {
   "sprint:round:start": { round: number; tasks: SprintTask[] };
   "sprint:round:complete": { round: number; duration: number };
   "sprint:task:start": { task: SprintTask; agentName: string };
-  "sprint:task:complete": { task: SprintTask };
+  "sprint:task:complete": { task: SprintTask; taskIndex?: number; totalTasks?: number };
   "sprint:agent:token": { agentName: string; token: string };
   "sprint:agent:tool": {
     agentName: string;

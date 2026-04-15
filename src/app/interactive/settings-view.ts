@@ -36,7 +36,7 @@ const FIELDS: SettingField[] = [
   { key: "mode", label: "mode", description: "Dispatch mode", type: "select", options: ["solo", "collab", "sprint"] },
   { key: "maxCycles", label: "maxCycles", description: "Max cycles per task", type: "number", validate: (v) => { const n = parseInt(v); return isNaN(n) || n < 1 || n > 50 ? "Must be 1-50" : null; } },
   { key: "temperature", label: "temperature", description: "LLM temperature", type: "number", validate: (v) => { const n = parseFloat(v); return isNaN(n) || n < 0 || n > 2 ? "Must be 0-2" : null; } },
-  { key: "team", label: "team", description: "Team config → /team", type: "text" },
+  { key: "team", label: "team", description: "Team config (use /team command)", type: "text" },
 ];
 
 const DEFAULT_MODELS: Record<string, string> = {
