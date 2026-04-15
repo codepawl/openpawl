@@ -703,10 +703,18 @@ export class MessagesComponent implements Component {
 
   /** Advance all running tool call spinners (call from timer). */
   advanceToolSpinners(): void {
+    let advanced = false;
     for (const view of this.activeToolCalls.values()) {
       if (view.status === "running") {
         view.advanceSpinner();
+        advanced = true;
       }
+    }
+    // Invalidate render cache for the last message so spinner frame change is visible
+    if (advanced && this.messages.length > 0) {
+      const lastIdx = this.messages.length - 1;
+      this.renderCache.delete(lastIdx);
+      this.heightCache.delete(lastIdx);
     }
   }
 

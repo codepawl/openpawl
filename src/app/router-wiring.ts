@@ -120,14 +120,24 @@ export function wireRouterEvents(
     }
   };
 
+  const toolVerbs: Record<string, string> = {
+    file_write: "writing", file_edit: "editing", file_read: "reading",
+    file_list: "listing", shell_exec: "running", web_search: "searching",
+    web_fetch: "fetching", git_ops: "git", execute_code: "executing",
+  };
+
   const onAgentTool = (_sessionId: string, _agentId: string, toolName: string, status: string, details?: { executionId?: string; inputSummary?: string; duration?: number; outputSummary?: string; success?: boolean; diff?: import("../utils/diff.js").DiffResult }) => {
     const execId = details?.executionId ?? `fallback_${Date.now()}`;
 
     if (status === "running") {
       layout.messages.startToolCall(execId, toolName, details?.inputSummary ?? toolName, _agentId);
       startToolSpinner();
+      const verb = toolVerbs[toolName] ?? toolName;
+      const target = details?.inputSummary ? ` ${details.inputSummary}` : "";
+      layout.statusBar.updateSegment(3, `${verb}${target}...`, defaultTheme.accent);
     } else if (status === "completed" || status === "failed") {
       layout.messages.completeToolCall(execId, status === "completed", details?.outputSummary ?? "", details?.duration ?? 0, details?.diff);
+      layout.statusBar.updateSegment(3, `${agentDisplayName(_agentId)} working... ${defaultTheme.dim("(Esc)")}`, defaultTheme.accent);
     }
 
     layout.tui.requestRender();

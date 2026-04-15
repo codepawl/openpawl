@@ -40,10 +40,19 @@ export function renderMarkdown(md: string, width: number): string[] {
   let codeBlockLang = "";
   let codeBlockLines: string[] = [];
   let tableLines: string[] = [];
+  let paragraphBuffer: string[] = [];
+
+  const flushParagraph = () => {
+    if (paragraphBuffer.length === 0) return;
+    const joined = paragraphBuffer.join(" ");
+    result.push(...wrapText(joined, width));
+    paragraphBuffer = [];
+  };
 
   for (const line of lines) {
     // Code block toggle
     if (line.trimStart().startsWith("```")) {
+      flushParagraph();
       if (!inCodeBlock) {
         inCodeBlock = true;
         codeBlockLang = line.trimStart().slice(3).trim();
@@ -70,6 +79,7 @@ export function renderMarkdown(md: string, width: number): string[] {
 
     // Horizontal rule — single blank line (headings provide enough structure)
     if (/^[-*_]{3,}\s*$/.test(line.trim())) {
+      flushParagraph();
       ensureBlankLine(result);
       continue;
     }
@@ -77,6 +87,7 @@ export function renderMarkdown(md: string, width: number): string[] {
     // Headers
     const headerMatch = line.match(/^(#{1,6})\s+(.+)/);
     if (headerMatch) {
+      flushParagraph();
       const level = headerMatch[1]!.length;
       const text = processInline(headerMatch[2]!);
       // Blank line before heading (unless first line)
@@ -93,6 +104,7 @@ export function renderMarkdown(md: string, width: number): string[] {
 
     // Blockquote
     if (line.startsWith("> ") || line === ">") {
+      flushParagraph();
       const content = line.slice(2);
       const wrapped = wrapText(processInline(content), width - 4);
       for (const wl of wrapped) {
@@ -104,6 +116,7 @@ export function renderMarkdown(md: string, width: number): string[] {
     // Bullet list
     const bulletMatch = line.match(/^(\s*)[-*+]\s+(.+)/);
     if (bulletMatch) {
+      flushParagraph();
       const indent = bulletMatch[1]!;
       const text = bulletMatch[2]!;
       const bulletIndent = indent + "  ";
@@ -118,6 +131,7 @@ export function renderMarkdown(md: string, width: number): string[] {
     // Numbered list
     const numMatch = line.match(/^(\s*)(\d+)\.\s+(.+)/);
     if (numMatch) {
+      flushParagraph();
       const indent = numMatch[1]!;
       const num = numMatch[2]!;
       const text = numMatch[3]!;
@@ -132,6 +146,7 @@ export function renderMarkdown(md: string, width: number): string[] {
 
     // Table row — collect consecutive pipe-delimited lines
     if (/^\|.+\|$/.test(line.trim())) {
+      flushParagraph();
       tableLines.push(line.trim());
       continue;
     }
@@ -143,16 +158,19 @@ export function renderMarkdown(md: string, width: number): string[] {
       // Fall through to process current line normally
     }
 
-    // Empty line — collapse consecutive blanks to a single blank
+    // Empty line — flush paragraph buffer and collapse blanks
     if (line.trim() === "") {
+      flushParagraph();
       ensureBlankLine(result);
       continue;
     }
 
-    // Regular paragraph
-    const processed = processInline(line);
-    result.push(...wrapText(processed, width));
+    // Regular paragraph — buffer consecutive lines for reflow
+    paragraphBuffer.push(processInline(line));
   }
+
+  // Flush any remaining paragraph text
+  flushParagraph();
 
   // Flush remaining table lines
   if (tableLines.length > 0) {

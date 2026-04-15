@@ -421,9 +421,10 @@ async function runSolo(
         workingDirectory: process.cwd(),
       });
       if (result.isOk()) {
-        const text = result.value.fullOutput || JSON.stringify(result.value.data) || result.value.summary;
         const data = result.value.data as Record<string, unknown> | undefined;
         const diff = data?.diff as import("../utils/diff.js").DiffResult | undefined;
+        const dataForLLM = Object.fromEntries(Object.entries(data ?? {}).filter(([k]) => k !== "diff"));
+        const text = result.value.fullOutput || JSON.stringify(dataForLLM) || result.value.summary;
         return diff ? { text, diff } : text;
       }
       const cause = "cause" in result.error ? `: ${result.error.cause}` : "";
@@ -544,9 +545,10 @@ async function runCollab(
         workingDirectory: process.cwd(),
       });
       if (result.isOk()) {
-        const text = result.value.fullOutput || JSON.stringify(result.value.data) || result.value.summary;
         const data = result.value.data as Record<string, unknown> | undefined;
         const diff = data?.diff as import("../utils/diff.js").DiffResult | undefined;
+        const dataForLLM = Object.fromEntries(Object.entries(data ?? {}).filter(([k]) => k !== "diff"));
+        const text = result.value.fullOutput || JSON.stringify(dataForLLM) || result.value.summary;
         return diff ? { text, diff } : text;
       }
       const cause = "cause" in result.error ? `: ${result.error.cause}` : "";
