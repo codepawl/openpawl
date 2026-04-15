@@ -111,6 +111,8 @@ const TASKS: BenchmarkTask[] = [
   },
 ];
 
+const COMPLEXITIES: Complexity[] = ["trivial", "simple", "medium", "complex", "large"];
+
 // ── CLI Parsing ────────────────────────────────────────────────────────────
 
 function parseCliArgs(): BenchmarkConfig {
@@ -320,7 +322,6 @@ async function runOrchestrationSuite(config: BenchmarkConfig): Promise<RunResult
         stderr,
         tokensIn,
         tokensOut,
-        costUsd,
         completedTasks,
         totalTasks,
         failedTasks,
@@ -333,7 +334,8 @@ async function runOrchestrationSuite(config: BenchmarkConfig): Promise<RunResult
       // Log summary
       const status = exitCode === 0 ? "OK" : `EXIT ${exitCode}`;
       const dur = formatMs(durationMs);
-      log(`    ${status} | ${dur} | ${filesCreated} files | ${totalLoc} LOC | $${costUsd.toFixed(4)}`);
+      const tokenStr = formatTokens(tokensIn, tokensOut);
+      log(`    ${status} | ${dur} | ${filesCreated} files | ${totalLoc} LOC | ${tokenStr}`);
 
       // Pause between runs
       if (runIndex < totalRuns) {
@@ -533,16 +535,15 @@ function generateReport(
     w("");
     w("### Per-Task Results");
     w("");
-    w("| Task | Mode | Duration | Files | LOC | Tokens (out) | Cost | Exit |");
-    w("|------|------|----------|-------|-----|-------------|------|------|");
+    w("| Task | Mode | Duration | Files | LOC | Tokens (in/out) | Exit |");
+    w("|------|------|----------|-------|-----|----------------|------|");
 
     for (const r of orchestration) {
       const task = TASKS.find((t) => t.id === r.taskId)!;
       const dur = formatMs(r.durationMs);
-      const tokens = r.tokensOut > 0 ? String(r.tokensOut) : "-";
-      const cost = `$${r.costUsd.toFixed(4)}`;
+      const tokenStr = formatTokens(r.tokensIn, r.tokensOut);
       const exit = r.exitCode === 0 ? "OK" : `${r.exitCode}`;
-      w(`| ${task.name} | ${r.mode} | ${dur} | ${r.filesCreated} | ${r.totalLoc} | ${tokens} | ${cost} | ${exit} |`);
+      w(`| ${task.name} | ${r.mode} | ${dur} | ${r.filesCreated} | ${r.totalLoc} | ${tokenStr} | ${exit} |`);
     }
     w("");
 
@@ -552,7 +553,7 @@ function generateReport(
     w("| Metric | " + config.modes.map((m) => m).join(" | ") + " |");
     w("|--------|" + config.modes.map(() => "------").join("|") + "|");
 
-    for (const metric of ["Avg quality score", "Avg duration", "Avg cost", "Avg files", "Avg LOC", "Syntax pass rate"] as const) {
+    for (const metric of ["Avg quality score", "Avg duration", "Avg tokens (in)", "Avg tokens (out)", "Avg files", "Avg LOC", "Syntax pass rate"] as const) {
       const cells: string[] = [];
       for (const mode of config.modes) {
         const modeRuns = orchestration.filter((r) => r.mode === mode);
@@ -572,9 +573,14 @@ function generateReport(
             cells.push(formatMs(avg));
             break;
           }
-          case "Avg cost": {
-            const avg = modeRuns.reduce((s, r) => s + r.costUsd, 0) / modeRuns.length;
-            cells.push(`$${avg.toFixed(4)}`);
+          case "Avg tokens (in)": {
+            const avg = modeRuns.reduce((s, r) => s + r.tokensIn, 0) / modeRuns.length;
+            cells.push(formatK(avg));
+            break;
+          }
+          case "Avg tokens (out)": {
+            const avg = modeRuns.reduce((s, r) => s + r.tokensOut, 0) / modeRuns.length;
+            cells.push(formatK(avg));
             break;
           }
           case "Avg files": {
@@ -626,16 +632,15 @@ function generateReport(
         w(`- Sprint vs Solo: quality ${sprintAvg >= soloAvg ? "improvement" : "decrease"} of ${improvement}%`);
       }
       if (soloR.length > 0 && sprintR.length > 0) {
-        const soloCost = soloR.reduce((s, r) => s + r.costUsd, 0) / soloR.length;
-        const sprintCost = sprintR.reduce((s, r) => s + r.costUsd, 0) / sprintR.length;
-        const costMultiplier = soloCost > 0 ? (sprintCost / soloCost).toFixed(1) : "N/A";
-        w(`- Sprint vs Solo: cost increase of ${costMultiplier}x`);
+        const soloTokens = soloR.reduce((s, r) => s + r.tokensOut, 0) / soloR.length;
+        const sprintTokens = sprintR.reduce((s, r) => s + r.tokensOut, 0) / sprintR.length;
+        const tokenMultiplier = soloTokens > 0 ? (sprintTokens / soloTokens).toFixed(1) : "N/A";
+        w(`- Sprint vs Solo: token usage ${tokenMultiplier}x (output tokens)`);
       }
     }
 
     // Per-complexity best mode
-    const complexities: Complexity[] = ["trivial", "simple", "medium", "complex", "large"];
-    for (const c of complexities) {
+    for (const c of COMPLEXITIES) {
       const task = TASKS.find((t) => t.complexity === c);
       if (!task) continue;
       const taskQuality = quality.filter((q) => q.taskId === task.id);
@@ -700,7 +705,7 @@ function generateReport(
     // Find which complexities each mode wins
     for (const mode of config.modes) {
       const wins: string[] = [];
-      for (const c of complexities) {
+      for (const c of COMPLEXITIES) {
         const task = TASKS.find((t) => t.complexity === c);
         if (!task) continue;
         const taskQ = quality.filter((q) => q.taskId === task.id);
@@ -726,6 +731,19 @@ function generateReport(
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 function log(msg: string) { console.log(msg); }
+
+/** Format a number as "1.2k" for thousands or raw for small values. */
+function formatK(n: number): string {
+  if (n === 0) return "-";
+  if (n < 1000) return String(Math.round(n));
+  return `${(n / 1000).toFixed(1)}k`;
+}
+
+/** Format token pair as "1.2k in / 480 out" or "-" if both zero. */
+function formatTokens(tokensIn: number, tokensOut: number): string {
+  if (tokensIn === 0 && tokensOut === 0) return "-";
+  return `${formatK(tokensIn)} in / ${formatK(tokensOut)} out`;
+}
 
 function formatMs(ms: number): string {
   if (ms < 1000) return `${Math.round(ms)}ms`;
@@ -793,7 +811,6 @@ async function main(): Promise<void> {
               stderr: "",
               tokensIn: 0,
               tokensOut: 0,
-              costUsd: 0,
               filesCreated,
               totalLoc,
               workdir,
