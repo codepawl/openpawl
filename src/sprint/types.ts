@@ -25,6 +25,8 @@ export interface SprintState {
   startedAt: string;
   completedTasks: number;
   failedTasks: number;
+  inputTokens: number;
+  outputTokens: number;
 }
 
 export interface SprintResult {
@@ -33,6 +35,8 @@ export interface SprintResult {
   completedTasks: number;
   failedTasks: number;
   duration: number;
+  inputTokens: number;
+  outputTokens: number;
 }
 
 export interface SprintTeamContext {

@@ -229,16 +229,20 @@ function parseSprintOutput(stdout: string): {
   completedTasks: number;
   totalTasks: number;
   failedTasks: number;
+  tokensIn: number;
   tokensOut: number;
 } {
   const taskMatch = /Tasks:\s*(\d+)\/(\d+)\s*completed\s*\|\s*Failed:\s*(\d+)/.exec(stdout);
-  const tokenMatch = /Tokens:\s*~?(\d+)/.exec(stdout);
+  // Match unified format: "Tokens: 1234in/5678out" (preferred) or legacy "Tokens: ~1234"
+  const unifiedMatch = /Tokens:\s*(\d+)in\/(\d+)out/.exec(stdout);
+  const legacyMatch = !unifiedMatch ? /Tokens:\s*~?(\d+)/.exec(stdout) : null;
 
   return {
     completedTasks: taskMatch ? parseInt(taskMatch[1]!, 10) : 0,
     totalTasks: taskMatch ? parseInt(taskMatch[2]!, 10) : 0,
     failedTasks: taskMatch ? parseInt(taskMatch[3]!, 10) : 0,
-    tokensOut: tokenMatch ? parseInt(tokenMatch[1]!, 10) : 0,
+    tokensIn: unifiedMatch ? parseInt(unifiedMatch[1]!, 10) : 0,
+    tokensOut: unifiedMatch ? parseInt(unifiedMatch[2]!, 10) : (legacyMatch ? parseInt(legacyMatch[1]!, 10) : 0),
   };
 }
 
@@ -303,6 +307,7 @@ async function runOrchestrationSuite(config: BenchmarkConfig): Promise<RunResult
         completedTasks = parsed.completedTasks;
         totalTasks = parsed.totalTasks;
         failedTasks = parsed.failedTasks;
+        tokensIn = parsed.tokensIn;
         tokensOut = parsed.tokensOut;
       } else {
         const parsed = parseSoloCollabOutput(stdout);

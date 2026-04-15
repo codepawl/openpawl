@@ -216,8 +216,9 @@ export async function runHeadless(args: string[]): Promise<void> {
         }
       }
 
-      const sprintTokens = (result as unknown as Record<string, unknown>).__outputTokens as number | undefined;
-      const tokenStr = sprintTokens ? ` | Tokens: ~${sprintTokens}` : "";
+      const tokenStr = (result.inputTokens > 0 || result.outputTokens > 0)
+        ? ` | Tokens: ${result.inputTokens}in/${result.outputTokens}out`
+        : "";
       console.log(
         `Tasks: ${result.completedTasks}/${result.tasks.length} completed | ` +
         `Failed: ${result.failedTasks} | ` +
@@ -307,7 +308,6 @@ async function runSprint(
     wireDebugToSprintRunner(runner);
   }
 
-  const taskTokensMap = new Map<string, number>();
   const taskStartMap = new Map<string, number>();
 
   runner.on(SprintEvent.Composition, ({ entries }: { entries: Array<{ role: string; task: string; included: boolean; reason: string }> }) => {
@@ -324,7 +324,6 @@ async function runSprint(
   runner.on(SprintEvent.Planning, () => {
     process.stdout.write(`  ${pc.cyan("[planner]")} planning tasks...`);
     taskStartMap.set("__planner__", Date.now());
-    taskTokensMap.set("__planner__", 0);
   });
 
   runner.on(SprintEvent.Plan, ({ tasks }) => {
@@ -349,14 +348,8 @@ async function runSprint(
   });
 
   runner.on(SprintEvent.TaskStart, ({ task, agentName }) => {
-    taskTokensMap.set(task.id, 0);
     taskStartMap.set(task.id, Date.now());
     process.stdout.write(`  ${pc.cyan(`[${agentName}]`)} ${task.description.slice(0, 60)}`);
-  });
-
-  runner.on(SprintEvent.AgentToken, ({ taskId }: { taskId?: string }) => {
-    const key = taskId ?? "__current__";
-    taskTokensMap.set(key, (taskTokensMap.get(key) ?? 0) + 1);
   });
 
   runner.on(SprintEvent.AgentTool, ({ toolName, status, details }: { toolName: string; status: string; details?: { diff?: { added: number; removed: number } } }) => {
@@ -373,12 +366,11 @@ async function runSprint(
 
   runner.on(SprintEvent.TaskComplete, ({ task, taskIndex, totalTasks }: { task: import("../sprint/types.js").SprintTask; taskIndex?: number; totalTasks?: number }) => {
     const elapsed = Date.now() - (taskStartMap.get(task.id) ?? Date.now());
-    const tokens = taskTokensMap.get(task.id) ?? 0;
     const status = task.status === "completed" ? pc.green("done")
       : task.status === "failed" ? pc.red("failed")
       : pc.yellow("incomplete");
     const progress = (taskIndex != null && totalTasks != null) ? ` ${pc.dim(`[${taskIndex}/${totalTasks}]`)}` : "";
-    process.stdout.write(` ${pc.dim(ICONS.arrow)} ${status} (${formatDuration(elapsed)}, ${tokens} tokens)${progress}\n`);
+    process.stdout.write(` ${pc.dim(ICONS.arrow)} ${status} (${formatDuration(elapsed)})${progress}\n`);
     if (task.status !== "completed" && task.error) {
       console.log(`    ${pc.red(task.error.slice(0, 120))}`);
     }
@@ -428,11 +420,6 @@ async function runSprint(
   } catch {
     // Handoff generation is non-critical
   }
-
-  // Sum all tracked output tokens across tasks
-  let totalTokens = 0;
-  for (const v of taskTokensMap.values()) totalTokens += v;
-  (result as unknown as Record<string, unknown>).__outputTokens = totalTokens;
 
   return result;
 }
