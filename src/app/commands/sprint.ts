@@ -195,6 +195,13 @@ export function createSprintCommand(deps: SprintCommandDeps): SlashCommand {
       });
       activeRunner = runner;
 
+      // Wire debug logging to sprint runner
+      if (process.env.OPENPAWL_DEBUG) {
+        import("../../debug/wiring.js").then(({ wireDebugToSprintRunner }) => {
+          wireDebugToSprintRunner(runner);
+        }).catch(() => {});
+      }
+
       // ── Wire sprint events to TUI ────────────────────────────────
 
       runner.on(SprintEvent.Start, ({ goal: g }: { goal: string }) => {

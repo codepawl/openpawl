@@ -13,6 +13,7 @@ import { compressContext, estimateTokens } from "../context/compressor.js";
 import type { ChatMessage, NativeToolDefinition } from "../providers/stream-types.js";
 import { profileStart, profileMeasure, isProfilingEnabled } from "../telemetry/profiler.js";
 import { safeJsonParse } from "../utils/safe-json-parse.js";
+import { debugLog, isDebugEnabled, truncateStr, TRUNCATION } from "../debug/logger.js";
 
 // ── Types ──────────────────────────────────────────────
 
@@ -83,6 +84,27 @@ export async function callLLM(
   const finishTotal = profileStart("llm_call_total", "callLLM");
   let finishTTFC: (() => void) | null = isProfilingEnabled() ? profileStart("llm_call_ttfc", "callLLM") : null;
 
+  // Debug: log LLM request
+  const _dbgEnabled = isDebugEnabled();
+  const _dbgStreamStart = _dbgEnabled ? Date.now() : 0;
+  let _dbgTtfc = 0;
+  let _dbgChunkCount = 0;
+  let _dbgChunkBytes = 0;
+
+  if (_dbgEnabled) {
+    debugLog("info", "llm", "llm:request", {
+      data: {
+        entryPoint: "callLLM",
+        model,
+        temperature: options?.temperature,
+        systemPrompt: truncateStr(effectiveSystemPrompt, TRUNCATION.systemPrompt),
+        systemPromptLength: effectiveSystemPrompt.length,
+        userMessage: truncateStr(prompt, TRUNCATION.userMessage),
+        userMessageLength: prompt.length,
+      },
+    });
+  }
+
   for await (const chunk of mgr.stream(prompt, {
     model: model || undefined,
     temperature: options?.temperature,
@@ -91,6 +113,8 @@ export async function callLLM(
   })) {
     if (chunk.content) {
       if (finishTTFC) { finishTTFC(); finishTTFC = null; }
+      if (_dbgEnabled && _dbgTtfc === 0) _dbgTtfc = Date.now() - _dbgStreamStart;
+      if (_dbgEnabled) { _dbgChunkCount++; _dbgChunkBytes += chunk.content.length; }
       chunks.push(chunk.content);
       options?.onChunk?.(chunk.content);
     }
@@ -110,6 +134,24 @@ export async function callLLM(
       input: Math.ceil((prompt.length + (effectiveSystemPrompt?.length ?? 0)) / 4),
       output: Math.ceil(text.length / 4),
     };
+  }
+
+  // Debug: log LLM response
+  if (_dbgEnabled) {
+    debugLog("info", "llm", "llm:response", {
+      data: {
+        entryPoint: "callLLM",
+        response: truncateStr(text, TRUNCATION.llmResponse),
+        responseLength: text.length,
+        inputTokens: usage.input,
+        outputTokens: usage.output,
+        ttfcMs: _dbgTtfc,
+        chunkCount: _dbgChunkCount,
+        avgChunkBytes: _dbgChunkCount > 0 ? Math.round(_dbgChunkBytes / _dbgChunkCount) : 0,
+        cancelled: !!options?.signal?.aborted,
+      },
+      duration: Date.now() - _dbgStreamStart,
+    });
   }
 
   return {
@@ -137,6 +179,7 @@ export async function callLLMWithMessages(
   // Compress context if exceeding 70% of context window
   let workMessages = messages;
   const maxCtx = options?.maxContextTokens ?? 128_000;
+  const _beforeTokens = isDebugEnabled() ? estimateTokens(workMessages) : 0;
   if (estimateTokens(workMessages) > maxCtx * 0.7 && workMessages.length > 6) {
     const result = await compressContext(
       workMessages,
@@ -152,6 +195,17 @@ export async function callLLMWithMessages(
       },
     );
     workMessages = result.messages;
+    if (isDebugEnabled()) {
+      debugLog("info", "llm", "llm:context_compression", {
+        data: {
+          beforeTokens: _beforeTokens,
+          afterTokens: estimateTokens(workMessages),
+          beforeMessages: messages.length,
+          afterMessages: workMessages.length,
+          strategy: "llm_summarize",
+        },
+      });
+    }
   }
 
   const mgr = await getGlobalProviderManager();
@@ -196,6 +250,27 @@ export async function callLLMWithMessages(
   const finishTotal = profileStart("llm_call_total", "callLLMWithMessages", { messageCount: chatMessages.length });
   let finishTTFC: (() => void) | null = isProfilingEnabled() ? profileStart("llm_call_ttfc", "callLLMWithMessages") : null;
 
+  // Debug: streaming stats
+  const _dbg2Enabled = isDebugEnabled();
+  const _dbg2StreamStart = _dbg2Enabled ? Date.now() : 0;
+  let _dbg2Ttfc = 0;
+  let _dbg2ChunkCount = 0;
+  let _dbg2ChunkBytes = 0;
+
+  if (_dbg2Enabled) {
+    debugLog("info", "llm", "llm:request", {
+      data: {
+        entryPoint: "callLLMWithMessages",
+        model,
+        temperature: options?.temperature,
+        messageCount: chatMessages.length,
+        nativeToolCount: nativeToolCount,
+        systemPrompt: effectiveSystemPrompt ? truncateStr(effectiveSystemPrompt, TRUNCATION.systemPrompt) : undefined,
+        systemPromptLength: effectiveSystemPrompt?.length ?? 0,
+      },
+    });
+  }
+
   for await (const chunk of mgr.stream("", {
     model: model || undefined,
     temperature: options?.temperature,
@@ -206,6 +281,8 @@ export async function callLLMWithMessages(
   })) {
     if (chunk.content) {
       if (finishTTFC) { finishTTFC(); finishTTFC = null; }
+      if (_dbg2Enabled && _dbg2Ttfc === 0) _dbg2Ttfc = Date.now() - _dbg2StreamStart;
+      if (_dbg2Enabled) { _dbg2ChunkCount++; _dbg2ChunkBytes += chunk.content.length; }
       chunks.push(chunk.content);
       options?.onChunk?.(chunk.content);
     }
@@ -246,6 +323,26 @@ export async function callLLMWithMessages(
     });
   } else if (text && hasAnyTools) {
     toolCalls = parseToolCalls(text);
+  }
+
+  // Debug: log response
+  if (_dbg2Enabled) {
+    debugLog("info", "llm", "llm:response", {
+      data: {
+        entryPoint: "callLLMWithMessages",
+        response: truncateStr(text, TRUNCATION.llmResponse),
+        responseLength: text.length,
+        inputTokens: usage.input,
+        outputTokens: usage.output,
+        ttfcMs: _dbg2Ttfc,
+        chunkCount: _dbg2ChunkCount,
+        avgChunkBytes: _dbg2ChunkCount > 0 ? Math.round(_dbg2ChunkBytes / _dbg2ChunkCount) : 0,
+        toolCallCount: toolCalls.length,
+        toolCallNames: toolCalls.map((tc) => tc.name),
+        cancelled: !!options?.signal?.aborted,
+      },
+      duration: Date.now() - _dbg2StreamStart,
+    });
   }
 
   return { text, toolCalls, usage };
@@ -299,7 +396,19 @@ export async function callLLMMultiTurn(opts: {
     // Uses a shallow copy — original messages array stays intact for tool loop state.
     let messagesForLLM = messages;
     if (!opts.beforeTurn && turn > 0 && estimateTokenCount(messages) > COMPRESS_TOKEN_THRESHOLD) {
+      const _tokBefore = isDebugEnabled() ? estimateTokenCount(messages) : 0;
       messagesForLLM = compressToolResults(messages, COMPRESS_KEEP_LAST);
+      if (isDebugEnabled()) {
+        debugLog("info", "llm", "llm:context_compression", {
+          data: {
+            turn,
+            strategy: "tool_result_compression",
+            beforeTokens: _tokBefore,
+            afterTokens: estimateTokenCount(messagesForLLM),
+            keepLast: COMPRESS_KEEP_LAST,
+          },
+        });
+      }
     }
 
     const response = await callLLMWithMessages(messagesForLLM, {

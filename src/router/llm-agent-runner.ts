@@ -13,6 +13,7 @@ import type { ContextTracker } from "../context/context-tracker.js";
 import type { ContextLevel } from "../context/types.js";
 import { compact } from "../context/compaction.js";
 import { getProjectContext } from "../context/project-context.js";
+import { debugLog, isDebugEnabled, truncateStr, TRUNCATION } from "../debug/logger.js";
 
 export interface ToolCallDetails {
   executionId: string;
@@ -91,7 +92,18 @@ export function createLLMAgentRunner(opts: LLMAgentRunnerOptions = {}): AgentRun
       if (getMemoryContext) {
         try {
           const memCtx = await getMemoryContext(prompt);
-          if (memCtx) systemPrompt += `\n\n${memCtx}`;
+          if (memCtx) {
+            systemPrompt += `\n\n${memCtx}`;
+            if (isDebugEnabled()) {
+              debugLog("info", "llm", "llm:memory_context", {
+                data: {
+                  agentId,
+                  memoryContextPreview: truncateStr(memCtx, 300),
+                  memoryContextLength: memCtx.length,
+                },
+              });
+            }
+          }
         } catch {
           // Memory retrieval failure is non-fatal
         }
@@ -111,7 +123,24 @@ export function createLLMAgentRunner(opts: LLMAgentRunnerOptions = {}): AgentRun
           .filter(m => m.role === "user" || m.role === "assistant")
           .map(m => ({ role: m.role as "user" | "assistant", content: m.content }));
 
-        if (hasTools) {
+        // Debug: log agent call params
+          if (isDebugEnabled()) {
+            debugLog("info", "llm", "llm:agent_call", {
+              data: {
+                agentId,
+                model: context.model,
+                hasTools: !!hasTools,
+                toolCount: nativeToolDefs.length || toolDefs.length,
+                systemPrompt: truncateStr(systemPrompt, TRUNCATION.systemPrompt),
+                systemPromptLength: systemPrompt.length,
+                userMessage: truncateStr(prompt, TRUNCATION.userMessage),
+                userMessageLength: prompt.length,
+                priorMessageCount: priorMessages.length,
+              },
+            });
+          }
+
+          if (hasTools) {
           // Multi-turn with tool loop
           const response = await callLLMMultiTurn({
             model: context.model,

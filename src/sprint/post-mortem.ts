@@ -5,6 +5,7 @@
  */
 
 import type { SprintResult, SprintTask } from "./types.js";
+import { debugLog, isDebugEnabled, truncateStr, TRUNCATION } from "../debug/logger.js";
 
 export interface PostMortemResult {
   failedTasks: { task: string; error: string; suggestedFix: string }[];
@@ -103,9 +104,9 @@ export function analyzeRunResult(
   const successPatterns: string[] = [];
   const prevSet = new Set((previousLessons ?? []).map((l) => l.toLowerCase()));
 
-  // Analyze failed tasks
+  // Analyze failed and incomplete tasks
   for (const task of result.tasks) {
-    if (task.status !== "failed") continue;
+    if (task.status !== "failed" && task.status !== "incomplete") continue;
 
     const classification = classifyFailure(task);
     if (!classification) continue;
@@ -147,10 +148,26 @@ export function analyzeRunResult(
     ? cappedLessons.slice(0, Math.max(1, MAX_TOTAL_LESSONS - (previousLessons?.length ?? 0)))
     : cappedLessons;
 
-  return {
+  const resultObj = {
     failedTasks,
     lessons: finalLessons,
     avoidPatterns: avoidPatterns.slice(0, 3),
     successPatterns: successPatterns.slice(0, 5),
   };
+
+  // Debug: log post-mortem results
+  if (isDebugEnabled()) {
+    debugLog("info", "sprint", "sprint:post_mortem", {
+      data: {
+        failedCount: failedTasks.length,
+        lessonCount: finalLessons.length,
+        lessons: finalLessons.map((l) => truncateStr(l, TRUNCATION.postMortemLesson)),
+        avoidPatterns: resultObj.avoidPatterns.length,
+        successPatterns: resultObj.successPatterns.length,
+        previousLessonCount: previousLessons?.length ?? 0,
+      },
+    });
+  }
+
+  return resultObj;
 }

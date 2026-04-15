@@ -6,6 +6,7 @@ import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
 import { ToolEvent } from "../router/event-types.js";
 import { Result, ok, err } from "neverthrow";
+import { debugLog, isDebugEnabled, truncateStr, TRUNCATION } from "../debug/logger.js";
 import type {
   ToolOutput,
   ToolError,
@@ -66,12 +67,26 @@ export class ToolExecutor extends EventEmitter {
 
     if ("needsConfirmation" in check && check.needsConfirmation) {
       const approval = await this.requestConfirmation(toolName, context.agentId, validatedInput);
+      if (isDebugEnabled()) {
+        debugLog("info", "tool", "tool:approval", {
+          data: {
+            toolName,
+            agentId: context.agentId,
+            riskLevel: tool.riskLevel,
+            decision: approval === "denied" ? "user:deny" : approval === "always" ? "user:always" : "user:allow",
+          },
+        });
+      }
       if (approval === "denied") {
         return err({ type: "permission_denied", toolName, level: permission });
       }
       if (approval === "always" || permission === "session") {
         this.permissionResolver.grantSession(toolName);
       }
+    } else if (isDebugEnabled()) {
+      debugLog("debug", "tool", "tool:approval", {
+        data: { toolName, agentId: context.agentId, decision: "auto" },
+      });
     }
 
     // 4. Execute with timeout
@@ -85,6 +100,32 @@ export class ToolExecutor extends EventEmitter {
     }
 
     this.emit(ToolEvent.Start, executionId, toolName, context.agentId);
+
+    // Debug: log safe tool args
+    if (isDebugEnabled()) {
+      const inp = validatedInput as Record<string, unknown>;
+      const safeArgs: Record<string, unknown> = { workingDirectory: context.workingDirectory };
+      if (toolName === "file_write") {
+        safeArgs.path = inp.path;
+        safeArgs.contentBytes = typeof inp.content === "string" ? inp.content.length : 0;
+      } else if (toolName === "file_edit") {
+        safeArgs.path = inp.path;
+        safeArgs.searchLen = typeof inp.search === "string" ? inp.search.length : 0;
+        safeArgs.replaceLen = typeof inp.replace === "string" ? inp.replace.length : 0;
+      } else if (toolName === "file_read" || toolName === "file_list") {
+        safeArgs.path = inp.path;
+      } else if (toolName === "shell_exec") {
+        safeArgs.command = typeof inp.command === "string"
+          ? truncateStr(inp.command, TRUNCATION.shellCommand)
+          : undefined;
+      } else {
+        // Generic: log keys only
+        safeArgs.argKeys = Object.keys(inp);
+      }
+      debugLog("info", "tool", "tool:args", {
+        data: { executionId, toolName, ...safeArgs },
+      });
+    }
 
     try {
       const result = await Promise.race([
@@ -103,6 +144,27 @@ export class ToolExecutor extends EventEmitter {
       const output = result.value;
       if (output.fullOutput && output.fullOutput.length > MAX_SUMMARY_BYTES) {
         output.summary = truncateForSummary(output.summary, output.fullOutput);
+      }
+
+      // Debug: log tool-specific result details
+      if (isDebugEnabled()) {
+        const data = output.data as Record<string, unknown> | undefined;
+        const extra: Record<string, unknown> = {};
+        if (toolName === "shell_exec" && data) {
+          extra.exitCode = data.exitCode;
+          if (typeof data.stderr === "string" && data.stderr.length > 0) {
+            extra.stderr = truncateStr(data.stderr, TRUNCATION.shellStderr);
+          }
+        } else if (toolName === "file_write" && data) {
+          extra.bytes = data.bytes;
+          extra.path = data.path;
+        }
+        if (Object.keys(extra).length > 0) {
+          debugLog("info", "tool", "tool:result_detail", {
+            data: { executionId, toolName, ...extra },
+            duration: output.duration,
+          });
+        }
       }
 
       this.emit(ToolEvent.Done, executionId, toolName, output);

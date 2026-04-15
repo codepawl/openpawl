@@ -12,6 +12,7 @@ import type { DriftResult, DriftConflict, ConflictType, DriftSeverity } from "./
 import { detectContradiction } from "../journal/supersession.js";
 import { extractGoalFragment } from "./fragment-extractor.js";
 import { generateExplanation } from "./explainer.js";
+import { debugLog, isDebugEnabled, truncateStr, TRUNCATION } from "../debug/logger.js";
 
 /** Preference patterns: "prefer X over Y", "chose X instead of Y" */
 const PREFERENCE_PATTERNS = [
@@ -184,10 +185,28 @@ export function detectDrift(
 
   const severity = computeSeverity(conflicts);
 
-  return {
+  const result: DriftResult = {
     hasDrift: conflicts.length > 0,
     severity,
     conflicts,
     checkedAt: now,
   };
+
+  if (isDebugEnabled()) {
+    debugLog(result.hasDrift ? "warn" : "info", "memory", "drift:check", {
+      data: {
+        goal: truncateStr(goal, TRUNCATION.goalText),
+        candidateDecisions: candidates.length,
+        conflictCount: conflicts.length,
+        severity,
+        conflicts: conflicts.slice(0, 3).map((c) => ({
+          type: c.conflictType,
+          decision: truncateStr(c.decision?.decision ?? "", TRUNCATION.driftConflict),
+          similarity: Math.round(c.similarityScore * 100) / 100,
+        })),
+      },
+    });
+  }
+
+  return result;
 }

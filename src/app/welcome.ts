@@ -53,7 +53,7 @@ export function buildWelcomeContent(): string {
   }
 
   lines.push("");
-  const tip = "Use /sessions to view previous conversations.";
+  const tip = "Type a prompt to get started. Shift+Tab to switch modes.";
   const tipPad = Math.max(0, Math.floor((termWidth - tip.length) / 2));
   lines.push(" ".repeat(tipPad) + defaultTheme.dim(tip));
   lines.push("");

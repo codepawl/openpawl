@@ -10,6 +10,7 @@ import { EventEmitter } from "node:events";
 import { Result, ok, err } from "neverthrow";
 import { buildIdentityPrefix } from "./agent-registry.js";
 import { profileStart } from "../telemetry/profiler.js";
+import { debugLog, isDebugEnabled, truncateStr, TRUNCATION } from "../debug/logger.js";
 import type {
   RouteDecision,
   DispatchResult,
@@ -263,6 +264,16 @@ export class Dispatcher extends EventEmitter {
     const results: AgentResult[] = [];
     const priorOutputs: { role: string; response: string }[] = [];
 
+    // Debug: log collab chain definition
+    if (isDebugEnabled()) {
+      debugLog("info", "router", "collab:chain_start", {
+        data: {
+          agentOrder: sorted.map((a) => a.agentId),
+          stepCount: sorted.length,
+        },
+      });
+    }
+
     for (const assignment of sorted) {
       if (signal.aborted) break;
 
@@ -273,8 +284,40 @@ export class Dispatcher extends EventEmitter {
       }
       const taskPrompt = contextParts.join("");
 
+      // Debug: log collab step input
+      if (isDebugEnabled()) {
+        const lastPrior = priorOutputs[priorOutputs.length - 1];
+        debugLog("info", "router", "collab:step_start", {
+          data: {
+            agentId: assignment.agentId,
+            role: assignment.role,
+            inputLength: taskPrompt.length,
+            priorOutputPreview: lastPrior
+              ? truncateStr(lastPrior.response, TRUNCATION.contextPassing)
+              : undefined,
+            contextChainLength: priorOutputs.length,
+          },
+        });
+      }
+
+      const stepStart = Date.now();
       const result = await this.runAgent(sessionId, assignment, taskPrompt, signal);
       results.push(result);
+
+      // Debug: log collab step output
+      if (isDebugEnabled()) {
+        debugLog("info", "router", "collab:step_done", {
+          data: {
+            agentId: assignment.agentId,
+            success: result.success,
+            outputPreview: result.response
+              ? truncateStr(result.response, TRUNCATION.contextPassing)
+              : undefined,
+            outputLength: result.response?.length ?? 0,
+          },
+          duration: Date.now() - stepStart,
+        });
+      }
 
       if (!result.success) break;
       priorOutputs.push({ role: assignment.role, response: result.response });

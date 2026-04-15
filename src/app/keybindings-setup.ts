@@ -187,6 +187,22 @@ export function setupKeybindings(
   });
 
   registry.register({
+    name: "mode",
+    description: "Switch mode (solo/collab/sprint) or cycle to next",
+    async execute(args, msgCtx) {
+      const target = args.trim().toLowerCase();
+      if (target === "solo" || target === "collab" || target === "sprint") {
+        appModeSystem.setMode(target);
+      } else {
+        appModeSystem.cycleNext();
+      }
+      updateModeDisplay();
+      const info = appModeSystem.getModeInfo();
+      msgCtx.addMessage("system", `${info.icon} Switched to ${info.displayName} mode`);
+    },
+  });
+
+  registry.register({
     name: "keybindings",
     description: "Create/open keybindings config",
     async execute(_args, msgCtx) {
@@ -195,4 +211,10 @@ export function setupKeybindings(
       msgCtx.addMessage("system", `Keybinding config: ${getConfigPath()}\nEdit this file to customize keyboard shortcuts.`);
     },
   });
+
+  // Wire Ctrl+, (app.settings) to open the /settings command
+  layout.tui.onOpenSettings = () => {
+    const result = registry.lookup("/settings ");
+    if (result) void result.command.execute("", makeLeaderCtx());
+  };
 }

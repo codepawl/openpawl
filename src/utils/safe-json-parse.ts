@@ -5,6 +5,7 @@
  */
 
 import { logger, isDebugMode } from "../core/logger.js";
+import { debugLog, isDebugEnabled } from "../debug/logger.js";
 
 export type SafeParseResult<T> =
   | { data: T; parsed: true }
@@ -21,7 +22,9 @@ export function safeJsonParse<T>(raw: string): SafeParseResult<T> {
 
   // Layer 1: direct parse
   try {
-    return { data: JSON.parse(raw) as T, parsed: true };
+    const data = JSON.parse(raw) as T;
+    if (isDebugEnabled()) debugLog("debug", "error", "json_parse:success", { data: { layer: 1 } });
+    return { data, parsed: true };
   } catch { /* continue */ }
 
   let cleaned = raw;
@@ -33,11 +36,21 @@ export function safeJsonParse<T>(raw: string): SafeParseResult<T> {
   cleaned = cleaned.replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, "").trim();
   cleaned = cleaned.replace(/<\/?[a-z_]+>/gi, "").trim();
 
+  if (cleaned !== raw) {
+    try {
+      const data = JSON.parse(cleaned) as T;
+      if (isDebugEnabled()) debugLog("info", "error", "json_parse:recovery", { data: { layer: 3, inputPreview: raw.slice(0, 100) } });
+      return { data, parsed: true };
+    } catch { /* continue */ }
+  }
+
   // Layer 4: extract from fenced code block
   const fenceMatch = cleaned.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
   if (fenceMatch) {
     try {
-      return { data: JSON.parse(fenceMatch[1]!.trim()) as T, parsed: true };
+      const data = JSON.parse(fenceMatch[1]!.trim()) as T;
+      if (isDebugEnabled()) debugLog("info", "error", "json_parse:recovery", { data: { layer: 4, inputPreview: raw.slice(0, 100) } });
+      return { data, parsed: true };
     } catch { /* continue */ }
   }
 
@@ -45,14 +58,18 @@ export function safeJsonParse<T>(raw: string): SafeParseResult<T> {
   const extracted = extractJsonBlock(cleaned);
   if (extracted) {
     try {
-      return { data: JSON.parse(extracted) as T, parsed: true };
+      const data = JSON.parse(extracted) as T;
+      if (isDebugEnabled()) debugLog("info", "error", "json_parse:recovery", { data: { layer: 5, inputPreview: raw.slice(0, 100) } });
+      return { data, parsed: true };
     } catch { /* continue */ }
 
     // Layer 6: try repairing truncated JSON (unclosed strings/brackets)
     const repaired = repairTruncatedJson(extracted);
     if (repaired !== extracted) {
       try {
-        return { data: JSON.parse(repaired) as T, parsed: true };
+        const data = JSON.parse(repaired) as T;
+        if (isDebugEnabled()) debugLog("info", "error", "json_parse:recovery", { data: { layer: 6, inputPreview: raw.slice(0, 100) } });
+        return { data, parsed: true };
       } catch { /* continue */ }
     }
   }
@@ -61,6 +78,11 @@ export function safeJsonParse<T>(raw: string): SafeParseResult<T> {
   const preview = raw.slice(0, 200).replace(/\n/g, "\\n");
   if (isDebugMode()) {
     logger.warn(`safeJsonParse failed. Preview: ${preview}`);
+  }
+  if (isDebugEnabled()) {
+    debugLog("error", "error", "json_parse:all_failed", {
+      data: { inputLength: raw.length, inputPreview: raw.slice(0, 100) },
+    });
   }
   return { error: `JSON parse failed. Preview: ${preview}`, parsed: false };
 }

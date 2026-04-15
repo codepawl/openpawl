@@ -22,6 +22,11 @@ export const ICONS = {
   bullet: "\u2022",      // •
   block: "\u2588",       // █
 
+  // Dots (status indicators)
+  dotFilled: "\u25cf",   // ●
+  dotEmpty: "\u25cb",    // ○
+  dotHalf: "\u25d0",     // ◐
+
   // Scroll indicators
   scrollUp: "\u25b2",    // ▲
   scrollDown: "\u25bc",  // ▼
@@ -32,7 +37,13 @@ export const ICONS = {
   modeCollab: "\u00bb",         // »
   modeSprint: "\u26a1",         // ⚡
 
+  // Spinners
+  spinnerFrames: ["\u25d2", "\u25d0", "\u25d3", "\u25d1"] as readonly string[], // ◒ ◐ ◓ ◑
+  brailleFrames: ["\u280b", "\u2819", "\u2839", "\u2838", "\u283c", "\u2834", "\u2826", "\u2827", "\u2807", "\u280f"] as readonly string[],
+  // ⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏
+
   // Misc
+  aborted: "\u25fc",     // ◼
   hourglass: "\u23f3",   // ⏳
   memo: "\ud83d\udcdd",  // 📝
   gear: "\u2699",        // ⚙

@@ -11,7 +11,7 @@ export function generateResumeCommands(
     if (item.command) {
       commands.push(item.command);
     } else {
-      commands.push(`openpawl work --goal "${item.description}"`);
+      commands.push(`openpawl run --headless --mode solo --goal "${item.description}"`);
     }
   }
 

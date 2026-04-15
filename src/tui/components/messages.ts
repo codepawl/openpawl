@@ -582,11 +582,14 @@ export class MessagesComponent implements Component {
     return [...badgeLines, ...contentLines];
   }
 
-  /** Fast content hash for cache invalidation. */
+  /** Fast content hash for cache invalidation (FNV-1a). */
   private contentHash(content: string): number {
-    const len = content.length;
-    if (len === 0) return 0;
-    return len * 31 + content.charCodeAt(0) + content.charCodeAt(len - 1) + content.charCodeAt(len >> 1);
+    let hash = 0x811c9dc5; // FNV offset basis
+    for (let i = 0; i < content.length; i++) {
+      hash ^= content.charCodeAt(i);
+      hash = (hash * 0x01000193) | 0; // FNV prime, keep as 32-bit int
+    }
+    return hash;
   }
 
   /** Push message lines, applying collapse if needed. */
@@ -883,7 +886,15 @@ export class MessagesComponent implements Component {
 
 /** Detect system message subtype and return the appropriate color function. */
 function detectSystemColor(content: string): (s: string) => string {
-  const first = content.slice(0, 40);
+  const first = content.slice(0, 60);
+  // Error-like messages — check first (most specific patterns)
+  if (/^(Error:|Failed |Cannot |Could not )/i.test(first)) {
+    return ctp.red;
+  }
+  // Negative results — require colon/period after "No"/"Not" to avoid false positives
+  if (/^(No\b.+\bfound|Not\b.+\bavailable|No results)/i.test(first)) {
+    return ctp.red;
+  }
   // Success / status messages
   if (first.startsWith("**") || /\bactive\b|\bmode\b|\bcaptured\b|\bswitching\b/i.test(first)) {
     return ctp.green;
@@ -891,10 +902,6 @@ function detectSystemColor(content: string): (s: string) => string {
   // Help / usage messages
   if (first.startsWith("Usage:") || first.startsWith("Example:") || content.includes("Use `/")) {
     return ctp.overlay1;
-  }
-  // Error-like messages
-  if (/^(Error|No |Not |Cannot |Failed)/i.test(first)) {
-    return ctp.red;
   }
   return ctp.overlay2;
 }

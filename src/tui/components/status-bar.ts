@@ -59,12 +59,14 @@ export class StatusBarComponent implements Component {
   private renderSegments(width: number): string {
     const separator = " \u2502 ";
     const bp = this.layoutProvider?.().breakpoint;
-    // Narrow terminals: drop non-essential segments
+    // Narrow terminals: show fewer segments
     // xs (<60): show provider + connection only
-    // sm (60-80): show provider + connection only (drop mode, state, tokens)
-    const segments = (bp === "xs" || bp === "sm")
+    // sm (60-80): show provider + connection + mode (drop state/tokens)
+    const segments = bp === "xs"
       ? this.segments!.slice(0, 2)
-      : this.segments!;
+      : bp === "sm"
+        ? this.segments!.slice(0, 3)
+        : this.segments!;
     const right = this.rightText ? this.rightText + " " : "";
     const rightWidth = visibleWidth(right);
 

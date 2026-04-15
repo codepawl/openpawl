@@ -28,14 +28,15 @@ const MIN_CODE_WORDS = 50;
  * Determine if a prompt warrants a collab chain.
  * Returns null for prompts that should use solo dispatch.
  */
-export function buildCollabChain(prompt: string): CollabChain | null {
+export function buildCollabChain(prompt: string, opts?: { force?: boolean }): CollabChain | null {
   const wordCount = prompt.split(/\s+/).filter(Boolean).length;
+  const force = opts?.force ?? false;
 
-  // Short prompts never get chains
-  if (wordCount < 5) return null;
+  // Short prompts never get chains (unless forced)
+  if (wordCount < 5 && !force) return null;
 
-  // Code prompts need sufficient complexity (> 50 words)
-  if (CODE_PATTERN.test(prompt) && wordCount > MIN_CODE_WORDS) {
+  // Code prompts need sufficient complexity (> 50 words), or force bypasses the gate
+  if (CODE_PATTERN.test(prompt) && (wordCount > MIN_CODE_WORDS || force)) {
     return {
       maxRounds: 3,
       steps: [
@@ -64,6 +65,18 @@ export function buildCollabChain(prompt: string): CollabChain | null {
       steps: [
         { agentId: "debugger", role: "debug", instruction: "Investigate the issue and identify the root cause." },
         { agentId: "coder", role: "fix", instruction: "Implement the fix based on the debugger's analysis." },
+      ],
+    };
+  }
+
+  // When explicitly requested, default to coder → reviewer → coder chain
+  if (force) {
+    return {
+      maxRounds: 3,
+      steps: [
+        { agentId: "coder", role: "implement", instruction: "Implement the requested code." },
+        { agentId: "reviewer", role: "review", instruction: "Review the implementation for correctness, edge cases, and code quality." },
+        { agentId: "coder", role: "revision", instruction: "Apply the reviewer's feedback and produce the final implementation." },
       ],
     };
   }

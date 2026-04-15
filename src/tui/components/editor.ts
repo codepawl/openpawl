@@ -74,7 +74,9 @@ export class EditorComponent implements Component {
 
   render(width: number): string[] {
     // Update max visible lines from responsive layout
-    this.maxVisibleLines = this.layoutProvider?.().maxInputLines ?? 8;
+    const layout = this.layoutProvider?.();
+    this.maxVisibleLines = layout?.maxInputLines ?? 8;
+    this.acMaxVisible = layout?.maxAutocompleteItems ?? 8;
 
     const result: string[] = [];
 

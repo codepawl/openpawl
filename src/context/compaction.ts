@@ -8,6 +8,7 @@
 
 import type { ContextLevel, CompactionResult } from "./types.js";
 import { estimateMessageTokens } from "./context-tracker.js";
+import { debugLog, isDebugEnabled } from "../debug/logger.js";
 
 /** Message shape compatible with both engine/llm.ts Message and SessionMessage. */
 export interface CompactableMessage {
@@ -74,6 +75,20 @@ export async function compact(
 
   result.beforeTokens = beforeTokens;
   result.afterTokens = estimateMessageTokens(messages);
+
+  if (isDebugEnabled()) {
+    debugLog("info", "llm", "context:compaction", {
+      data: {
+        level,
+        strategy: result.strategy,
+        beforeTokens: result.beforeTokens,
+        afterTokens: result.afterTokens,
+        messagesAffected: result.messagesAffected,
+        reduction: result.beforeTokens - result.afterTokens,
+      },
+    });
+  }
+
   return result;
 }
 

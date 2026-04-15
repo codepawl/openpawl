@@ -163,7 +163,7 @@ export class PromptRouter extends EventEmitter {
     // 3b. Collab mode check
     const appMode = options?.appMode;
     if ((appMode === "collab" || mentions.forceCollab) && !mentions.hasExplicitRouting) {
-      const chain = buildCollabChain(mentions.cleanedPrompt);
+      const chain = buildCollabChain(mentions.cleanedPrompt, { force: appMode === "collab" });
       if (chain) {
         const agents = chain.steps.map((step, i) => ({
           agentId: step.agentId,

@@ -181,7 +181,7 @@ export function setupInputHandler(
           const connState = getConnectionState();
           if (connState.status === "no_key") {
             if (!ctx.configState?.hasProvider) {
-              msgCtx.addMessage("system", `${ICONS.warning} No provider configured. Run /setup to set up your AI provider.`);
+              msgCtx.addMessage("system", `${ICONS.warning} No provider configured. Run /settings to set up your AI provider.`);
             } else {
               msgCtx.addMessage("system", `${ICONS.warning} No API key found. Run /settings to configure your provider.`);
             }
@@ -247,6 +247,7 @@ export function setupInputHandler(
     if (ctx.cleanupRouter?.isStreaming()) {
       ctx.cleanupRouter.cancelStreaming();
       state.agentBusy = false;
+      layout.tui.onFlashMessage?.("Cancelled");
       return true;
     }
     if (state.queue.length > 0) {

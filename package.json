@@ -51,7 +51,8 @@
     "lint": "eslint src/",
     "web": "tsup && NODE_ENV=production node dist/cli.js web",
     "work": "tsup && node dist/cli.js work --web",
-    "test:file": "bun test"
+    "test:file": "bun test",
+    "benchmark": "tsx scripts/testing/benchmark.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.79.0",

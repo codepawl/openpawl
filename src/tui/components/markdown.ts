@@ -4,11 +4,12 @@
  * highlighting, bullet/numbered lists, blockquotes, links, horizontal rules.
  */
 import type { Component } from "../core/component.js";
-import { bold, italic, dim, bgRgb } from "../core/ansi.js";
+import { bold, italic, dim, strikethrough, bgRgb, link as hyperlink } from "../core/ansi.js";
 import { wrapText } from "../utils/wrap.js";
 import { visibleWidth } from "../utils/text-width.js";
 import { truncate } from "../utils/truncate.js";
 import { defaultTheme, ctp } from "../themes/default.js";
+import { ICONS } from "../constants/icons.js";
 import { highlight } from "cli-highlight";
 
 // Code block background — Catppuccin mantle (#181825)
@@ -109,7 +110,7 @@ export function renderMarkdown(md: string, width: number): string[] {
       const bulletIndent = indent + "  ";
       const wrapped = wrapText(processInline(text), width - bulletIndent.length - 2);
       wrapped.forEach((wl, i) => {
-        const prefix = i === 0 ? bulletIndent + ctp.overlay0("• ") : bulletIndent + "  ";
+        const prefix = i === 0 ? bulletIndent + ctp.overlay0(ICONS.bullet + " ") : bulletIndent + "  ";
         result.push(prefix + wl);
       });
       continue;
@@ -313,11 +314,11 @@ function processInline(text: string): string {
   result = result.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, (_match, t: string) => italic(t));
 
   // Strikethrough: ~~text~~
-  result = result.replace(/~~(.+?)~~/g, (_match, t: string) => `\x1b[9m${t}\x1b[29m`);
+  result = result.replace(/~~(.+?)~~/g, (_match, t: string) => strikethrough(t));
 
   // Links: [text](url)
   result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, text: string, url: string) => {
-    return `\x1b]8;;${url}\x1b\\${defaultTheme.markdown.link(text)}\x1b]8;;\x1b\\`;
+    return hyperlink(url, defaultTheme.markdown.link(text));
   });
 
   return result;

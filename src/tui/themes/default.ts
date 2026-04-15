@@ -73,13 +73,13 @@ const catppuccinMochaTheme: Theme = {
 
   // UI symbols
   symbols: {
-    spinner: ["◒", "◐", "◓", "◑"],
+    spinner: ICONS.spinnerFrames as unknown as string[],
     success: ICONS.success,
     error: ICONS.error,
     warning: ICONS.warning,
     arrow: ICONS.arrow,
-    bullet: "●",
-    pending: "○",
+    bullet: ICONS.dotFilled,
+    pending: ICONS.dotEmpty,
     selected: "❯",
   },
 

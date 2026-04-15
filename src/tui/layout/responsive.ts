@@ -24,6 +24,8 @@ export interface LayoutConfig {
   contentPadding: number;
   /** Message bubble width as fraction of terminal width. */
   messageBubblePercent: number;
+  /** Max visible items in autocomplete popup. */
+  maxAutocompleteItems: number;
 }
 
 /** Minimum terminal dimensions — below this, show a "resize" overlay instead of the UI. */
@@ -50,6 +52,7 @@ const INPUT_LINES: Record<Breakpoint, number> = { xs: 3, sm: 5, md: 8, lg: 10 };
 const SELECT_ITEMS: Record<Breakpoint, number> = { xs: 6, sm: 8, md: 10, lg: 12 };
 const CONTENT_PADDING: Record<Breakpoint, number> = { xs: 0, sm: 1, md: 2, lg: 3 };
 const BUBBLE_PERCENT: Record<Breakpoint, number> = { xs: 0.95, sm: 0.80, md: 0.70, lg: 0.60 };
+const AUTOCOMPLETE_ITEMS: Record<Breakpoint, number> = { xs: 4, sm: 6, md: 8, lg: 10 };
 
 export function computeLayout(cols: number, rows: number): LayoutConfig {
   const bp = getBreakpoint(cols);
@@ -64,6 +67,7 @@ export function computeLayout(cols: number, rows: number): LayoutConfig {
     showAsciiArt: bp === "md" || bp === "lg",
     contentPadding: CONTENT_PADDING[bp],
     messageBubblePercent: BUBBLE_PERCENT[bp],
+    maxAutocompleteItems: AUTOCOMPLETE_ITEMS[bp],
   };
 }
 

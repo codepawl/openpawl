@@ -8,6 +8,7 @@
 
 import type { HebbianMemory, MemoryResult, MemoryNode } from "./hebbian/index.js";
 import { profileStart } from "../telemetry/profiler.js";
+import { debugLog, isDebugEnabled } from "../debug/logger.js";
 
 /**
  * A candidate from the upstream LanceDB search.
@@ -86,6 +87,21 @@ export class HybridRetriever {
     // Recall triggers spreading activation + Hebbian update + scoring
     const results = this.hebbian.recall(seeds, similarityMap, limit);
     finish();
+
+    // Debug: log retrieval results
+    if (isDebugEnabled()) {
+      debugLog("info", "memory", "memory:retrieval", {
+        data: {
+          candidateCount: candidates.length,
+          resultCount: results.length,
+          topScores: results.slice(0, 5).map((r) => ({
+            id: r.node.id,
+            score: Math.round(r.score * 1000) / 1000,
+          })),
+        },
+      });
+    }
+
     return results;
   }
 

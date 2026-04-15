@@ -3,26 +3,27 @@
  * and inline loading spinners across all TUI views.
  */
 import { ctp } from "../themes/default.js";
+import { ICONS } from "../constants/icons.js";
 
 // ── Status Dots ──────────────────────────────────────────────────
 
 const STATUS_DOT = {
-  active:       { symbol: "\u25cf", color: ctp.green },     // ● green — currently in use
-  configured:   { symbol: "\u25cf", color: ctp.yellow },    // ● yellow — set up but not active
-  offline:      { symbol: "\u25cf", color: ctp.overlay0 },  // ● dim — unreachable
-  unconfigured: { symbol: "\u25cb", color: ctp.overlay0 },  // ○ dim — not set up
-  error:        { symbol: "\u25cf", color: ctp.red },       // ● red — failed
-  ready:        { symbol: "\u25cf", color: ctp.blue },      // ● blue — ready, not yet connected
-  connecting:   { symbol: "\u25d0", color: ctp.overlay0 },  // ◐ dim — connecting
+  active:       { symbol: ICONS.dotFilled, color: ctp.green },     // ● green — currently in use
+  configured:   { symbol: ICONS.dotFilled, color: ctp.yellow },    // ● yellow — set up but not active
+  offline:      { symbol: ICONS.dotFilled, color: ctp.overlay0 },  // ● dim — unreachable
+  unconfigured: { symbol: ICONS.dotEmpty,  color: ctp.overlay0 },  // ○ dim — not set up
+  error:        { symbol: ICONS.dotFilled, color: ctp.red },       // ● red — failed
+  ready:        { symbol: ICONS.dotFilled, color: ctp.blue },      // ● blue — ready, not yet connected
+  connecting:   { symbol: ICONS.dotHalf,   color: ctp.overlay0 },  // ◐ dim — connecting
 } as const;
 
 export type StatusDotKind = keyof typeof STATUS_DOT;
 
 /** Raw dot symbols (uncolored) for contexts where color is applied externally. */
 export const DOT_SYMBOL = {
-  filled: "\u25cf",      // ●
-  empty:  "\u25cb",      // ○
-  half:   "\u25d0",      // ◐
+  filled: ICONS.dotFilled,  // ●
+  empty:  ICONS.dotEmpty,   // ○
+  half:   ICONS.dotHalf,    // ◐
 } as const;
 
 /** Render a colored status dot for the given status. */
@@ -33,8 +34,7 @@ export function statusDot(status: StatusDotKind): string {
 
 // ── Inline Spinner ───────────────────────────────────────────────
 
-const BRAILLE_FRAMES = ["\u280b", "\u2819", "\u2839", "\u2838", "\u283c", "\u2834", "\u2826", "\u2827", "\u2807", "\u280f"];
-// ⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏
+const BRAILLE_FRAMES = ICONS.brailleFrames;
 
 export interface InlineSpinner {
   /** Returns the current spinner frame string (colored). */

@@ -47,6 +47,12 @@ function getLogSources(): LogSource[] {
       path: path.join(homeDir, ".openpawl", "logs"),
       description: "Work runner session history (per-session files in ~/.openpawl/logs/)",
     },
+    {
+      name: "debug",
+      label: "Debug Logs",
+      path: path.join(homeDir, ".openpawl", "debug"),
+      description: "Structured debug logs (JSONL, enabled via OPENPAWL_DEBUG=true)",
+    },
   ];
 }
 
@@ -136,6 +142,12 @@ export async function runLogs(args: string[]): Promise<void> {
   if (!sourceName || sourceName === "--help" || sourceName === "-h") {
     printLogIndex();
     return;
+  }
+
+  // Debug logs have their own viewer with structured filtering
+  if (sourceName === "debug") {
+    const { runLogsDebug } = await import("./logs-debug.js");
+    return runLogsDebug(args.slice(1));
   }
 
   const sources = getLogSources();
