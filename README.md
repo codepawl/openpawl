@@ -15,8 +15,6 @@
 
 OpenPawl orchestrates a team of specialized AI agents toward your goals — with memory, learning, and structure that persists across sessions.
 
----
-
 ## The Problem
 
 Vibe coding alone is a grind. Every session starts from scratch:
@@ -34,8 +32,6 @@ No structure                    →   Sprint cadence with standup
 ```
 
 OpenPawl replaces that friction with a team that remembers, learns, and holds itself accountable.
-
----
 
 ## Screenshots
 
@@ -77,8 +73,6 @@ OpenPawl replaces that friction with a team that remembers, learns, and holds it
 
 *Press Escape to stop any response mid-stream. Partial output preserved.*
 
----
-
 ## Install
 
 ```bash
@@ -86,8 +80,6 @@ curl -fsSL https://raw.githubusercontent.com/codepawl/openpawl/main/install.sh |
 ```
 
 **Requirements:** Node.js >= 20, bun, and an LLM API key (Anthropic, OpenAI, OpenRouter, DeepSeek, Groq, or local Ollama).
-
----
 
 ## Quickstart
 
@@ -103,8 +95,6 @@ The bare `openpawl` command launches the interactive TUI with chat, sprint, and 
 ```bash
 openpawl run --headless --goal "Build auth" --mode sprint --runs 2
 ```
-
----
 
 ## Features
 
@@ -159,8 +149,6 @@ The team remembers across sessions. Success patterns get stored in LanceDB — f
 - **Headless mode** — `openpawl run --headless` with `--mode`, `--template`, `--workdir`, `--runs`
 - **Provider/model sync** — single source of truth across agents and modes
 
----
-
 ## Team Templates
 
 Pre-built teams you can install and use immediately:
@@ -183,8 +171,6 @@ Or use `/team` in the TUI to browse and switch templates interactively.
 | `full-stack-sprint` | Frontend, Backend, DevOps, Lead |
 
 Five seed templates ship offline. Community templates at [openpawl-templates](https://github.com/codepawl/openpawl-templates).
-
----
 
 ## CLI Reference
 
@@ -264,8 +250,6 @@ Five seed templates ship offline. Community templates at [openpawl-templates](ht
 | `/compact` | Toggle compact/expanded view |
 | `/setup` | Re-run setup wizard |
 
----
-
 ## Architecture
 
 ```mermaid
@@ -299,8 +283,6 @@ graph TD
 
 Three execution modes share a common LLM multi-turn loop with native tool calling. Sprint mode parallelizes independent tasks. Post-mortem extracts lessons into LanceDB vector memory for future runs. Context compression keeps long conversations within token limits.
 
----
-
 ## Comparison
 
 | Feature | OpenPawl | Claude Code | OpenCode | Aider |
@@ -317,8 +299,6 @@ Three execution modes share a common LLM multi-turn loop with native tool callin
 | Agent heatmap | Utilization + bottleneck | None | None | None |
 
 OpenPawl focuses on multi-agent workflows and persistent learning. For single-agent coding tasks, Claude Code and Aider are more mature. For a detailed feature comparison, see [docs/comparison.md](./docs/comparison.md).
-
----
 
 ## Tech Stack
 
@@ -337,8 +317,6 @@ OpenPawl focuses on multi-agent workflows and persistent learning. For single-ag
 
 Pure TypeScript (ESM). No Python. 437 source files, ~63.5k LOC.
 
----
-
 ## Development
 
 ```bash
@@ -352,8 +330,6 @@ bun run lint         # lint (eslint src/)
 
 Pre-commit hook runs typecheck → lint → tests automatically.
 
----
-
 ## Security
 
 - Config at `~/.openpawl/config.json` may contain API tokens
@@ -361,8 +337,6 @@ Pre-commit hook runs typecheck → lint → tests automatically.
 - Global memory at `~/.openpawl/memory/global.db` — back it up
 
 See [SECURITY.md](./SECURITY.md) for vulnerability reporting.
-
----
 
 ## Documentation
 
@@ -373,8 +347,6 @@ See [SECURITY.md](./SECURITY.md) for vulnerability reporting.
 | [CUSTOM_AGENTS.md](./docs/CUSTOM_AGENTS.md) | Custom agent SDK guide |
 | [WEBHOOKS.md](./docs/WEBHOOKS.md) | Webhook event schemas |
 | [comparison.md](./docs/comparison.md) | Feature comparison with other tools |
-
----
 
 ## License
 
