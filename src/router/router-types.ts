@@ -99,6 +99,10 @@ export interface ToolCallSummary {
   output: string;
   duration: number;
   success: boolean;
+  /** Shell exit code for shell_exec (and tools that wrap it). */
+  exitCode?: number;
+  /** First ~200 chars of stderr for shell_exec. */
+  stderrHead?: string;
 }
 
 export interface AgentResult {

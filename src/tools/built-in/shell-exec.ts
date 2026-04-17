@@ -7,6 +7,13 @@ import { z } from "zod";
 import { ok, err } from "neverthrow";
 import type { ToolDefinition, ToolOutput } from "../types.js";
 
+/** Structured payload stored in ToolOutput.data for shell_exec. */
+export interface ShellExecData {
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+}
+
 const BLOCKED_PATTERNS = [
   /rm\s+-rf\s+\//,
   /sudo\s+rm/,
@@ -74,9 +81,14 @@ export function createShellExecTool(): ToolDefinition {
         });
 
         const fullOutput = chunks.join("");
+        const data: ShellExecData = {
+          exitCode: result.exitCode,
+          stdout: result.stdout,
+          stderr: result.stderr,
+        };
         const output: ToolOutput = {
           success: result.exitCode === 0,
-          data: { exitCode: result.exitCode, stdout: fullOutput },
+          data,
           summary: `Ran \`${sanitizedCommand.slice(0, 60)}\` → exit ${result.exitCode} (${Date.now() - start}ms)`,
           fullOutput,
           duration: Date.now() - start,

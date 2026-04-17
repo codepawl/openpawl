@@ -2,6 +2,15 @@
  * Sprint mode types — lightweight autonomous task orchestration.
  */
 
+export interface SprintToolCallResult {
+  /** Tool name. */
+  name: string;
+  /** Shell exit code for shell_exec (and tools that wrap it). */
+  exitCode?: number;
+  /** First ~200 chars of stderr for shell_exec. */
+  stderrHead?: string;
+}
+
 export interface SprintTask {
   id: string;
   description: string;
@@ -9,8 +18,10 @@ export interface SprintTask {
   assignedAgent?: string;
   result?: string;
   error?: string;
-  /** Tool names called during this task's execution. */
+  /** Tool names called during this task's execution (deduped). */
   toolsCalled?: string[];
+  /** Per-call tool results with structured metadata (exit code, stderr head). Not deduped. */
+  toolCallResults?: SprintToolCallResult[];
   /** 1-based task indices that must complete before this task can start. */
   dependsOn?: number[];
 }

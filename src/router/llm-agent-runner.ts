@@ -22,6 +22,10 @@ export interface ToolCallDetails {
   outputSummary?: string;
   success?: boolean;
   diff?: import("../utils/diff.js").DiffResult;
+  /** Shell exit code for shell_exec (and tools that wrap it). */
+  exitCode?: number;
+  /** First ~200 chars of stderr for shell_exec. */
+  stderrHead?: string;
 }
 
 export interface LLMAgentRunnerOptions {
@@ -31,8 +35,22 @@ export interface LLMAgentRunnerOptions {
   getToolSchemas?: (toolNames: string[]) => ToolDef[];
   /** Get native tool definitions for API function calling. */
   getNativeTools?: (toolNames: string[]) => import("../providers/stream-types.js").NativeToolDefinition[];
-  /** Execute a tool and return the result as a string, optionally with diff metadata. */
-  executeTool?: (toolName: string, args: Record<string, unknown>) => Promise<string | { text: string; diff?: import("../utils/diff.js").DiffResult }>;
+  /**
+   * Execute a tool and return the result as a string, optionally with
+   * structured metadata. `text` is what goes to the LLM; the other
+   * fields are internal telemetry used by downstream consumers
+   * (sprint validator, classifier).
+   */
+  executeTool?: (toolName: string, args: Record<string, unknown>) => Promise<
+    | string
+    | {
+        text: string;
+        diff?: import("../utils/diff.js").DiffResult;
+        success?: boolean;
+        exitCode?: number;
+        stderrHead?: string;
+      }
+  >;
   /** Doom-loop detector — prevents repeated identical tool calls. */
   doomLoopDetector?: DoomLoopDetector;
   /** Tool output handler — summarizes large outputs and offloads to scratch files. */
@@ -169,9 +187,15 @@ export function createLLMAgentRunner(opts: LLMAgentRunnerOptions = {}): AgentRun
                     const rawResult = await executeTool!(name, args);
                     let result: string;
                     let diff: import("../utils/diff.js").DiffResult | undefined;
+                    let callSuccess = true;
+                    let exitCode: number | undefined;
+                    let stderrHead: string | undefined;
                     if (typeof rawResult === "object" && rawResult !== null) {
                       result = rawResult.text;
                       diff = rawResult.diff;
+                      if (typeof rawResult.success === "boolean") callSuccess = rawResult.success;
+                      exitCode = rawResult.exitCode;
+                      stderrHead = rawResult.stderrHead;
                     } else {
                       result = rawResult;
                     }
@@ -184,8 +208,8 @@ export function createLLMAgentRunner(opts: LLMAgentRunnerOptions = {}): AgentRun
                       result = summarized.content;
                     }
                     const duration = Date.now() - startTime;
-                    onToolCall?.(agentId, name, "completed", { executionId: execId, duration, outputSummary: result.slice(0, 200), success: true, diff });
-                    allToolCalls.push({ tool: name, input: JSON.stringify(args), output: result.slice(0, 200), duration, success: true });
+                    onToolCall?.(agentId, name, callSuccess ? "completed" : "failed", { executionId: execId, duration, outputSummary: result.slice(0, 200), success: callSuccess, diff, exitCode, stderrHead });
+                    allToolCalls.push({ tool: name, input: JSON.stringify(args), output: result.slice(0, 200), duration, success: callSuccess, exitCode, stderrHead });
                     return result + "\n\n" + verdict.message;
                   } catch (e) {
                     const duration = Date.now() - startTime;
@@ -202,9 +226,15 @@ export function createLLMAgentRunner(opts: LLMAgentRunnerOptions = {}): AgentRun
                 const rawResult = await executeTool!(name, args);
                 let result: string;
                 let diff: import("../utils/diff.js").DiffResult | undefined;
+                let callSuccess = true;
+                let exitCode: number | undefined;
+                let stderrHead: string | undefined;
                 if (typeof rawResult === "object" && rawResult !== null) {
                   result = rawResult.text;
                   diff = rawResult.diff;
+                  if (typeof rawResult.success === "boolean") callSuccess = rawResult.success;
+                  exitCode = rawResult.exitCode;
+                  stderrHead = rawResult.stderrHead;
                 } else {
                   result = rawResult;
                 }
@@ -222,8 +252,8 @@ export function createLLMAgentRunner(opts: LLMAgentRunnerOptions = {}): AgentRun
                 }
 
                 const duration = Date.now() - startTime;
-                onToolCall?.(agentId, name, "completed", { executionId: execId, duration, outputSummary: result.slice(0, 200), success: true, diff });
-                allToolCalls.push({ tool: name, input: JSON.stringify(args), output: result.slice(0, 200), duration, success: true });
+                onToolCall?.(agentId, name, callSuccess ? "completed" : "failed", { executionId: execId, duration, outputSummary: result.slice(0, 200), success: callSuccess, diff, exitCode, stderrHead });
+                allToolCalls.push({ tool: name, input: JSON.stringify(args), output: result.slice(0, 200), duration, success: callSuccess, exitCode, stderrHead });
                 return result;
               } catch (e) {
                 const duration = Date.now() - startTime;

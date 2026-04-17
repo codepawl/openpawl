@@ -77,6 +77,42 @@ describe("SprintRunner", () => {
     expect(result.completedTasks).toBe(0);
   });
 
+  it("records structured tool-call results (exitCode, stderrHead)", async () => {
+    const runner = new SprintRunner(mockRegistry());
+    let callCount = 0;
+    (runner as any).runAgent = vi.fn(async (): Promise<string> => {
+      callCount++;
+      if (callCount === 1) return "1. Run the build";
+      runner.recordToolCall("shell_exec", { exitCode: 127, stderrHead: "npm: command not found" });
+      return "Ran the build.";
+    });
+
+    const result = await runner.run("Build the project");
+
+    expect(result.tasks[0]!.toolsCalled).toContain("shell_exec");
+    expect(result.tasks[0]!.toolCallResults?.[0]).toEqual({
+      name: "shell_exec",
+      exitCode: 127,
+      stderrHead: "npm: command not found",
+    });
+  });
+
+  it("appends last shell exit code to thrown error message", async () => {
+    const runner = new SprintRunner(mockRegistry());
+    let callCount = 0;
+    (runner as any).runAgent = vi.fn(async (): Promise<string> => {
+      callCount++;
+      if (callCount === 1) return "1. Do something";
+      runner.recordToolCall("shell_exec", { exitCode: 2, stderrHead: "oops" });
+      throw new Error("LLM timeout");
+    });
+
+    const result = await runner.run("Failing goal");
+
+    expect(result.tasks[0]!.status).toBe("failed");
+    expect(result.tasks[0]!.error).toBe("LLM timeout (last shell exit 2)");
+  });
+
   it("handles task failure gracefully", async () => {
     const runner = new SprintRunner(mockRegistry());
     let callCount = 0;

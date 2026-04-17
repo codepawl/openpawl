@@ -476,6 +476,7 @@ export class SprintRunner extends EventEmitter {
     }
     task.status = "in_progress";
     task.toolsCalled = [];
+    task.toolCallResults = [];
     this.emitTyped("sprint:task:start", { task, agentName });
 
     try {
@@ -497,7 +498,10 @@ export class SprintRunner extends EventEmitter {
 
       if (this.taskExpectsWrite(task) && !this.taskDidWrite(task)) {
         task.status = "incomplete";
-        task.error = "Task expects file creation/modification but agent only performed read operations";
+        const shellFail = this.lastShellFailure(task);
+        task.error = shellFail
+          ? `Task expects file creation/modification but last shell_exec failed with exit ${shellFail.exitCode}${shellFail.stderrHead ? `: ${shellFail.stderrHead}` : ""}`
+          : "Task expects file creation/modification but agent only performed read operations";
         this.state.failedTasks++;
       } else {
         task.status = "completed";
@@ -505,7 +509,9 @@ export class SprintRunner extends EventEmitter {
       }
     } catch (err) {
       task.status = "failed";
-      task.error = err instanceof Error ? err.message : String(err);
+      const base = err instanceof Error ? err.message : String(err);
+      const shellFail = this.lastShellFailure(task);
+      task.error = shellFail ? `${base} (last shell exit ${shellFail.exitCode})` : base;
       this.state.failedTasks++;
     }
     this.emitTyped("sprint:task:complete", { task, taskIndex: index + 1, totalTasks: this.state.tasks.length });
@@ -539,6 +545,7 @@ export class SprintRunner extends EventEmitter {
     task.error = undefined;
     task.result = undefined;
     task.toolsCalled = [];
+    task.toolCallResults = [];
     this.state.failedTasks--;
 
     this.emitTyped("sprint:warning", {
@@ -565,13 +572,15 @@ export class SprintRunner extends EventEmitter {
   }
 
   /** Record a tool call for the currently executing task. */
-  recordToolCall(toolName: string): void {
+  recordToolCall(toolName: string, info?: { exitCode?: number; stderrHead?: string }): void {
     const task = this.state.tasks[this.state.currentTaskIndex];
     if (task && task.status === "in_progress") {
       task.toolsCalled ??= [];
       if (!task.toolsCalled.includes(toolName)) {
         task.toolsCalled.push(toolName);
       }
+      task.toolCallResults ??= [];
+      task.toolCallResults.push({ name: toolName, exitCode: info?.exitCode, stderrHead: info?.stderrHead });
     }
   }
 
@@ -584,6 +593,18 @@ export class SprintRunner extends EventEmitter {
   /** Check if any write tools were called during this task. */
   private taskDidWrite(task: SprintTask): boolean {
     return (task.toolsCalled ?? []).some((t) => WRITE_TOOLS.has(t));
+  }
+
+  /** Find the last shell_exec call that returned a non-zero exit code, if any. */
+  private lastShellFailure(task: SprintTask): { exitCode: number; stderrHead?: string } | undefined {
+    const results = task.toolCallResults ?? [];
+    for (let i = results.length - 1; i >= 0; i--) {
+      const r = results[i]!;
+      if (r.name === "shell_exec" && typeof r.exitCode === "number" && r.exitCode !== 0) {
+        return { exitCode: r.exitCode, stderrHead: r.stderrHead };
+      }
+    }
+    return undefined;
   }
 
   protected assignAgent(task: SprintTask): string {

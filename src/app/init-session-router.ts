@@ -251,7 +251,14 @@ export async function initSessionRouter(
             const text = result.value.fullOutput || JSON.stringify(result.value.data) || result.value.summary;
             const data = result.value.data as Record<string, unknown> | undefined;
             const diff = data?.diff as import("../utils/diff.js").DiffResult | undefined;
-            return diff ? { text, diff } : text;
+            const shell = toolName === "shell_exec" && data
+              ? { exitCode: data.exitCode as number | undefined, stderrHead: typeof data.stderr === "string" ? (data.stderr as string).slice(0, 200) : undefined }
+              : undefined;
+            const success = result.value.success;
+            if (diff || shell) {
+              return { text, diff, success, exitCode: shell?.exitCode, stderrHead: shell?.stderrHead };
+            }
+            return text;
           }
           const cause = "cause" in result.error ? `: ${result.error.cause}` : "";
           throw new Error(`${result.error.type}${cause}`);

@@ -73,7 +73,6 @@ export function createSprintRunner(opts: CreateSprintRunnerOptions): SprintRunne
           const inputSummary = formatInputSummary(name, args as Record<string, unknown>);
           const startTime = Date.now();
 
-          this.recordToolCall(name);
           this.emit(SprintEvent.AgentTool, {
             agentName,
             toolName: name,
@@ -93,14 +92,20 @@ export function createSprintRunner(opts: CreateSprintRunnerOptions): SprintRunne
           if (result.isOk()) {
             const data = result.value.data as Record<string, unknown> | undefined;
             const diff = data?.diff as import("../utils/diff.js").DiffResult | undefined;
+            const shell = name === "shell_exec" && data
+              ? { exitCode: data.exitCode as number | undefined, stderrHead: typeof data.stderr === "string" ? (data.stderr as string).slice(0, 200) : undefined }
+              : undefined;
+            const callSuccess = result.value.success;
+            this.recordToolCall(name, shell ? { exitCode: shell.exitCode, stderrHead: shell.stderrHead } : undefined);
             this.emit(SprintEvent.AgentTool, {
               agentName,
               toolName: name,
-              status: "completed",
-              details: { executionId: execId, duration, outputSummary: result.value.summary.slice(0, 200), success: true, diff },
+              status: callSuccess ? "completed" : "failed",
+              details: { executionId: execId, duration, outputSummary: result.value.summary.slice(0, 200), success: callSuccess, diff, exitCode: shell?.exitCode, stderrHead: shell?.stderrHead },
             });
             return result.value.summary;
           }
+          this.recordToolCall(name);
 
           const errMsg = `${result.error.type} — ${result.error.toolName}`;
           this.emit(SprintEvent.AgentTool, {
