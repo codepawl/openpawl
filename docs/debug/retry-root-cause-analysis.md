@@ -8,6 +8,27 @@ Two nested retry loops compound on environmental failures: the LLM keeps spendin
 - **Sprint-level retry is oblivious to error class.** Any `failed` / `incomplete` task that doesn't match three narrow exclusions (`timeout`, `Skipped:`, `aborted`) is retried once with the same agent in the same environment — only the description gets an appended hint. A post-hoc classifier that *does* understand env errors (`post-mortem.ts`) runs too late to influence retry.
 - **No status exists for "blocked by environment."** The task state union is `pending | in_progress | completed | failed | incomplete`. Adding `blocked` plus a shared error classifier lets both layers short-circuit on env failures and reports them honestly as partial, not failed.
 
+## Re-analysis — additional findings (post first draft)
+
+Re-reading the tool wiring surfaced a root cause that makes the model-level retry problem even sharper than the first pass suggested.
+
+**Exit codes are dropped at the LLM boundary.** `src/tools/built-in/shell-exec.ts:78-80` already captures structured data: `{ success: exitCode === 0, data: { exitCode, stdout } }`. But every `executeTool` wiring flattens this before handing it back to the model:
+
+```ts
+// src/app/init-session-router.ts:251
+// src/app/headless.ts:482
+// src/app/headless.ts:604 (actually :611 in current file — executeTool for solo mode)
+const text = result.value.fullOutput || JSON.stringify(result.value.data) || result.value.summary;
+```
+
+`fullOutput` is stdout/stderr text only. `data.exitCode` and `success` never reach the LLM. So when `npm install` returns exit 127, the model sees stderr text like `"npm ERR! ..."` with no structured signal; it reads the message, tries a different command, and the cycle begins.
+
+**`llm-agent-runner.ts:226` records `success: true` on exit-non-zero shell calls.** The success flag on `allToolCalls` reflects whether `executeTool` threw, not whether the command succeeded. A failed `shell_exec` that returns normally is counted as a successful tool call in the activity log, which blinds downstream analytics (and would blind a classifier layered here).
+
+**Error-classification infrastructure already exists in `src/engine/errors.ts`.** The file defines an `ErrorCode` union (`TOOL_EXECUTION_FAILED`, `TIMEOUT`, `NETWORK_ERROR`, `AUTH_FAILED`, ...) and `translateError` at `src/engine/errors.ts:223-251` does regex-based classification of raw errors — exactly the pattern proposed for Part B fix 1. It's currently scoped to LLM-provider errors; extending it (or mirroring it) for tool-output errors is mostly a copy-paste of the existing pattern, not new design.
+
+**Implication for the ranked fixes.** Part A fix 3 (structured tool results) is now the **highest-leverage** change in the whole doc — it costs ~10 lines across three wiring sites, and every downstream fix (escalation clause, doom-loop signature, sprint classifier, `blocked` status) becomes simpler because they can key off `exitCode` instead of grepping stderr strings.
+
 ## Log note
 
 The referenced log `benchmarks/debug-reruns/2026-04-17/cli-task-manager-sprint-post-fix1.jsonl` is not present in the working tree (no `benchmarks/` directory on `staging` at the time of writing, even though the structured JSONL logging feature landed via #71). The "count turns spent on npm install" verification could not be performed against the actual trace. Structural findings below are drawn from the code and are independent of that count. The expected pattern for that run, given the mechanisms described here, is: coder burns up to ~10 tool turns cycling through install commands, LLM loop exits (tool turns exhausted), validation marks the task `incomplete` (no write happened), sprint retries once with the same agent against the same env, burns ~10 more turns, and finally surfaces as a task failure with no indication that the root cause was environmental.
@@ -237,3 +258,34 @@ Concrete files/lines that read or write the status union today and would need up
 - `src/sprint/sprint-runner.ts:522-555` — `retryTask`
 - `src/sprint/post-mortem.ts:25-71` — `FAILURE_RULES`
 - `src/sprint/post-mortem.ts:73-83` — `classifyFailure`
+- `src/engine/errors.ts:7-20` — `ErrorCode` union (existing error-classification infra)
+- `src/engine/errors.ts:223-251` — `translateError` (pattern to mirror for tool errors)
+- `src/tools/built-in/shell-exec.ts:77-83` — structured `ToolOutput` with `exitCode`
+- `src/tools/executor.ts:143-168` — debug path that already extracts `exitCode` for logging
+- `src/app/init-session-router.ts:251` — `executeTool` wiring drops `exitCode` (chat/sprint)
+- `src/app/headless.ts:482` — `executeTool` wiring drops `exitCode` (headless solo)
+- `src/app/headless.ts:611` — `executeTool` wiring drops `exitCode` (headless collab)
+- `src/router/llm-agent-runner.ts:226` — records `success: true` regardless of shell exit code
+
+## Conclusion
+
+The retry compounding is not a single bug but a **chain of four drops** of the same signal:
+
+1. `shell-exec.ts:78` produces `{ success, exitCode, stdout }`.
+2. `init-session-router.ts:251` / `headless.ts:482,611` flatten to stdout text only.
+3. `llm-agent-runner.ts:202-234` passes that text to the model; the catch block only fires on thrown exceptions, not on exit-non-zero.
+4. `sprint-runner.ts:515-519` (`isRetriable`) inspects `task.error` as a string and has no regex for env-error signatures; the classifier that *does* have them (`post-mortem.ts:25-71`) runs too late to block retry.
+
+Each layer would have had the information it needed if the one below hadn't thrown it away. The remediation is correspondingly staged:
+
+**Priority 1 (highest leverage, ~20 LOC):** Surface `exitCode` across the three `executeTool` wirings. Either prepend `[exit ${N}] ` to the returned text, or return `{ text, exitCode }` and update the `executeTool` type at `llm-agent-runner.ts:35` to carry it through. This single change lights up every downstream fix.
+
+**Priority 2:** Extract `src/sprint/error-classify.ts` mirroring `src/engine/errors.ts:223-251`. Use it in `isRetriable` to short-circuit env errors. Share rules with `post-mortem.ts` so the two stay consistent.
+
+**Priority 3:** Add `blocked` to the `SprintTask` status union (`types.ts:8`) and wire the touchpoint list from Part C. This is mostly mechanical once priorities 1 and 2 land.
+
+**Priority 4:** Add the escalation clause to coder/tester/debugger/assistant system prompts. Useful as defense-in-depth, but priorities 1-3 already remove the pathological pattern — this fix mostly improves error messaging to operators.
+
+**Priority 5 (optional, deeper refactor):** Generalize `doom-loop-detector` to fingerprint by `(toolName, exitCode, stderr_head)` instead of params, so repeated env failures across different commands are caught at the LLM-loop level too.
+
+With priorities 1 and 2, the `cli-task-manager` post-fix pattern (coder cycling through package managers, sprint retrying against the same broken env) becomes: first failed `shell_exec` with exit 127 returns `[exit 127] command not found` → classifier tags task as env-blocked → `isRetriable` returns false → sprint marks task `blocked` and continues. Turns wasted: zero.
