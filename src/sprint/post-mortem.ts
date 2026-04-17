@@ -6,6 +6,7 @@
 
 import type { SprintResult, SprintTask } from "./types.js";
 import { debugLog, isDebugEnabled, truncateStr, TRUNCATION } from "../debug/logger.js";
+import { matchFailureRule } from "./error-classify.js";
 
 export interface PostMortemResult {
   failedTasks: { task: string; error: string; suggestedFix: string }[];
@@ -17,69 +18,14 @@ export interface PostMortemResult {
 const MAX_LESSONS_PER_RUN = 3;
 const MAX_TOTAL_LESSONS = 10;
 
-interface FailureRule {
-  pattern: RegExp;
-  lesson: (task: SprintTask, match: RegExpMatchArray) => string;
-  fix: (task: SprintTask, match: RegExpMatchArray) => string;
-}
-
-const FAILURE_RULES: FailureRule[] = [
-  {
-    pattern: /module\s+not\s+found|cannot\s+find\s+module|no\s+such\s+file|ENOENT/i,
-    lesson: (_t) => "Add dependency installation and file creation to project setup task before implementation tasks",
-    fix: (_t) => "ensure dependencies are installed in setup",
-  },
-  {
-    pattern: /command\s+not\s+found|not\s+recognized|ENOENT.*bin/i,
-    lesson: (_t) => "Verify required CLI tools are available before running commands",
-    fix: (_t) => "check tool availability before use",
-  },
-  {
-    pattern: /timeout|timed?\s*out|ETIMEDOUT|deadline\s+exceeded/i,
-    lesson: (t) => `Break "${t.description.slice(0, 50)}" into smaller, focused subtasks`,
-    fix: (_t) => "split into smaller tasks",
-  },
-  {
-    pattern: /test.*fail|assert.*fail|expect.*received|FAIL\s+src/i,
-    lesson: (_t) => "Verify implementation correctness before writing tests; ensure test setup (framework, config) is a separate earlier task",
-    fix: (_t) => "verify implementation before testing",
-  },
-  {
-    pattern: /syntax\s*error|unexpected\s+token|parsing\s+error/i,
-    lesson: (_t) => "Include explicit file format and syntax requirements in task descriptions",
-    fix: (_t) => "specify exact syntax in task description",
-  },
-  {
-    pattern: /permission\s+denied|EACCES|forbidden/i,
-    lesson: (_t) => "Check file and directory permissions before write operations",
-    fix: (_t) => "ensure write permissions",
-  },
-  {
-    pattern: /port\s+.*in\s+use|EADDRINUSE|already\s+listening/i,
-    lesson: (_t) => "Use dynamic or non-default ports to avoid conflicts",
-    fix: (_t) => "use a non-conflicting port",
-  },
-  {
-    pattern: /type\s*error|is\s+not\s+a\s+function|undefined\s+is\s+not/i,
-    lesson: (_t) => "Include type annotations and interface definitions in task descriptions to prevent type mismatches",
-    fix: (_t) => "add explicit types",
-  },
-  {
-    pattern: /import\s+error|cannot\s+use\s+import|require\s+is\s+not\s+defined/i,
-    lesson: (_t) => "Specify module system (ESM vs CommonJS) in project setup and ensure consistent usage",
-    fix: (_t) => "align module system across files",
-  },
-];
-
 function classifyFailure(task: SprintTask): { lesson: string; fix: string } | null {
   const errorText = `${task.error ?? ""} ${task.result ?? ""}`;
   if (!errorText.trim()) return null;
 
-  for (const rule of FAILURE_RULES) {
-    const match = errorText.match(rule.pattern);
-    if (match) {
-      return { lesson: rule.lesson(task, match), fix: rule.fix(task, match) };
-    }
+  const rule = matchFailureRule(errorText);
+  if (rule) {
+    const match = errorText.match(rule.pattern)!;
+    return { lesson: rule.lesson(task, match), fix: rule.fix };
   }
 
   // Generic fallback for unclassified errors

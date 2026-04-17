@@ -33,7 +33,7 @@ const BUILT_IN_AGENTS: AgentDefinition[] = [
     capabilities: ["code_write", "code_edit", "code_debug", "file_ops"],
     defaultTools: ["file_read", "file_list", "file_write", "file_edit", "shell_exec", "git_ops"],
     modelTier: "primary",
-    systemPrompt: "Write and modify code. Use tools to read files before editing. Output working code, not explanations about code.",
+    systemPrompt: "Write and modify code. Use tools to read files before editing. Output working code, not explanations about code.\n\nIf a shell_exec call returns exit code 127 or stderr contains 'command not found', the environment is missing a dependency. Do not retry with different package managers or paths. Stop immediately and end your response with exactly: BLOCKED: <what is missing>",
     canCollaborate: true,
     maxConcurrent: 3,
     triggerPatterns: [
@@ -76,7 +76,7 @@ const BUILT_IN_AGENTS: AgentDefinition[] = [
     capabilities: ["test_write", "test_run", "code_debug"],
     defaultTools: ["file_read", "file_list", "file_write", "shell_exec"],
     modelTier: "fast",
-    systemPrompt: "Write test code. Read the source first to understand what to test. Show test code, not test philosophy.",
+    systemPrompt: "Write test code. Read the source first to understand what to test. Show test code, not test philosophy.\n\nIf a shell_exec call returns exit code 127 or stderr contains 'command not found', the environment is missing a dependency. Do not retry with different package managers or paths. Stop immediately and end your response with exactly: BLOCKED: <what is missing>",
     canCollaborate: true,
     maxConcurrent: 3,
     triggerPatterns: [
@@ -90,7 +90,7 @@ const BUILT_IN_AGENTS: AgentDefinition[] = [
     capabilities: ["code_debug", "code_edit", "test_run"],
     defaultTools: ["file_read", "file_list", "file_write", "file_edit", "shell_exec", "git_ops"],
     modelTier: "primary",
-    systemPrompt: "Debug by reading the actual error and source code. Trace the root cause. Fix it or explain exactly what's wrong.",
+    systemPrompt: "Debug by reading the actual error and source code. Trace the root cause. Fix it or explain exactly what's wrong.\n\nIf a shell_exec call returns exit code 127 or stderr contains 'command not found', the environment is missing a dependency. Do not retry with different package managers or paths. Stop immediately and end your response with exactly: BLOCKED: <what is missing>",
     canCollaborate: true,
     maxConcurrent: 2,
     triggerPatterns: [
@@ -118,7 +118,7 @@ const BUILT_IN_AGENTS: AgentDefinition[] = [
     capabilities: ["conversation", "code_explain", "file_ops"],
     defaultTools: ["file_read", "file_list", "shell_exec"],
     modelTier: "fast",
-    systemPrompt: "Answer directly. If a tool would help, use it. If not, give the shortest correct answer.",
+    systemPrompt: "Answer directly. If a tool would help, use it. If not, give the shortest correct answer.\n\nIf a shell_exec call returns exit code 127 or stderr contains 'command not found', the environment is missing a dependency. Do not retry with different package managers or paths. Stop immediately and end your response with exactly: BLOCKED: <what is missing>",
     canCollaborate: false,
     maxConcurrent: 1,
     triggerPatterns: [],

@@ -13,6 +13,7 @@ import { validatePlan, reorderSetupFirst } from "./plan-validator.js";
 import { profileMeasure } from "../telemetry/profiler.js";
 import { resolveModelForAgent } from "../core/model-config.js";
 import { debugLog, isDebugEnabled, truncateStr, TRUNCATION } from "../debug/logger.js";
+import { classifyTask, type ErrorKind } from "./error-classify.js";
 
 const PLANNER_PROMPT = (goal: string, maxTasks: number, teamContext?: SprintTeamContext, lessons?: string[]) => {
   let prompt =
@@ -517,11 +518,47 @@ export class SprintRunner extends EventEmitter {
     this.emitTyped("sprint:task:complete", { task, taskIndex: index + 1, totalTasks: this.state.tasks.length });
   }
 
-  /** Check if a failed task is worth retrying (not timeout, not skip, not abort). */
+  /**
+   * Decide whether a failed task should be retried. Structured classifier
+   * (error-classify.ts) is consulted first — env_* and timeout kinds skip
+   * retry because the same agent in the same environment cannot recover.
+   * Falls back to string-based exclusions for pre-PR-#76 edge cases.
+   */
   private isRetriable(task: SprintTask): boolean {
     const err = task.error ?? "";
-    return !err.includes("timeout") && !err.includes("Timed out")
-      && !err.includes("Skipped:") && !err.includes("aborted");
+
+    // Hard exclusions — abort and dependency-skip are terminal regardless of kind
+    if (err.includes("Skipped:") || err.includes("aborted")) return false;
+
+    const { kind, signal } = classifyTask(task);
+    const nonRetriableKinds: ErrorKind[] = [
+      "env_command_not_found",
+      "env_missing_dep",
+      "env_perm",
+      "env_port_in_use",
+      "timeout",
+    ];
+    const willRetry = !nonRetriableKinds.includes(kind);
+
+    if (isDebugEnabled()) {
+      debugLog("info", "sprint", "sprint:retry_gate", {
+        data: {
+          taskId: task.id,
+          kind,
+          signal,
+          willRetry,
+          errorHead: truncateStr(err, 120),
+        },
+      });
+    }
+
+    if (!willRetry) return false;
+
+    // Fallback string-based exclusions for cases where the classifier
+    // returned "unknown" but the error text still looks terminal.
+    if (err.includes("timeout") || err.includes("Timed out")) return false;
+
+    return true;
   }
 
   /** Retry a failed task once with error context appended. */
