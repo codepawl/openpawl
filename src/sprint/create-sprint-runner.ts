@@ -23,10 +23,13 @@ export function createSprintRunner(opts: CreateSprintRunnerOptions): SprintRunne
   return new (class extends SprintRunner {
     protected override async runAgent(
       agentName: string,
-      runOpts: { prompt: string; signal: AbortSignal },
+      runOpts: { prompt: string; signal: AbortSignal; taskIndex?: number },
     ): Promise<{ text: string; usage: { input: number; output: number } }> {
       // Capture cwd once at entry — avoids stale/racy process.cwd() in callbacks
       const workingDirectory = process.cwd();
+      // Capture taskIndex so handleTool attributes to the correct task under
+      // parallel execution (see recordToolCall in sprint-runner.ts).
+      const capturedTaskIndex = runOpts.taskIndex;
       const agent = this.agents.get(agentName);
       if (!agent) {
         throw new Error(`Unknown agent: ${agentName}`);
@@ -96,7 +99,7 @@ export function createSprintRunner(opts: CreateSprintRunnerOptions): SprintRunne
               ? { exitCode: data.exitCode as number | undefined, stderrHead: typeof data.stderr === "string" ? (data.stderr as string).slice(0, 200) : undefined }
               : undefined;
             const callSuccess = result.value.success;
-            this.recordToolCall(name, shell ? { exitCode: shell.exitCode, stderrHead: shell.stderrHead } : undefined);
+            this.recordToolCall(name, shell ? { exitCode: shell.exitCode, stderrHead: shell.stderrHead } : undefined, capturedTaskIndex);
             this.emit(SprintEvent.AgentTool, {
               agentName,
               toolName: name,

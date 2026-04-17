@@ -485,6 +485,7 @@ export class SprintRunner extends EventEmitter {
         this.runAgent(agentName, {
           prompt: TASK_PROMPT(task, this.state),
           signal: this.abortController!.signal,
+          taskIndex: index,
         }),
       );
 
@@ -603,14 +604,25 @@ export class SprintRunner extends EventEmitter {
   /** Override in subclass or mock for testing. */
   protected async runAgent(
     _agentName: string,
-    _opts: { prompt: string; signal: AbortSignal },
+    _opts: { prompt: string; signal: AbortSignal; taskIndex?: number },
   ): Promise<string | { text: string; usage: { input: number; output: number } }> {
     throw new Error("runAgent must be wired to LLM before calling run()");
   }
 
-  /** Record a tool call for the currently executing task. */
-  recordToolCall(toolName: string, info?: { exitCode?: number; stderrHead?: string }): void {
-    const task = this.state.tasks[this.state.currentTaskIndex];
+  /**
+   * Record a tool call for a task. When `taskIndex` is given, attribute to
+   * that task directly — required under parallel execution, where the shared
+   * `state.currentTaskIndex` races between concurrent `executeTask` frames.
+   * Falls back to `currentTaskIndex` for sequential callers that don't thread
+   * the index.
+   */
+  recordToolCall(
+    toolName: string,
+    info?: { exitCode?: number; stderrHead?: string },
+    taskIndex?: number,
+  ): void {
+    const idx = taskIndex ?? this.state.currentTaskIndex;
+    const task = this.state.tasks[idx];
     if (task && task.status === "in_progress") {
       task.toolsCalled ??= [];
       if (!task.toolsCalled.includes(toolName)) {
