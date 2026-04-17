@@ -54,7 +54,15 @@ const PLANNER_PROMPT = (goal: string, maxTasks: number, teamContext?: SprintTeam
     `9. NO QUESTIONS AS TASKS: NEVER output clarification questions as tasks. Every task description must start with an action verb ` +
     `(Create, Implement, Write, Set up, Configure, Build, Add, Install, Test, Deploy). ` +
     `If the goal is too vague to decompose into actionable tasks, respond with EXACTLY:\n` +
-    `NEEDS_CLARIFICATION: followed by your questions, one per line. Do NOT wrap questions in JSON or task format.\n\n`;
+    `NEEDS_CLARIFICATION: followed by your questions, one per line. Do NOT wrap questions in JSON or task format.\n\n` +
+    `AGENT ASSIGNMENT:\n` +
+    `Tag each task with the "agent" field. Valid values: coder, reviewer, tester, debugger, researcher. ` +
+    `NEVER assign a task to "planner" — planner decomposes goals, it does not execute them. ` +
+    `Use "coder" by default for write/implementation tasks (most tasks). ` +
+    `Use "tester" for tasks that only write tests. ` +
+    `Use "researcher" for tasks that only read/search. ` +
+    `Use "reviewer" for tasks that only read existing code and report. ` +
+    `Use "debugger" only for tasks that explicitly diagnose a failure.\n\n`;
 
   if (teamContext) {
     const agentList = teamContext.agents
@@ -72,7 +80,7 @@ const PLANNER_PROMPT = (goal: string, maxTasks: number, teamContext?: SprintTeam
   } else {
     prompt +=
       `Output as a JSON array:\n` +
-      `[{"description": "...", "dependsOn": []}, {"description": "...", "dependsOn": [1]}]\n\n`;
+      `[{"description": "...", "agent": "coder", "dependsOn": []}, {"description": "...", "agent": "tester", "dependsOn": [1]}]\n\n`;
   }
 
   if (lessons && lessons.length > 0) {
@@ -713,7 +721,32 @@ export class SprintRunner extends EventEmitter {
     return undefined;
   }
 
+  /**
+   * Guard against planner self-assignment for write-intent tasks. The planner
+   * agent's defaultTools exclude file_write/file_edit, so honoring a planner
+   * tag on a write-intent task guarantees the task fails PR #82 validation.
+   * Downgrade to coder and log a warning. See
+   * docs/debug/planner-misassignment-diagnosis.md for the post-PR-82 trace.
+   */
+  private downgradePlannerOnWrite(task: SprintTask): void {
+    if (task.assignedAgent === "planner" && this.taskExpectsWrite(task)) {
+      if (isDebugEnabled()) {
+        debugLog("warn", "sprint", "sprint:agent_downgrade", {
+          data: {
+            taskId: task.id,
+            from: "planner",
+            to: "coder",
+            reason: "planner lacks write tools for write-intent task",
+            description: truncateStr(task.description, 120),
+          },
+        });
+      }
+      task.assignedAgent = "coder";
+    }
+  }
+
   protected assignAgent(task: SprintTask): string {
+    this.downgradePlannerOnWrite(task);
     // Template mode: use planner-assigned role or map template roles
     if (this.teamContext) {
       // If planner tagged the task with an agent role, map it
