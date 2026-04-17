@@ -54,7 +54,7 @@
     "test:file": "bun test"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.79.0",
+    "@anthropic-ai/sdk": "^0.90.0",
     "@aws-sdk/client-bedrock-runtime": "^3.1012.0",
     "@clack/core": "^1.1.0",
     "@clack/prompts": "^0.9.1",
