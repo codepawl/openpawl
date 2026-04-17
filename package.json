@@ -1,6 +1,6 @@
 {
   "name": "openpawl",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Your AI team for vibe coding. Multi-agent orchestration with memory, learning, and team templates.",
   "type": "module",
   "license": "MIT",

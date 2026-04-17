@@ -1,0 +1,2 @@
+{"event":"run:start","timestamp":"2026-04-17T13:03:08Z","task":"cli-task-manager","mode":"sprint","branch":"fix/validation-parallel-race","workdir":"/home/nxank4/personal/openpawl-test-projects/bench/cli-task-manager-sprint-pr78"}
+{"event":"run:close","timestamp":"2026-04-17T13:07:11Z","exitCode":0,"durationMs":242663}
