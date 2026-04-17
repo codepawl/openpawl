@@ -4,7 +4,7 @@
 
 # OpenPawl
 
-**Your AI team for vibe coding. Stop prompting alone.**
+**Terminal AI coding with a team of agents, not just one. Chat-based, keyboard-first, open source.**
 
 [![CI](https://github.com/codepawl/openpawl/actions/workflows/ci.yml/badge.svg)](https://github.com/codepawl/openpawl/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)

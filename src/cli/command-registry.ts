@@ -4,6 +4,7 @@
  */
 import pc from "picocolors";
 import { VERSION } from "../version.js";
+import { PRODUCT_NAME, PRODUCT_TAGLINE_SHORT } from "../meta/product.js";
 
 export type CommandCategory =
   | "getting-started"
@@ -291,7 +292,7 @@ export function generateHelp(): string {
 
   const lines: string[] = [
     "",
-    pc.bold(pc.cyan("OpenPawl")) + " — Your AI team for shipping goals" + "  " + pc.dim(`v${version}`),
+    pc.bold(pc.cyan(PRODUCT_NAME)) + " — " + PRODUCT_TAGLINE_SHORT + "  " + pc.dim(`v${version}`),
     "",
     section("USAGE"),
     "  openpawl <command> [options]",

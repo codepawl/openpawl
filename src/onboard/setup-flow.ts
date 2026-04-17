@@ -14,6 +14,7 @@ import {
   type OpenPawlGlobalConfig,
   type ProviderConfigEntry,
 } from "../core/global-config.js";
+import { PRODUCT_NAME, PRODUCT_TAGLINE_SHORT } from "../meta/product.js";
 
 export interface SetupOptions {
   prefill?: OpenPawlGlobalConfig;
@@ -101,7 +102,7 @@ export async function runSetup(options?: SetupOptions): Promise<void> {
   const prefill = options?.prefill;
   const isResetup = Boolean(prefill);
 
-  p.intro(pc.bold(pc.cyan(isResetup ? "OpenPawl — Reconfigure" : "Welcome to OpenPawl — your AI team, one prompt away.")));
+  p.intro(pc.bold(pc.cyan(isResetup ? `${PRODUCT_NAME} — Reconfigure` : `Welcome to ${PRODUCT_NAME} — ${PRODUCT_TAGLINE_SHORT}`)));
 
   // Step 1: Detect providers
   const detected = await detectProviders();
