@@ -4,6 +4,8 @@
  * from the registry, and emits events for TUI rendering.
  */
 import { EventEmitter } from "node:events";
+import { existsSync } from "node:fs";
+import { isAbsolute, join } from "node:path";
 import type { AgentRegistry } from "../router/agent-registry.js";
 import type { SprintTask, SprintState, SprintResult, SprintOptions, SprintEventMap, SprintTeamContext } from "./types.js";
 import { mapTemplateRoleToAgent } from "./team-resolver.js";
@@ -112,10 +114,31 @@ function isSmallModel(modelId: string): boolean {
   return SMALL_MODEL_PATTERNS.some((p) => p.test(modelId));
 }
 
-/** Keywords in task descriptions that imply the agent must write/modify files. */
-const WRITE_INTENT_KEYWORDS = ["create", "build", "implement", "write", "add", "generate", "set up", "setup", "configure", "install"];
-/** Tools that constitute a write action. */
-const WRITE_TOOLS = new Set(["file_write", "file_edit", "shell_exec"]);
+/**
+ * Keywords in task descriptions that imply the agent must write/modify files.
+ * Ambiguous words ("install", "setup", "configure") previously lived here but
+ * triggered validation on no-op tasks like `npm install`, so they are dropped.
+ * False negatives (missing a write-intent task) are preferred over false
+ * positives (retrying a no-op task).
+ */
+const WRITE_INTENT_KEYWORDS = ["create", "build", "implement", "write", "add", "generate"];
+
+/**
+ * Tools that constitute a write action. `shell_exec` is intentionally excluded
+ * because it has too many non-write uses (`ls`, `cat`, `which`, test runners)
+ * and counting it previously let tasks pass validation without producing any
+ * file. Tasks that legitimately only need shell (e.g. "run tests") should
+ * have descriptions without WRITE_INTENT_KEYWORDS, causing `taskExpectsWrite`
+ * to return false.
+ */
+const WRITE_TOOLS = new Set(["file_write", "file_edit"]);
+
+/**
+ * Match file paths mentioned in task descriptions. Covers relative paths
+ * (`src/foo.ts`), bare filenames with extensions (`package.json`,
+ * `README.md`), and nested paths (`src/__tests__/bar.test.ts`).
+ */
+const FILE_PATH_REGEX = /\b[\w.-]+(?:\/[\w.-]+)+\.(?:ts|tsx|js|jsx|json|md|yml|yaml|toml|sh|py|rs|go|html|css|txt|lock)\b|\b(?:package\.json|tsconfig\.json|README\.md|CHANGELOG\.md|\.gitignore|LICENSE|[\w-]+\.(?:ts|tsx|js|jsx|md|yml|yaml|toml|sh|py|rs|go))\b/g;
 
 /** Extract clarification questions if planner responded with NEEDS_CLARIFICATION. */
 function extractClarification(response: string): string[] | null {
@@ -505,6 +528,19 @@ export class SprintRunner extends EventEmitter {
           ? `Task expects file creation/modification but last shell_exec failed with exit ${shellFail.exitCode}${shellFail.stderrHead ? `: ${shellFail.stderrHead}` : ""}`
           : "Task expects file creation/modification but agent only performed read operations";
         this.state.failedTasks++;
+      } else if (this.taskExpectsWrite(task)) {
+        // Belt-and-suspenders: task says "create src/foo.ts" and the agent
+        // called a write tool, but did the file actually land? Catches cases
+        // where the agent wrote to the wrong path.
+        const missing = this.missingDescribedFiles(task);
+        if (missing.length > 0) {
+          task.status = "incomplete";
+          task.error = `Task described creating ${missing.slice(0, 3).join(", ")}${missing.length > 3 ? ` (+${missing.length - 3} more)` : ""} but file${missing.length === 1 ? " does" : "s do"} not exist`;
+          this.state.failedTasks++;
+        } else {
+          task.status = "completed";
+          this.state.completedTasks++;
+        }
       } else {
         task.status = "completed";
         this.state.completedTasks++;
@@ -642,6 +678,27 @@ export class SprintRunner extends EventEmitter {
   /** Check if any write tools were called during this task. */
   private taskDidWrite(task: SprintTask): boolean {
     return (task.toolsCalled ?? []).some((t) => WRITE_TOOLS.has(t));
+  }
+
+  /**
+   * Return file paths the task description mentioned that do not currently
+   * exist on disk. Empty when the description names no paths or all of them
+   * exist. Used as a final gate after `taskDidWrite` — catches agents that
+   * wrote to the wrong location.
+   */
+  private missingDescribedFiles(task: SprintTask): string[] {
+    const matches = task.description.match(FILE_PATH_REGEX);
+    if (!matches || matches.length === 0) return [];
+    const cwd = process.cwd();
+    const missing: string[] = [];
+    const seen = new Set<string>();
+    for (const rel of matches) {
+      if (seen.has(rel)) continue;
+      seen.add(rel);
+      const abs = isAbsolute(rel) ? rel : join(cwd, rel);
+      if (!existsSync(abs)) missing.push(rel);
+    }
+    return missing;
   }
 
   /** Find the last shell_exec call that returned a non-zero exit code, if any. */
