@@ -95,6 +95,51 @@ const PLANNER_PROMPT = (goal: string, maxTasks: number, teamContext?: SprintTeam
   return prompt;
 };
 
+/**
+ * Build the "Files already created" block for the task prompt. Cold-starts
+ * between coder tasks previously caused the same file (e.g. `src/types.ts`)
+ * to be re-read on every task; injecting a compact known-paths digest
+ * lets later tasks reference prior files without re-discovery.
+ *
+ * Contract: empty string when no prior task produced an on-disk file;
+ * otherwise a block bounded by `KNOWN_FILES_BUDGET` chars regardless of
+ * prior task count (tail summarized with "…+N more").
+ */
+const KNOWN_FILES_BUDGET = 500;
+
+export function buildKnownFilesBlock(state: SprintState, cwd: string = process.cwd()): string {
+  const entries: Array<{ path: string; hint: string }> = [];
+  const seen = new Set<string>();
+  for (const t of state.tasks) {
+    if (t.status !== "completed") continue;
+    const matches = t.description.match(FILE_PATH_REGEX);
+    if (!matches) continue;
+    for (const rel of matches) {
+      if (seen.has(rel)) continue;
+      const abs = isAbsolute(rel) ? rel : join(cwd, rel);
+      if (!existsSync(abs)) continue;
+      seen.add(rel);
+      entries.push({ path: rel, hint: t.description.slice(0, 100).replace(/\s+/g, " ").trim() });
+    }
+  }
+  if (entries.length === 0) return "";
+
+  const header = "Files already created (use these — do not re-read unless you must):\n";
+  const lines: string[] = [];
+  let bytes = header.length;
+  let idx = 0;
+  for (; idx < entries.length; idx++) {
+    const e = entries[idx]!;
+    const line = `- ${e.path} — ${e.hint}\n`;
+    if (bytes + line.length > KNOWN_FILES_BUDGET) break;
+    lines.push(line);
+    bytes += line.length;
+  }
+  const remaining = entries.length - idx;
+  if (remaining > 0) lines.push(`- …+${remaining} more\n`);
+  return "\n\n" + header + lines.join("");
+}
+
 const TASK_PROMPT = (task: SprintTask, state: SprintState) => {
   const context = state.tasks
     .filter((t) => (t.status === "completed" || (t.status === "failed" && t.result)) && t.result)
@@ -104,7 +149,8 @@ const TASK_PROMPT = (task: SprintTask, state: SprintState) => {
     })
     .join("\n");
   const prior = context ? `\n\nPrior work:\n${context}` : "";
-  return `Goal: ${state.goal}\n\nYour task: ${task.description}${prior}\n\nWorking directory: ${process.cwd()}`;
+  const knownFiles = buildKnownFilesBlock(state);
+  return `Goal: ${state.goal}\n\nYour task: ${task.description}${prior}${knownFiles}\n\nWorking directory: ${process.cwd()}`;
 };
 
 /**
