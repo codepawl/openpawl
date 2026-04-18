@@ -343,8 +343,6 @@ See [SECURITY.md](./SECURITY.md) for vulnerability reporting.
 | Document | Contents |
 |----------|----------|
 | [AGENTS.md](./docs/AGENTS.md) | Team culture and RFC policy |
-| [ARCHITECTURE.md](./docs/ARCHITECTURE.md) | System design |
-| [CUSTOM_AGENTS.md](./docs/CUSTOM_AGENTS.md) | Custom agent SDK guide |
 | [WEBHOOKS.md](./docs/WEBHOOKS.md) | Webhook event schemas |
 | [comparison.md](./docs/comparison.md) | Feature comparison with other tools |
 
