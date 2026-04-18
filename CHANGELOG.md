@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.3.0] - 2026-04-18
+
+Sprint correctness and context-sharing release. Closes out a two-day debug session that moved the CLI Task Manager benchmark sprint/solo output-token ratio from **2.08× (pre-PR-74)** to **0.66× (post-PR-84)** — a **68 % reduction**. Sprint is now meaningfully cheaper than solo on the reference benchmark, with honest claim-vs-disk quality.
+
+### Fixed
+- **Retry semantics rework** (#77): classifier-backed `isRetriable` skips `env_*` and `timeout` kinds because the same agent in the same environment cannot recover. Eliminated the false-positive retry cascade that previously re-ran tasks blocked by missing deps.
+- **Env error classification** (#77): tasks that fail with `exit 127` / command-not-found / missing-dep surface `BLOCKED: <what is missing>` instead of looping through retries. `classifyError`/`classifyTask` prefer exit code over regex.
+- **Validator correctness** — two bugs fixed:
+  - **Parallel-attribution race** (#78): tool calls now attribute by explicit `taskIndex` threaded through `runAgent` → `handleTool` → `recordToolCall`, replacing the shared `state.currentTaskIndex` that got clobbered under concurrent execution.
+  - **Leniency tightened** (#82): `shell_exec` no longer counts as write evidence. Write-intent tasks that only ran reads/shells are now correctly flagged incomplete. Eliminates silent success on tasks that produced no files.
+- **Planner misassignment** (#83): LLM planner no longer self-assigns write-intent tasks. Prompt constraint + runtime `downgradePlannerOnWrite` guard reassigns to `coder`. Planner output tokens dropped from 52,445 (85.5 % of run) to 943 (8 %) on the CLI Task Manager benchmark.
+
+### Added
+- **Inter-task context sharing** (#84): `TASK_PROMPT` now includes a compact "Files already created" digest listing on-disk files produced by prior completed tasks, each with a ≤100-char hint. Bounded at 500 chars with `…+N more` tail. Eliminates coder cold-start: `src/types.ts` re-reads dropped from 18 to 4 across a 5-task plan.
+
+### Benchmark impact (CLI Task Manager sprint)
+| metric | pre-session baseline | post-PR-84 | Δ |
+|---|---|---|---|
+| output tokens | 22,414 | 10,976 | −51 % |
+| sprint/solo output ratio | 2.08× → 0.89× (post-PR-83 partial) | **0.66×** | target <1.2× ✅ |
+| `task-1` turns (scaffold) | 20 | 10 | −50 % |
+| `src/types.ts` re-reads | 18 | 4 | −78 % |
+| retry count pathology | 5 false-positives | 0 | eliminated |
+
+Full trace in `docs/debug/pr83-investigation.md`.
+
 ## [0.2.0] - 2026-04-17
 
 Sprint retry-semantics overhaul. Four-PR chain eliminates the env-retry cascade and the parallel-task validator race, delivering a measured **−69 % sprint output tokens** and **−56 % wall time** on the CLI Task Manager benchmark (`docs/debug/pr78-validation.md`). Sprint/solo output-token ratio on the same benchmark: **2.08× → 0.63×** — sprint is now cheaper than solo.
