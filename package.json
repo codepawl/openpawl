@@ -55,7 +55,7 @@
     "benchmark": "tsx scripts/testing/benchmark.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.90.0",
+    "@anthropic-ai/sdk": "^0.91.1",
     "@aws-sdk/client-bedrock-runtime": "^3.1012.0",
     "@clack/core": "^1.1.0",
     "@clack/prompts": "^0.9.1",
