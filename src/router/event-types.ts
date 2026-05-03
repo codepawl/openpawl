@@ -33,27 +33,6 @@ export const DISPATCH_EVENTS = [
   RouterEvent.Abort,
 ] as const;
 
-// ── Sprint events ───────────────────────────────────────────────────────────
-
-export enum SprintEvent {
-  Start = "sprint:start",
-  Composition = "sprint:composition",
-  Planning = "sprint:planning",
-  Plan = "sprint:plan",
-  RoundStart = "sprint:round:start",
-  RoundComplete = "sprint:round:complete",
-  TaskStart = "sprint:task:start",
-  TaskComplete = "sprint:task:complete",
-  AgentToken = "sprint:agent:token",
-  AgentTool = "sprint:agent:tool",
-  Done = "sprint:done",
-  NeedsClarification = "sprint:needs_clarification",
-  Error = "sprint:error",
-  Warning = "sprint:warning",
-  Paused = "sprint:paused",
-  Resumed = "sprint:resumed",
-}
-
 // ── Tool events ─────────────────────────────────────────────────────────────
 
 export enum ToolEvent {

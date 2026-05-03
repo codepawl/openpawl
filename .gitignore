@@ -67,6 +67,8 @@ vite.config.ts
 .openpawl/
 
 # Benchmark run artifacts (raw JSONL logs, per-run workdirs).
-# Keep docs under docs/debug/ tracked; ignore only raw outputs.
 benchmarks/debug-reruns/
 benchmarks/benchmark-parent.jsonl
+
+# Claude Code scheduled-task locks (runtime state)
+.claude/scheduled_tasks.lock

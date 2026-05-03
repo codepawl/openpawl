@@ -43,14 +43,7 @@ export function parseMentions(
     }
   }
 
-  // Detect @collab prefix (force collab mode for this prompt)
-  let forceCollab = false;
-  let processedPrompt = prompt;
-  const collabMatch = prompt.match(/(?:^|\s)@collab\b/i);
-  if (collabMatch) {
-    forceCollab = true;
-    processedPrompt = prompt.replace(/@collab\b/gi, "").replace(/\s+/g, " ").trim();
-  }
+  const processedPrompt = prompt;
 
   // Find code block ranges to exclude
   const codeRanges = findCodeBlockRanges(processedPrompt);
@@ -100,7 +93,6 @@ export function parseMentions(
       mentions: [],
       cleanedPrompt: processedPrompt.trim(),
       hasExplicitRouting: false,
-      ...(forceCollab ? { forceCollab } : {}),
     };
   }
 
@@ -128,7 +120,6 @@ export function parseMentions(
     mentions: deduped,
     cleanedPrompt,
     hasExplicitRouting: true,
-    ...(forceCollab ? { forceCollab } : {}),
   };
 }
 

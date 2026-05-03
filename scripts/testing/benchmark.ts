@@ -1,10 +1,9 @@
 /**
- * Orchestration benchmark — measures what multi-agent adds over single-agent.
- *
- * Runs the same tasks across solo / collab / sprint modes and scores outputs.
+ * Solo-mode benchmark — runs canonical tasks against the headless solo runner
+ * and scores the resulting code quality.
  *
  * Usage:
- *   bun run tsx scripts/testing/benchmark.ts [--suite all|orchestration|quality|swebench] [--tasks 1,2,3] [--modes solo,collab,sprint] [--timeout 600000]
+ *   bun run tsx scripts/testing/benchmark.ts [--suite all|orchestration|quality|swebench] [--tasks 1,2,3] [--timeout 600000]
  */
 
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
@@ -22,7 +21,7 @@ import { homedir } from "node:os";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-type RunMode = "solo" | "collab" | "sprint";
+type RunMode = "solo";
 type Complexity = "trivial" | "simple" | "medium" | "complex" | "large";
 
 interface BenchmarkTask {
@@ -49,9 +48,6 @@ interface RunResult {
   stderr: string;
   tokensIn: number;
   tokensOut: number;
-  completedTasks?: number;
-  totalTasks?: number;
-  failedTasks?: number;
   filesCreated: number;
   totalLoc: number;
   workdir: string;
@@ -136,10 +132,7 @@ function parseCliArgs(): BenchmarkConfig {
     ? tasksArg.split(",").map((t) => parseInt(t.trim(), 10))
     : [1, 2, 3, 4, 5];
 
-  const modesArg = getArg("--modes");
-  const modes: RunMode[] = modesArg
-    ? (modesArg.split(",").map((m) => m.trim()) as RunMode[])
-    : ["solo", "collab", "sprint"];
+  const modes: RunMode[] = ["solo"];
 
   const timeoutMs = parseInt(getArg("--timeout") ?? "600000", 10);
 
@@ -156,12 +149,9 @@ const BENCHMARK_LOG_PATH =
   join(PROJECT_ROOT, "benchmarks", "benchmark-parent.jsonl");
 const DELAY_BETWEEN_RUNS_MS = 5_000;
 
-/** Per-mode kill timeout. Solo runs are I/O-light and stay tight; collab/sprint
- *  get more headroom so a "slow but progressing" run doesn't get confused with
- *  a genuine hang. The global --timeout flag still acts as the hard upper bound. */
-function killTimeoutFor(mode: RunMode, fallbackMs: number): number {
-  if (mode === "solo") return Math.min(fallbackMs, 10 * 60_000);
-  return Math.min(Math.max(fallbackMs, 15 * 60_000), 30 * 60_000);
+/** Solo kill timeout. The global --timeout flag still acts as the hard upper bound. */
+function killTimeoutFor(_mode: RunMode, fallbackMs: number): number {
+  return Math.min(fallbackMs, 10 * 60_000);
 }
 
 function appendParentLog(entry: Record<string, unknown>): void {
@@ -292,33 +282,12 @@ function runHeadlessSubprocess(
 
 // ── Output Parsers ─────────────────────────────────────────────────────────
 
-function parseSoloCollabOutput(stdout: string): { tokensIn: number; tokensOut: number } {
+function parseSoloOutput(stdout: string): { tokensIn: number; tokensOut: number } {
   const m = /Tokens:\s*(\d+)in\/(\d+)out/.exec(stdout);
   if (!m) return { tokensIn: 0, tokensOut: 0 };
   return {
     tokensIn: parseInt(m[1]!, 10),
     tokensOut: parseInt(m[2]!, 10),
-  };
-}
-
-function parseSprintOutput(stdout: string): {
-  completedTasks: number;
-  totalTasks: number;
-  failedTasks: number;
-  tokensIn: number;
-  tokensOut: number;
-} {
-  const taskMatch = /Tasks:\s*(\d+)\/(\d+)\s*completed\s*\|\s*Failed:\s*(\d+)/.exec(stdout);
-  // Match unified format: "Tokens: 1234in/5678out" (preferred) or legacy "Tokens: ~1234"
-  const unifiedMatch = /Tokens:\s*(\d+)in\/(\d+)out/.exec(stdout);
-  const legacyMatch = !unifiedMatch ? /Tokens:\s*~?(\d+)/.exec(stdout) : null;
-
-  return {
-    completedTasks: taskMatch ? parseInt(taskMatch[1]!, 10) : 0,
-    totalTasks: taskMatch ? parseInt(taskMatch[2]!, 10) : 0,
-    failedTasks: taskMatch ? parseInt(taskMatch[3]!, 10) : 0,
-    tokensIn: unifiedMatch ? parseInt(unifiedMatch[1]!, 10) : 0,
-    tokensOut: unifiedMatch ? parseInt(unifiedMatch[2]!, 10) : (legacyMatch ? parseInt(legacyMatch[1]!, 10) : 0),
   };
 }
 
@@ -373,24 +342,7 @@ async function runOrchestrationSuite(config: BenchmarkConfig): Promise<RunResult
       );
 
       // Parse metrics from stdout
-      let tokensIn = 0;
-      let tokensOut = 0;
-      let completedTasks: number | undefined;
-      let totalTasks: number | undefined;
-      let failedTasks: number | undefined;
-
-      if (mode === "sprint") {
-        const parsed = parseSprintOutput(stdout);
-        completedTasks = parsed.completedTasks;
-        totalTasks = parsed.totalTasks;
-        failedTasks = parsed.failedTasks;
-        tokensIn = parsed.tokensIn;
-        tokensOut = parsed.tokensOut;
-      } else {
-        const parsed = parseSoloCollabOutput(stdout);
-        tokensIn = parsed.tokensIn;
-        tokensOut = parsed.tokensOut;
-      }
+      const { tokensIn, tokensOut } = parseSoloOutput(stdout);
 
       // Scan output files
       const { filesCreated, totalLoc } = scanWorkdir(workdir);
@@ -404,9 +356,6 @@ async function runOrchestrationSuite(config: BenchmarkConfig): Promise<RunResult
         stderr,
         tokensIn,
         tokensOut,
-        completedTasks,
-        totalTasks,
-        failedTasks,
         filesCreated,
         totalLoc,
         workdir,
@@ -578,7 +527,7 @@ async function runSweBenchSuite(config: BenchmarkConfig): Promise<SweBenchResult
   // TODO: Implement when SWE-bench Verified task IDs are available
   // For each task:
   //   1. git clone <repo> --depth 1 at <baseCommit> into temp dir
-  //   2. Run headless solo + sprint with issueDescription as goal
+  //   2. Run headless solo with issueDescription as goal
   //   3. Capture git diff, check if patch was applied
   //   4. Optionally run swebench eval if installed
   return [];
@@ -687,48 +636,17 @@ function generateReport(
     }
     w("");
 
-    // Key findings
+    // Key findings — solo-mode quality summary by complexity
     w("### Key Findings");
     w("");
 
-    if (config.modes.includes("solo") && config.modes.includes("collab")) {
-      const soloQ = quality.filter((q) => q.mode === "solo");
-      const collabQ = quality.filter((q) => q.mode === "collab");
-      if (soloQ.length > 0 && collabQ.length > 0) {
-        const soloAvg = soloQ.reduce((s, q) => s + q.score, 0) / soloQ.length;
-        const collabAvg = collabQ.reduce((s, q) => s + q.score, 0) / collabQ.length;
-        const improvement = soloAvg > 0 ? ((collabAvg - soloAvg) / soloAvg * 100).toFixed(1) : "N/A";
-        w(`- Collab vs Solo: quality ${collabAvg >= soloAvg ? "improvement" : "decrease"} of ${improvement}%`);
-      }
-    }
-
-    if (config.modes.includes("solo") && config.modes.includes("sprint")) {
-      const soloQ = quality.filter((q) => q.mode === "solo");
-      const sprintQ = quality.filter((q) => q.mode === "sprint");
-      const soloR = orchestration.filter((r) => r.mode === "solo");
-      const sprintR = orchestration.filter((r) => r.mode === "sprint");
-      if (soloQ.length > 0 && sprintQ.length > 0) {
-        const soloAvg = soloQ.reduce((s, q) => s + q.score, 0) / soloQ.length;
-        const sprintAvg = sprintQ.reduce((s, q) => s + q.score, 0) / sprintQ.length;
-        const improvement = soloAvg > 0 ? ((sprintAvg - soloAvg) / soloAvg * 100).toFixed(1) : "N/A";
-        w(`- Sprint vs Solo: quality ${sprintAvg >= soloAvg ? "improvement" : "decrease"} of ${improvement}%`);
-      }
-      if (soloR.length > 0 && sprintR.length > 0) {
-        const soloTokens = soloR.reduce((s, r) => s + r.tokensOut, 0) / soloR.length;
-        const sprintTokens = sprintR.reduce((s, r) => s + r.tokensOut, 0) / sprintR.length;
-        const tokenMultiplier = soloTokens > 0 ? (sprintTokens / soloTokens).toFixed(1) : "N/A";
-        w(`- Sprint vs Solo: token usage ${tokenMultiplier}x (output tokens)`);
-      }
-    }
-
-    // Per-complexity best mode
     for (const c of COMPLEXITIES) {
       const task = TASKS.find((t) => t.complexity === c);
       if (!task) continue;
       const taskQuality = quality.filter((q) => q.taskId === task.id);
       if (taskQuality.length === 0) continue;
       const best = taskQuality.reduce((a, b) => a.score > b.score ? a : b);
-      w(`- ${c} tasks (${task.name}): best mode = **${best.mode}** (${best.score}/10)`);
+      w(`- ${c} tasks (${task.name}): score = **${best.score}/10**`);
     }
     w("");
   }
@@ -775,33 +693,10 @@ function generateReport(
 
   if (quality.length > 0) {
     const soloScores = quality.filter((q) => q.mode === "solo");
-    const collabScores = quality.filter((q) => q.mode === "collab");
-    const sprintScores = quality.filter((q) => q.mode === "sprint");
-
     const avg = (arr: QualityScore[]) => arr.length > 0 ? arr.reduce((s, q) => s + q.score, 0) / arr.length : 0;
-
     const soloAvg = avg(soloScores);
-    const collabAvg = avg(collabScores);
-    const sprintAvg = avg(sprintScores);
 
-    // Find which complexities each mode wins
-    for (const mode of config.modes) {
-      const wins: string[] = [];
-      for (const c of COMPLEXITIES) {
-        const task = TASKS.find((t) => t.complexity === c);
-        if (!task) continue;
-        const taskQ = quality.filter((q) => q.taskId === task.id);
-        if (taskQ.length === 0) continue;
-        const best = taskQ.reduce((a, b) => a.score > b.score ? a : b);
-        if (best.mode === mode) wins.push(c);
-      }
-      if (wins.length > 0) {
-        w(`- Use **${mode}** for: ${wins.join(", ")} tasks`);
-      }
-    }
-
-    w("");
-    w(`Orchestration value summary: solo avg ${soloAvg.toFixed(1)}/10, collab avg ${collabAvg.toFixed(1)}/10, sprint avg ${sprintAvg.toFixed(1)}/10`);
+    w(`Solo quality summary: avg ${soloAvg.toFixed(1)}/10 across ${soloScores.length} runs`);
   } else {
     w("- Run quality suite for recommendations");
   }

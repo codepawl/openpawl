@@ -1,5 +1,5 @@
 /**
- * Interactive mode picker — solo / collab / sprint.
+ * Interactive mode picker — solo / crew.
  * ↑/↓ navigate, Enter to select, Esc to close.
  */
 import type { KeyEvent } from "../../tui/core/input.js";
@@ -16,8 +16,7 @@ interface ModeOption {
 
 const MODES: ModeOption[] = [
   { name: "solo", icon: ICONS.modeSolo, description: "Single agent responds to prompts" },
-  { name: "collab", icon: ICONS.modeCollab, description: "Multi-agent chain (coder → reviewer)" },
-  { name: "sprint", icon: ICONS.modeSprint, description: "Autonomous multi-agent task execution" },
+  { name: "crew", icon: ICONS.modeCrew, description: "Multi-agent crew (not yet implemented)" },
 ];
 
 export class ModeView extends InteractiveView {

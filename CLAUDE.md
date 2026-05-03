@@ -1,141 +1,154 @@
 # CLAUDE.md
 
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 ## Project Overview
 
-OpenPawl orchestrates AI agent teams for coding tasks. Three execution
-modes: solo (single agent), collab (multi-agent chain), sprint (full
-pipeline with parallel tasks). Memory persists across sessions via
-LanceDB. Post-mortem learning improves subsequent runs.
+OpenPawl orchestrates AI agent teams for coding tasks via a TUI. Two app
+modes: **solo** (single agent) and **crew** (multi-agent — scaffolding
+removed in `2a22da9`, full implementation in progress on
+`chore/nuke-sprint-scaffold-crew`). Memory persists across sessions via
+LanceDB. Decision journal, drift detection, post-mortem learning, and
+session briefing keep context alive between runs.
 
 ## Commands
 
-- Runtime: Node >= 20, bun
-- `bun install` — install deps
-- `bun run build` — build (tsup + web client)
-- `bun run typecheck` — type-check
-- `bun run test` — tests (475 passing)
-- `bun run lint` — lint
-- `bun run dev` — watch mode
+Runtime: Node >= 20, Bun.
 
-Testing:
-- `bun run tsx src/testing/prompt-quality-test.ts` — test agent prompts
-- `bun run tsx src/testing/session-test.ts` — session CRUD + perf
-- `bun run tsx src/testing/stress-test.ts` — stress test all subsystems
-- `bun run tsx src/testing/provider-test.ts` — provider connectivity
-- `bun run benchmark` — orchestration benchmarks (scripts/testing/benchmark.ts)
+- `bun install` — install deps (workspace: root, `src/web/client`, `packages/*`)
+- `bun run build` — `tsup` + web client build
+- `bun run typecheck` — `tsc --noEmit`
+- `bun run lint` — `eslint src/`
+- `bun run test` — Bun test runner (467 tests across 44 files)
+- `bun run test:e2e` — `tests/e2e/` only
+- `bun run test:watch` / `bun run test:coverage`
+- `bun run dev` — tsup watch mode
+- `bun run dev:cli` / `dev:work` / `dev:web` — tsx-driven entry points
+- `bun run benchmark` — `scripts/testing/benchmark.ts`
 
-Headless:
-- `openpawl run --headless --mode solo|collab|sprint --goal "..." [--template id] [--workdir path] [--runs N]`
+Out-of-band test scripts (live in `scripts/testing/`, not `src/testing/`):
+- `bun run tsx scripts/testing/prompt-quality-test.ts`
+- `bun run tsx scripts/testing/session-test.ts`
+- `bun run tsx scripts/testing/stress-test.ts`
+- `bun run tsx scripts/testing/provider-test.ts`
+
+Headless run: `openpawl run --headless --goal "..." [--runs N] [--mode solo] [--workdir path]`. Only `--mode solo` is wired today.
 
 Debug:
-- `OPENPAWL_DEBUG=true openpawl run --headless ...` — structured JSONL logs
+- `OPENPAWL_DEBUG=true openpawl ...` — structured JSONL logs
 - `openpawl logs debug --timeline` — view debug logs
-- `OPENPAWL_PROFILE=true openpawl run --headless ...` — performance profiling
+- `OPENPAWL_PROFILE=true openpawl ...` — performance profiling
+- `OPENPAWL_DEBUG_STARTUP=1` — print stage timings to stderr from `cli.ts`
+
+## CLI Surface
+
+Top-level commands (see `src/cli/command-registry.ts` for the source of truth):
+
+`setup`/`init`, `check`, `demo`, `solo`/`chat`, `standup`, `think`,
+`clarity`, `journal`, `drift`, `lessons`, `handoff`, `templates`,
+`model`, `providers`, `agent`, `settings`, `config`, `replay`, `audit`,
+`heatmap`, `forecast`, `diff`, `score`, `sessions`, `memory`, `cache`,
+`logs`, `profile`, `clean`, `update`, `uninstall`.
+
+Primary interactive entry point is `openpawl work` (alias for the TUI session).
 
 ## Architecture
 
 ### Entry Points
-- src/cli.ts — CLI command registration
-- src/app/index.ts — TUI app orchestrator (226 lines, delegates to 13 sub-modules)
-- src/app/headless.ts — headless mode (solo/collab/sprint)
+- `src/cli.ts` (~380 lines) — CLI bootstrap, proxy auto-detection, command dispatch
+- `src/cli/command-registry.ts` — single registry of all CLI commands
+- `src/app/index.ts` (226 lines) — TUI app orchestrator, delegates to ~13 sub-modules
+- `src/app/headless.ts` — headless solo runs
 
-### App Sub-modules (split from index.ts)
-- src/app/init-session-router.ts — session + router + memory initialization
-- src/app/router-wiring.ts — router events → TUI wiring
-- src/app/input-handler.ts — editor submit, prompt queue, abort
-- src/app/config-wiring.ts — provider config, connection state
-- src/app/keybindings-setup.ts — keyboard shortcuts
-- src/app/session-helpers.ts — session replay, picker
-- src/app/prompt-handler.ts — handleWithRouter, chat fallback
-- src/app/tool-permission.ts — tool approval UX
-- src/app/welcome.ts — welcome banner + briefing
-- src/app/tui-callbacks.ts — TUI events, navigation, cleanup
-- src/app/agent-display.ts — agent colors, token formatting
-- src/app/startup.ts — debug timing
+### App sub-modules (`src/app/`)
+`init-session-router.ts`, `router-wiring.ts`, `input-handler.ts`,
+`config-wiring.ts`, `keybindings-setup.ts`, `session-helpers.ts`,
+`prompt-handler.ts`, `tool-permission.ts`, `welcome.ts`,
+`tui-callbacks.ts`, `agent-display.ts`, `startup.ts`, `layout.ts`,
+`autocomplete.ts`, `file-ref.ts`, `shell.ts`, `config-check.ts`.
 
-### Router (src/router/)
-- prompt-router.ts — mode routing (solo/collab/sprint)
-- dispatch-strategy.ts — agent dispatch
-- llm-agent-runner.ts — multi-turn tool-use loop
-- collab-dispatch.ts — multi-agent chain (coder→reviewer→coder)
-- event-types.ts — typed event enums (RouterEvent, SprintEvent, ToolEvent)
+### Router (`src/router/`)
+`prompt-router.ts` (mode dispatch), `dispatch-strategy.ts`,
+`llm-agent-runner.ts` (multi-turn tool-use loop),
+`agent-config.ts`/`agent-registry.ts`/`agent-resolver.ts`,
+`intent-classifier.ts`, `mention-parser.ts`,
+`event-types.ts` (typed `RouterEvent` / `ToolEvent` enums — never use string literals).
 
-### Sprint (src/sprint/)
-- sprint-runner.ts — task execution with soft deps + retry
-- task-parser.ts — parse planner output into tasks
-- post-mortem.ts — rule-based failure analysis
-- goal-analyzer.ts — autonomous team composition
-- team-resolver.ts — template → agent mapping
-- create-sprint-runner.ts — factory
+### Engine (`src/engine/`)
+`llm.ts` — LLM call loop with context compression and parallel tool execution.
 
-### Engine (src/engine/)
-- llm.ts — LLM calling with context compression, parallel tool exec
+### Memory (`src/memory/`)
+- `global/store.ts` — `GlobalMemoryManager` (LanceDB)
+- `hybrid-retriever.ts` — vector search + reranking
+- `hebbian/` + `hebbian-integration.ts` — associative learning
+- `success/` — success-pattern storage
 
-### Memory (src/memory/)
-- global/store.ts — GlobalMemoryManager (LanceDB)
-- hybrid-retriever.ts — vector search + reranking
-- hebbian/ — associative learning
-- success/ — success pattern storage
+### Templates (`src/templates/`)
+- `types.ts` — `OpenPawlTemplate`, `TemplateAgent`, `TeamComposition`
+- `template-store.ts` — combined built-in + installed store
+- `seeds/index.ts` — 5 built-in templates inline (content-creator, indie-hacker, research-intelligence, business-ops, full-stack-sprint)
 
-### Templates (src/templates/)
-- types.ts — OpenPawlTemplate, TemplateAgent, TeamComposition
-- template-store.ts — combined built-in + installed store
-- seeds/ — 5 built-in templates
+### TUI (`src/tui/`)
+`core/tui.ts` (engine), `components/`, `constants/icons.ts`,
+`keybindings/input-shortcuts.ts`, `keybindings/app-mode.ts`
+(defines `AppMode = "solo" | "crew"`), `themes/`, `primitives/`,
+`slash/`, `text/`, `autocomplete/`, `keyboard/`, `layout/`.
 
-### TUI (src/tui/)
-- core/tui.ts — main TUI engine
-- components/ — messages, editor, status-bar, scrollable-filter-list,
-  tool-call-view, status-indicator
-- constants/icons.ts — centralized Unicode symbols
-- keybindings/input-shortcuts.ts — centralized text editing shortcuts
+### Flagship features (top-level dirs)
+- `journal/` — decision journal (`extractor`, `store`, `supersession`)
+- `drift/` — goal vs decision conflict detection
+- `briefing/` — "previously on..." session briefing
+- `handoff/` — `CONTEXT.md` auto-generation + resume
+- `think/` — multi-perspective debate (rubber duck)
+- `standup/` — daily standup generation
+- `audit/` — sprint/run auditing + renderers
+- `clarity/` — goal clarity analyzer + rewriter
+- `forecast/` — cost/run forecast with learning discount
+- `heatmap/` — agent performance visualization
+- `score/` — vibe coding collaboration score
+- `replay/` — session recording + diff/replay
+- `research/` — research agent + change-agent
+- `recovery/` — crash handler + error presenter
+- `personality/` — agent personality injection
+- `clarification/` (`conversation/`) — clarification dialogs + undo
+- `onboard/` — first-run setup flow
+- `agents/profiles/` — agent profile store
+- `debate/`, `forecast/methods`, `graph/preview` — newer subsystems
 
-### Flagship Features
-- src/journal/ — decision journal with drift detection
-- src/drift/ — goal vs decision conflict detection
-- src/briefing/ — session briefing ("previously on...")
-- src/handoff/ — CONTEXT.md auto-generation
-- src/think/ — rubber duck mode (multi-perspective debate)
-- src/standup/ — daily standup generation
+### Other infrastructure
+- `cache/` — response cache + interceptor
+- `proxy/` — `ProxyService`
+- `security/` — prompt injection detector
+- `telemetry/`, `token-opt/`, `meta/`, `dev/`, `webhook/`
+- `web/` — dashboard server + `client/` (separate workspace)
+- `tools/` — tool executor, registry, permissions, `built-in/`
+- `providers/`, `credentials/`, `session/`, `core/` (config, logger, errors, sandbox)
+- `debug/logger.ts` + `debug/wiring.ts` — structured JSONL logging
+- `utils/diff.ts` (LCS), `utils/safe-json-parse.ts` (6-layer JSON recovery), `utils/formatters.ts`
 
-### Debug (src/debug/)
-- logger.ts — structured JSONL debug logging
-- wiring.ts — event listener attachment
+## App Modes
 
-### Utils
-- src/utils/diff.ts — LCS line diff engine
-- src/utils/safe-json-parse.ts — 6-layer JSON recovery
-- src/utils/formatters.ts — shared formatters (tokens, duration, bytes)
+- **Solo**: prompt → single agent → tools → response
+- **Crew**: multi-agent — `prompt-router.ts` currently rejects with "Crew mode not yet implemented" until the new scaffold lands
 
-## Three Execution Modes
-
-Solo: user prompt → single agent → tools → response
-Collab: user prompt → agent chain (coder→reviewer→coder) → response
-Sprint: goal → planner → parallel tasks → post-mortem → lessons
+Shift+Tab cycles modes. The legacy `collab` and `sprint` modes were removed in commit `2a22da9` (`chore(crew): nuke sprint and collab scaffolding`); README still references them but the code does not.
 
 ## Code Style
 
 - TypeScript ESM, strict typing, no `any`
 - Files under 700 LOC
-- Use theme colors (not hardcoded ctp.* or hex)
-- Use ICONS from src/tui/constants/icons.ts
-- Use formatters from src/utils/formatters.ts
-- Use safeJsonParse for any LLM output parsing
-- Use event-types.ts enums for all events (no string literals)
-- Debug logging: `debugLog(level, source, event, data)` pattern
+- Use theme colors from `src/tui/themes/` (not hardcoded `ctp.*` or hex)
+- Use `ICONS` from `src/tui/constants/icons.ts`
+- Use formatters from `src/utils/formatters.ts`
+- Use `safeJsonParse` for any LLM output parsing
+- Use `event-types.ts` enums for all router/tool events (no string literals)
+- Debug logging: `debugLog(level, source, event, data)`
 
 ## Testing
 
-- 475 tests passing
+- `bun test` runs the suite (currently 448 pass / 19 skip / 0 fail across 44 files)
 - Test before pushing when touching logic
-- Use OPENPAWL_DEBUG=true for debugging
-- Use OPENPAWL_PROFILE=true for performance
-
-## Commits & PRs
-
-- Concise messages: `type(scope): description`
-- 200-1000 lines per commit
-- Branch off staging, merge via PR
-- Pre-commit: typecheck → lint → tests
+- `OPENPAWL_DEBUG=true` for trace logs, `OPENPAWL_PROFILE=true` for profiling
 
 ## Git Workflow
 
@@ -143,69 +156,55 @@ Sprint: goal → planner → parallel tasks → post-mortem → lessons
 
 ```
 main ← production, tagged releases only
-  └── staging ← integration branch, sprint accumulator
-        ├── feat/setup-wizard-tui ← feature branch (auto-created, auto-merged, auto-deleted)
-        ├── fix/scroll-performance
-        ├── feat/oauth-providers
-        └── ...
+  └── staging ← integration branch
+        └── feat|fix|refactor|chore|docs/<short-name> ← topic branches
 ```
 
-### Branch lifecycle (FOLLOW THIS EVERY TIME)
+### Branch lifecycle (FOLLOW EVERY TIME)
 
-**Before starting any task:**
+Before starting:
 1. `git checkout staging && git pull origin staging`
-2. Create a topic branch: `git checkout -b <type>/<short-name>`
-   - Types: `feat/`, `fix/`, `refactor/`, `chore/`, `docs/`
-3. One branch = one theme. Multiple commits OK, but all related to the same topic.
+2. `git checkout -b <type>/<short-name>` (types: `feat/`, `fix/`, `refactor/`, `chore/`, `docs/`)
+3. One branch = one theme.
 
-**While working:**
-4. Commit at natural milestones (~200-1000 lines changed)
-5. Commit messages: `type: concise description`
+While working:
+4. Commit at natural milestones (~200–1000 lines).
+5. Conventional commits: `type(scope): description`, imperative, lowercase, no period, no AI attribution.
 
-**When task is complete:**
-6. Run full CI checks locally: `bun run typecheck && bun run lint && bun run test`
-7. If ANY check fails → fix it on the same branch → re-run checks
-8. Merge into staging: `git checkout staging && git merge --no-ff <branch-name>`
-9. Push staging: `git push origin staging`
-10. Delete the topic branch
+When complete:
+6. `bun run typecheck && bun run lint && bun run test` — all must pass.
+7. Fix on the same branch if anything fails.
+8. `git checkout staging && git merge --no-ff <branch>` then `git push origin staging`.
+9. Delete the topic branch.
 
-**NEVER skip steps 6-7. NEVER merge with failing checks.**
+**Never skip steps 6–7. Never merge with failing checks. Never commit directly to `main` or `staging`. Never force-push shared branches.**
 
-### Semantic versioning
+### Versioning
 - patch: bug fixes, perf
 - minor: new features, commands, UI
 - major: breaking changes
 
-### Rules
-- Never commit directly to main or staging
-- Always create topic branch per task
-- Always delete topic branches after merge
-- Never force push main or staging
+### Pre-commit hook
+`.githooks/pre-commit` runs typecheck → lint → tests. Install with `git config core.hooksPath .githooks` (no Makefile in repo).
 
-## Pre-commit Hook
-
-Located at `.githooks/pre-commit`, installed via `make install-hooks`. Runs typecheck → lint → tests in sequence.
-
-## Git Notes
-
-- Branch delete blocked? Use `git update-ref -d refs/heads/<branch>`.
-- Bulk PR operations (>5): ask for explicit confirmation.
-- File references: repo-root relative only.
-- GitHub CLI: use `-F - <<'EOF'` for multiline bodies.
-- Verify answers in code; do not guess.
+### Git utilities
+- Branch delete blocked? `git update-ref -d refs/heads/<branch>`
+- Bulk PR operations (>5): ask for explicit confirmation
+- File references: repo-root relative
+- Multiline `gh` bodies: `-F - <<'EOF'`
 
 ## Security
 
-- Never commit real credentials/tokens. Use `.env` from `.env.example`.
-- Dashboard server has no built-in auth. Bind to `127.0.0.1` or trusted network.
+- Never commit real credentials/tokens; copy `.env.example` → `.env`
+- Dashboard server has no built-in auth — bind to `127.0.0.1` or trusted networks only
 
 ## Agent-Specific Notes
 
-- Never edit `node_modules`.
-- Multi-agent safety: no stash, no branch switching unless requested. Scope commits to your changes only.
-- Bug investigations: read source before concluding; aim for high-confidence root cause.
-- No dependency patching or version bumps without explicit approval.
+- Never edit `node_modules`
+- Multi-agent safety: no stash, no branch switching unless requested; scope commits to your changes only
+- Bug investigations: read source before concluding; aim for high-confidence root cause
+- No dependency patching or version bumps without explicit approval
 
 ## Tech Stack
 
-TypeScript (ESM), Bun, tsup, Zod, LanceDB, cli-highlight. Multi-provider LLM (Anthropic SDK, OpenAI-compatible, Bedrock, Vertex). No Python.
+TypeScript (ESM), Bun, tsup, Zod, LanceDB, cli-highlight. Multi-provider LLM (Anthropic SDK, OpenAI-compatible, Bedrock, Vertex). Workspace pulls in `packages/sdk` and `src/web/client`. No Python.

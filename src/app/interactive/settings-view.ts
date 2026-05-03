@@ -33,11 +33,18 @@ const FIELDS: SettingField[] = [
   { key: "provider", label: "provider", description: "LLM provider", type: "select", options: [] /* populated at runtime from ProviderRegistry */ },
   { key: "model", label: "model", description: "Active model", type: "select", options: [] },
   { key: "apikey", label: "apikey", description: "API key", type: "password" },
-  { key: "mode", label: "mode", description: "Dispatch mode", type: "select", options: ["solo", "collab", "sprint"] },
-  { key: "maxCycles", label: "maxCycles", description: "Max cycles per task", type: "number", validate: (v) => { const n = parseInt(v); return isNaN(n) || n < 1 || n > 50 ? "Must be 1-50" : null; } },
+  { key: "mode", label: "mode", description: "Dispatch mode", type: "select", options: ["solo", "crew"] },
+  { key: "maxCycles", label: "maxCycles", description: "Max cycles per task", type: "number", validate: (v) => { const n = Number(v); return !Number.isInteger(n) || n < 1 ? "Must be an integer ≥ 1" : null; } },
   { key: "temperature", label: "temperature", description: "LLM temperature", type: "number", validate: (v) => { const n = parseFloat(v); return isNaN(n) || n < 0 || n > 2 ? "Must be 0-2" : null; } },
   { key: "team", label: "team", description: "Team config (use /team command)", type: "text" },
 ];
+
+// Inherited defaults shown when the project value is unset.
+// Sourced from src/core/config.ts (maxCycles: 10, llmTemperature: 0.7).
+const FIELD_DEFAULTS: Record<string, string> = {
+  maxCycles: "10",
+  temperature: "0.7",
+};
 
 const DEFAULT_MODELS: Record<string, string> = {
   anthropic: "claude-sonnet-4-20250514",
@@ -188,7 +195,7 @@ export class SettingsView extends InteractiveView {
       this.selectScrollOffset = 0;
       this.adjustSelectScroll(opts.length);
     } else {
-      const raw = this.getRawValue(field.key);
+      const raw = this.getRawValue(field.key) || (FIELD_DEFAULTS[field.key] ?? "");
       this.editBuffer = raw;
       this.editCursor = this.editBuffer.length;
     }
@@ -357,7 +364,9 @@ export class SettingsView extends InteractiveView {
       const disabled = this.isFieldDisabled(field);
       // Model shows "(not set)" when provider is empty regardless of stored value
       const rawValue = disabled ? "" : (this.values.get(field.key) ?? "");
-      const value = rawValue || "(not set)";
+      const fallback = disabled ? "" : (FIELD_DEFAULTS[field.key] ?? "");
+      const usingDefault = !rawValue && !!fallback;
+      const value = rawValue || fallback || "(not set)";
       const status = this.connectionStatus.get(field.key);
       const statusStr = status === "ok" ? t.success(` ${ICONS.success}`) : status === "fail" ? t.error(` ${ICONS.error}`) : "";
 
@@ -393,7 +402,8 @@ export class SettingsView extends InteractiveView {
         const cursor = isSelected ? ICONS.cursor : "\u2502";
         const label = field.label.padEnd(16);
         const displayValue = this.maskDisplay(field.key, value).padEnd(18);
-        const desc = t.dim(field.description);
+        const descText = usingDefault ? `${field.description} (default)` : field.description;
+        const desc = t.dim(descText);
         if (disabled) {
           // Grayed out — field depends on unset parent
           lines.push(`  ${t.dim("\u2502")} ${t.dim(label)} ${t.dim(displayValue)}  ${t.dim(desc)}`);
@@ -529,11 +539,20 @@ export class SettingsView extends InteractiveView {
         this.goToField("model", true);
         return;
       } else {
-        // Project-scoped fields: mode, maxCycles, temperature
+        // Project-scoped fields: mode, maxCycles, temperature.
+        // Optimistic: update in-memory value before the async write so the
+        // synchronous render in the caller already shows the new selection.
+        const prev = this.values.get(key);
+        this.values.set(key, value);
+        this.render();
         const { setConfigValue } = await import("../../core/configManager.js");
         const result = setConfigValue(key, value);
-        if ("error" in result) return;
-        this.values.set(key, value);
+        if ("error" in result) {
+          this.values.set(key, prev ?? "");
+          this.editError = result.error;
+          this.render();
+          return;
+        }
       }
 
       // Health check after provider or apikey changes

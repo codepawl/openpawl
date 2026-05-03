@@ -1,5 +1,5 @@
 /**
- * /mode command — show or switch dispatch mode (solo/collab/sprint).
+ * /mode command — show or switch dispatch mode (solo/crew).
  * No args → interactive mode picker.
  * With args → set mode directly.
  */
@@ -8,7 +8,7 @@ import { ModeView } from "../interactive/mode-view.js";
 import { ICONS } from "../../tui/constants/icons.js";
 import type { AppMode } from "../../tui/keybindings/app-mode.js";
 
-const VALID_MODES: AppMode[] = ["solo", "collab", "sprint"];
+const VALID_MODES: AppMode[] = ["solo", "crew"];
 
 export interface ModeCommandDeps {
   getMode: () => AppMode;
@@ -20,7 +20,7 @@ export function createModeCommand(deps?: ModeCommandDeps): SlashCommand {
   return {
     name: "mode",
     aliases: ["md"],
-    description: "Switch dispatch mode (solo/collab/sprint)",
+    description: "Switch dispatch mode (solo/crew)",
     args: "[mode-name]",
     async execute(args, ctx) {
       const currentMode = deps?.getMode() ?? "solo";
@@ -50,8 +50,7 @@ export function createModeCommand(deps?: ModeCommandDeps): SlashCommand {
           "",
           "Available modes:",
           `  ${ICONS.modeSolo} solo      Single agent responds to prompts`,
-          `  ${ICONS.modeCollab} collab    Multi-agent chain (coder → reviewer)`,
-          `  ${ICONS.modeSprint} sprint    Autonomous multi-agent task execution`,
+          `  ${ICONS.modeCrew} crew      Multi-agent crew (not yet implemented)`,
           "",
           "Switch: /mode <name> or Shift+Tab to cycle",
         ].join("\n"));

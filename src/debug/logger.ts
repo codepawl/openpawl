@@ -22,7 +22,6 @@ import { homedir } from "node:os";
 
 export type DebugSource =
   | "router"
-  | "sprint"
   | "tool"
   | "llm"
   | "memory"

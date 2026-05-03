@@ -387,17 +387,6 @@ export async function initSessionRouter(
   });
   ctx.cleanupSession = wireSessionEvents(ctx.sessionMgr, layout);
 
-  // Register /sprint command
-  {
-    const { createSprintCommand } = await import("./commands/sprint.js");
-    registry.register(createSprintCommand({
-      agents: ctx.router.getRegistry(),
-      toolRegistry: toolRegistry ?? undefined,
-      toolExecutor: toolExecutor ?? undefined,
-      layout,
-    }));
-  }
-
   // Register router-powered commands
   if (ctx.chatSession) {
     registerRouterCommands(registry, ctx.router);

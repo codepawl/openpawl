@@ -24,7 +24,6 @@ import { Dispatcher } from "./dispatch-strategy.js";
 import type { AgentRunner } from "./dispatch-strategy.js";
 import { RouterEvent, DISPATCH_EVENTS } from "./event-types.js";
 import { parseMentions } from "./mention-parser.js";
-import { buildCollabChain } from "./collab-dispatch.js";
 import type { AppMode } from "../tui/keybindings/app-mode.js";
 import type { SessionManager } from "../session/index.js";
 
@@ -160,40 +159,14 @@ export class PromptRouter extends EventEmitter {
     // 3. Parse mentions
     const mentions = parseMentions(prompt, this.registry.getIds());
 
-    // 3b. Collab mode check
+    // 3b. Crew mode is not yet implemented in v0.4 scaffold
     const appMode = options?.appMode;
-    if ((appMode === "collab" || mentions.forceCollab) && !mentions.hasExplicitRouting) {
-      const chain = buildCollabChain(mentions.cleanedPrompt, { force: appMode === "collab" });
-      if (chain) {
-        const agents = chain.steps.map((step, i) => ({
-          agentId: step.agentId,
-          role: step.role,
-          task: step.instruction,
-          tools: this.registry.get(step.agentId)?.defaultTools ?? [],
-          priority: i,
-        }));
-        const decision: RouteDecision = {
-          strategy: "collab",
-          agents,
-          requiresConfirmation: false,
-        };
-        const activeSession = this.sessionManager.getActive();
-        const sessionHistory = activeSession
-          ? activeSession.buildContextMessages()
-              .filter(m => m.role !== "system")
-              .map(m => ({ role: m.role, content: m.content }))
-          : [];
-        const dispatchResult = await this.dispatcher.dispatch(sessionId, mentions.cleanedPrompt, decision, sessionHistory);
-        if (dispatchResult.isOk()) {
-          const results = dispatchResult.value.agentResults;
-          const lastAgent = results[results.length - 1];
-          if (lastAgent && lastAgent.agentId !== "system") {
-            this.lastAgentBySession.set(sessionId, lastAgent.agentId);
-          }
-        }
-        return dispatchResult;
-      }
-      // Chain returned null — fall through to solo dispatch
+    if (appMode === "crew") {
+      return err({
+        type: "dispatch_failed",
+        agentId: "crew",
+        cause: "Crew mode not yet implemented. Use --mode solo for now.",
+      });
     }
 
     // 4. Classify intent
@@ -322,12 +295,10 @@ export class PromptRouter extends EventEmitter {
       "  @tester          Route to Tester",
       "  @debugger        Route to Debugger",
       "  @researcher      Route to Researcher",
-      "  @collab          Force collab mode (multi-agent chain)",
       "",
-      "Modes: Shift+Tab to cycle (solo/collab/sprint) | /mode to pick",
+      "Modes: Shift+Tab to cycle (solo/crew) | /mode to pick",
       "",
       "Example: @coder write a login form",
-      "Example: @collab implement auth with OAuth2",
     ];
     return ok(lines.join("\n"));
   }

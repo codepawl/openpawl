@@ -5,7 +5,7 @@
  *   openpawl logs debug                        # Latest session, last 50 entries
  *   openpawl logs debug --session latest        # Explicit latest
  *   openpawl logs debug --level error           # Filter by level
- *   openpawl logs debug --source sprint         # Filter by source
+ *   openpawl logs debug --source router         # Filter by source
  *   openpawl logs debug --event task:start      # Filter by event substring
  *   openpawl logs debug --grep "file_write"     # Search across all fields
  *   openpawl logs debug --tail 100              # Show last 100 entries

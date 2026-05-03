@@ -55,17 +55,9 @@ OpenPawl replaces that friction with a team that remembers, learns, and holds it
 
 *5 built-in team templates. Pick a team or let OpenPawl compose autonomously.*
 
-### Collab Mode (coder -> reviewer -> revision)
+### Crew Mode (coming soon)
 
-<img src="./docs/screenshots/collab.png" width="800" alt="Collab Mode" />
-
-*Multi-agent collaboration: coder writes, reviewer catches issues, coder revises.*
-
-### Sprint Mode (full pipeline)
-
-<img src="./docs/screenshots/sprint.png" width="800" alt="Sprint Mode" />
-
-*Planner decomposes goal, parallel coders execute, post-mortem extracts lessons. Template: indie-hacker.*
+*Multi-agent execution lands in crew mode — see `docs/design/crew-v0.4.md`. Today, solo mode is the supported execution path.*
 
 ### Escape to Cancel
 
@@ -90,27 +82,26 @@ openpawl standup                  # daily summary
 openpawl think "SSE or WebSocket?" # rubber duck mode
 ```
 
-The bare `openpawl` command launches the interactive TUI with chat, sprint, and collab modes. For unattended runs:
+The bare `openpawl` command launches the interactive TUI in solo mode. For unattended runs:
 
 ```bash
-openpawl run --headless --goal "Build auth" --mode sprint --runs 2
+openpawl run --headless --goal "Build auth" --mode solo --runs 2
 ```
 
 ## Features
 
-### Three Execution Modes
+### Execution Modes
 
-| Mode | How it works | When to use |
-|------|-------------|-------------|
-| **Solo** | Single agent responds to prompts with tool calling | Quick tasks, chat, exploration |
-| **Collab** | Multi-agent chain (e.g. coder → reviewer → coder) | Code review, architecture, debugging |
-| **Sprint** | Planner breaks goal into tasks → parallel execution → post-mortem | Full features, multi-file changes |
+| Mode | How it works | Status |
+|------|-------------|--------|
+| **Solo** | Single agent responds to prompts with tool calling | ✅ Working |
+| **Crew** | Multi-agent orchestration (planner → workers → review) | 🟡 Scaffolded — see `docs/design/crew-v0.4.md` |
 
-Switch modes with `Shift+Tab` in the TUI or `--mode` in headless.
+Cycle modes with `Shift+Tab` in the TUI; pick a mode with `--mode` in headless (only `solo` is wired today).
 
 ### Team Orchestration
 
-7 built-in agents (coder, reviewer, planner, tester, debugger, researcher, assistant) collaborate via native API tool calling. The planner decomposes goals into tasks, workers execute in parallel, and a post-mortem loop extracts lessons for future runs. Agents use keyword-based routing and confidence-gated delivery.
+7 built-in agents (coder, reviewer, planner, tester, debugger, researcher, assistant) are defined and ready to be exercised by crew mode. Agents use keyword-based routing and confidence-gated delivery.
 
 Team composition is flexible: pick agents manually, let the system compose autonomously based on your goal, or use one of 5 built-in templates. Custom agents can be created and configured via `/agents` in the TUI. Agent profiles track performance across runs.
 
@@ -187,7 +178,7 @@ Five seed templates ship offline. Community templates at [openpawl-templates](ht
 | Command | Description |
 |---------|-------------|
 | `solo` | Interactive solo mode (single agent) |
-| `run` | Headless mode (`--headless --goal "..." --mode sprint\|solo\|collab --runs N --template <id> --workdir <path>`) |
+| `run` | Headless mode (`--headless --goal "..." --mode solo --runs N --workdir <path>`) |
 | `standup` | Daily standup summary |
 | `think` | Rubber duck mode — structured debate |
 | `clarity` | Check goal clarity |
@@ -239,7 +230,7 @@ Five seed templates ship offline. Community templates at [openpawl-templates](ht
 
 | Command | Description |
 |---------|-------------|
-| `/mode` | Switch between solo, collab, and sprint |
+| `/mode` | Switch between solo and crew |
 | `/team` | Browse and switch team templates |
 | `/agents` | List and configure agents (CRUD) |
 | `/hotkeys` | View and customize keybindings |
@@ -257,37 +248,27 @@ graph TD
     U[User Prompt] --> R[Prompt Router]
 
     R -->|solo| A1[Single Agent + Tools]
-    R -->|collab| CC[Agent Chain]
-    R -->|sprint| SP[Sprint Planner]
+    R -->|crew 🟡| CR[Crew Orchestrator]
 
     A1 --> LLM[LLM Multi-Turn Loop]
-    CC --> LLM
-
-    SP --> T1[Task 1]
-    SP --> T2[Task 2]
-    SP --> T3[Task N]
-
-    T1 --> LLM
-    T2 --> LLM
-    T3 --> LLM
+    CR --> LLM
 
     LLM --> TC[Tool Calls]
     TC -->|file_write/edit| DIFF[Inline Diff]
     TC -->|shell_exec| SH[Shell]
     TC -->|web_search| WS[Web]
 
-    LLM --> PM[Post-Mortem]
-    PM --> MS[(Memory Store)]
-    MS -->|next run| SP
+    LLM --> MS[(Memory Store)]
+    MS -->|next run| LLM
 ```
 
-Three execution modes share a common LLM multi-turn loop with native tool calling. Sprint mode parallelizes independent tasks. Post-mortem extracts lessons into LanceDB vector memory for future runs. Context compression keeps long conversations within token limits.
+Solo mode dispatches a single agent through an LLM multi-turn loop with native tool calling. Crew mode (multi-agent orchestration) is scaffolded — see `docs/design/crew-v0.4.md`. Memory: LanceDB vector store + hebbian associative layer carries patterns and lessons across runs. Context compression keeps long conversations within token limits.
 
 ## Comparison
 
 | Feature | OpenPawl | Claude Code | OpenCode | Aider |
 |---------|----------|-------------|----------|-------|
-| Multi-agent orchestration | 3 modes (solo/collab/sprint) | Single agent | Single agent | Single agent |
+| Multi-agent orchestration | Solo today; crew mode planned | Single agent | Single agent | Single agent |
 | Cross-session memory | LanceDB vector + hebbian | Per-project CLAUDE.md | None | Git-based |
 | Post-mortem learning | Extracts & injects lessons | None | None | None |
 | Team templates | 5 built-in + custom | None | None | None |

@@ -54,8 +54,8 @@ export function setupInputHandler(
   registry: CommandRegistry,
   ctx: AppContext,
   state: PromptQueueState,
-  appModeSystem: AppModeSystem,
-  updateModeDisplay: () => void,
+  _appModeSystem: AppModeSystem,
+  _updateModeDisplay: () => void,
 ): void {
   layout.editor.onSubmit = async (text: string, attachedFiles?: string[]) => {
     state.welcomeMessageActive = false;
@@ -71,21 +71,7 @@ export function setupInputHandler(
         }
         const result = registry.lookup(`/${parsed.name} ${parsed.args}`);
         if (result) {
-          if (parsed.name === "sprint" && parsed.args.trim() && ctx.chatSession) {
-            const title = ctx.chatSession.getState().title;
-            if (title === "Untitled session" || title === "New session") {
-              const { generateSessionName } = await import("../session/session-name.js");
-              ctx.chatSession.setTitle(generateSessionName(parsed.args));
-            }
-            const prevMode = appModeSystem.getMode();
-            appModeSystem.setMode("sprint");
-            updateModeDisplay();
-            await result.command.execute(result.args, msgCtx);
-            appModeSystem.setMode(prevMode);
-            updateModeDisplay();
-          } else {
-            await result.command.execute(result.args, msgCtx);
-          }
+          await result.command.execute(result.args, msgCtx);
         } else if (ctx.router && ctx.chatSession) {
           const slashResult = await ctx.router.handleSlashCommand(ctx.chatSession.id, `/${parsed.name} ${parsed.args}`);
           if (slashResult) {

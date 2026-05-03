@@ -24,7 +24,7 @@ export function createBuiltinCommands(
         contentLines.push(labelValue("@file", "Attach file to prompt", { labelWidth: 16, gap: 1 }));
         contentLines.push(labelValue("@agent", "Route to specific agent", { labelWidth: 16, gap: 1 }));
         contentLines.push(labelValue("!command", "Run shell command", { labelWidth: 16, gap: 1 }));
-        contentLines.push(labelValue("Shift+Tab", "Cycle mode (solo/collab/sprint)", { labelWidth: 16, gap: 1 }));
+        contentLines.push(labelValue("Shift+Tab", "Cycle mode (solo/crew)", { labelWidth: 16, gap: 1 }));
         contentLines.push(labelValue("Ctrl+P", "Command palette", { labelWidth: 16, gap: 1 }));
         contentLines.push(labelValue("Ctrl+X + key", "Leader shortcuts", { labelWidth: 16, gap: 1 }));
         const panel = renderPanel({ title: "Help", footer: "Press any key to close" }, contentLines);

@@ -10,7 +10,6 @@ import { EventEmitter } from "node:events";
 import { Result, ok, err } from "neverthrow";
 import { buildIdentityPrefix } from "./agent-registry.js";
 import { profileStart } from "../telemetry/profiler.js";
-import { debugLog, isDebugEnabled, truncateStr, TRUNCATION } from "../debug/logger.js";
 import type {
   RouteDecision,
   DispatchResult,
@@ -101,9 +100,6 @@ export class Dispatcher extends EventEmitter {
           break;
         case "orchestrated":
           result = await this.dispatchOrchestrated(sessionId, prompt, decision, controller.signal);
-          break;
-        case "collab":
-          result = await this.dispatchCollab(sessionId, prompt, decision, controller.signal);
           break;
         case "clarify":
           result = await this.dispatchClarify(sessionId, prompt);
@@ -251,82 +247,6 @@ export class Dispatcher extends EventEmitter {
       strategy: "clarify",
       agentResults: [result],
       ...aggregateCosts([result]),
-    };
-  }
-
-  private async dispatchCollab(
-    sessionId: string,
-    originalPrompt: string,
-    decision: RouteDecision,
-    signal: AbortSignal,
-  ): Promise<DispatchResult> {
-    const sorted = [...decision.agents].sort((a, b) => a.priority - b.priority);
-    const results: AgentResult[] = [];
-    const priorOutputs: { role: string; response: string }[] = [];
-
-    // Debug: log collab chain definition
-    if (isDebugEnabled()) {
-      debugLog("info", "router", "collab:chain_start", {
-        data: {
-          agentOrder: sorted.map((a) => a.agentId),
-          stepCount: sorted.length,
-        },
-      });
-    }
-
-    for (const assignment of sorted) {
-      if (signal.aborted) break;
-
-      // Each agent gets the original prompt plus all prior agents' output
-      const contextParts = [originalPrompt];
-      for (const prior of priorOutputs) {
-        contextParts.push(`\n\n[${prior.role} output]:\n${prior.response}`);
-      }
-      const taskPrompt = contextParts.join("");
-
-      // Debug: log collab step input
-      if (isDebugEnabled()) {
-        const lastPrior = priorOutputs[priorOutputs.length - 1];
-        debugLog("info", "router", "collab:step_start", {
-          data: {
-            agentId: assignment.agentId,
-            role: assignment.role,
-            inputLength: taskPrompt.length,
-            priorOutputPreview: lastPrior
-              ? truncateStr(lastPrior.response, TRUNCATION.contextPassing)
-              : undefined,
-            contextChainLength: priorOutputs.length,
-          },
-        });
-      }
-
-      const stepStart = Date.now();
-      const result = await this.runAgent(sessionId, assignment, taskPrompt, signal);
-      results.push(result);
-
-      // Debug: log collab step output
-      if (isDebugEnabled()) {
-        debugLog("info", "router", "collab:step_done", {
-          data: {
-            agentId: assignment.agentId,
-            success: result.success,
-            outputPreview: result.response
-              ? truncateStr(result.response, TRUNCATION.contextPassing)
-              : undefined,
-            outputLength: result.response?.length ?? 0,
-          },
-          duration: Date.now() - stepStart,
-        });
-      }
-
-      if (!result.success) break;
-      priorOutputs.push({ role: assignment.role, response: result.response });
-    }
-
-    return {
-      strategy: "collab",
-      agentResults: results,
-      ...aggregateCosts(results),
     };
   }
 

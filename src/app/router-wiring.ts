@@ -66,6 +66,7 @@ export function wireRouterEvents(
       agentColor: getAgentColorFn(agentId),
       content: thinking.getCurrentText(),
       timestamp: new Date(),
+      tag: "thinking",
     });
     thinkingMsgAdded = true;
 
@@ -77,7 +78,16 @@ export function wireRouterEvents(
     if (thinking.isVisible()) {
       thinking.stop();
       thinkingMsgAdded = false;
-      layout.messages.replaceLast("");
+      // Swap the tagged thinking placeholder for a fresh untagged agent
+      // message so the renderer drops the inline single-line layout and
+      // streams tokens normally.
+      layout.messages.replaceLastWith({
+        role: "agent",
+        agentName: agentDisplayName(agentId),
+        agentColor: getAgentColorFn(agentId),
+        content: "",
+        timestamp: new Date(),
+      });
       layout.statusBar.updateSegment(3, `${agentDisplayName(agentId)} working... ${defaultTheme.dim("(Esc)")}`, defaultTheme.accent);
     }
     if (streamingForAgent !== agentId || !layout.messages.isLastAgentMessage()) {

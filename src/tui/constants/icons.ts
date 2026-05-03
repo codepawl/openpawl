@@ -31,11 +31,10 @@ export const ICONS = {
   scrollUp: "\u25b2",    // ▲
   scrollDown: "\u25bc",  // ▼
 
-  // Mode icons (solo/collab/sprint)
-  bolt: "\u26a1",               // ⚡ (used for sprint mode)
+  // Mode icons (solo/crew)
+  bolt: "\u26a1",               // ⚡
   modeSolo: "\u203a",           // ›
-  modeCollab: "\u00bb",         // »
-  modeSprint: "\u26a1",         // ⚡
+  modeCrew: "\u26a1",           // ⚡
 
   // Spinners
   spinnerFrames: ["\u25d2", "\u25d0", "\u25d3", "\u25d1"] as readonly string[], // ◒ ◐ ◓ ◑

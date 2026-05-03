@@ -1,14 +1,14 @@
 /**
  * App mode system — the only mode system in OpenPawl.
- * Controls dispatch strategy: solo (single agent), collab (multi-agent chain), sprint (autonomous).
- * Shift+Tab cycles: solo → collab → sprint → solo.
+ * Controls dispatch strategy: solo (single agent) or crew (multi-agent, not yet implemented).
+ * Shift+Tab cycles: solo → crew → solo.
  */
 
 import { ICONS } from "../constants/icons.js";
 import { defaultTheme } from "../themes/default.js";
 import type { StyleFn } from "../themes/theme.js";
 
-export type AppMode = "solo" | "collab" | "sprint";
+export type AppMode = "solo" | "crew";
 
 export interface AppModeInfo {
   mode: AppMode;
@@ -20,11 +20,10 @@ export interface AppModeInfo {
 
 const APP_MODE_DEFS: AppModeInfo[] = [
   { mode: "solo", displayName: "Solo", shortName: "solo", icon: ICONS.modeSolo, color: defaultTheme.dim },
-  { mode: "collab", displayName: "Collab", shortName: "collab", icon: ICONS.modeCollab, color: defaultTheme.primary },
-  { mode: "sprint", displayName: "Sprint", shortName: "sprint", icon: ICONS.modeSprint, color: defaultTheme.accent },
+  { mode: "crew", displayName: "Crew", shortName: "crew", icon: ICONS.modeCrew, color: defaultTheme.accent },
 ];
 
-const CYCLE_ORDER: AppMode[] = ["solo", "collab", "sprint"];
+const CYCLE_ORDER: AppMode[] = ["solo", "crew"];
 
 export class AppModeSystem {
   private currentMode: AppMode = "solo";
@@ -41,7 +40,7 @@ export class AppModeSystem {
     return APP_MODE_DEFS.find((m) => m.mode === this.currentMode) ?? APP_MODE_DEFS[0]!;
   }
 
-  /** Cycles solo → collab → sprint → solo. */
+  /** Cycles solo → crew → solo. */
   cycleNext(): AppMode {
     const idx = CYCLE_ORDER.indexOf(this.currentMode);
     this.currentMode = CYCLE_ORDER[(idx + 1) % CYCLE_ORDER.length]!;

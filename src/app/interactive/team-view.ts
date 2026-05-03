@@ -1,7 +1,20 @@
 /**
  * Interactive team configuration view.
- * Toggle between autonomous/template/manual modes,
- * browse and select templates, manage agents.
+ *
+ * Phased UI: phase 1 picks the team composition (autonomous vs custom).
+ * Phase 2/3 only render when the user advances into them, so the view
+ * doesn't render every section inline at once.
+ *
+ *   phase = "mode"      → autonomous / custom selector
+ *   phase = "templates" → template picker + preview (custom mode)
+ *   phase = "agents"    → manual agent editor (custom mode)
+ *
+ * Two UI modes — autonomous and custom — map onto three on-disk
+ * TeamComposition.mode values (autonomous / template / manual) so the
+ * persisted shape stays compatible with the rest of the app:
+ *   autonomous       → mode: "autonomous"
+ *   custom + template → mode: "template", templateId: ...
+ *   custom + agents   → mode: "manual",   customAgents: ...
  */
 import type { KeyEvent } from "../../tui/core/input.js";
 import type { TUI } from "../../tui/core/tui.js";
@@ -14,8 +27,11 @@ import { listTemplates } from "../../templates/template-store.js";
 import { readGlobalConfigWithDefaults, writeGlobalConfig } from "../../core/global-config.js";
 import { getAllAgentConfigs, isBuiltInAgent } from "../../router/agent-config.js";
 
-type TeamMode = "autonomous" | "template" | "manual";
-const MODES: TeamMode[] = ["autonomous", "template", "manual"];
+type StoredMode = "autonomous" | "template" | "manual";
+type UiMode = "autonomous" | "custom";
+type Phase = "mode" | "templates" | "agents";
+
+const UI_MODES: UiMode[] = ["autonomous", "custom"];
 
 interface TemplateItem {
   template: OpenPawlTemplate;
@@ -29,28 +45,27 @@ const DEFAULT_MANUAL_AGENTS: TemplateAgent[] = [
   { role: "tester", task: "Testing" },
 ];
 
-type Section = "mode" | "templates" | "agents";
-
 export class TeamView extends InteractiveView {
-  private mode: TeamMode = "autonomous";
+  private storedMode: StoredMode = "autonomous";
+  private uiMode: UiMode = "autonomous";
   private chatCollaboration = false;
   private templateId: string | null = null;
   private templates: OpenPawlTemplate[] = [];
   private selectedTemplate: OpenPawlTemplate | null = null;
   private manualAgents: TemplateAgent[] = [];
 
-  private section: Section = "mode";
-  private modeIndex = 0;
+  private phase: Phase = "mode";
+  private uiModeIndex = 0;
   private templateList: ScrollableFilterList<TemplateItem>;
   private templateSelectedIndex = 0;
   private templateScrollOffset = 0;
   private agentSelectedIndex = 0;
 
-  private onUpdate: ((mode: TeamMode, templateId: string | null) => void) | null;
+  private onUpdate: ((mode: StoredMode, templateId: string | null) => void) | null;
 
   constructor(
     tui: TUI,
-    onUpdate: ((mode: TeamMode, templateId: string | null) => void) | null,
+    onUpdate: ((mode: StoredMode, templateId: string | null) => void) | null,
     onClose: () => void,
   ) {
     super(tui, onClose);
@@ -70,7 +85,6 @@ export class TeamView extends InteractiveView {
   }
 
   override activate(): void {
-    this.filterEnabled = true;
     this.filterText = "";
     this.loadConfig();
     super.activate();
@@ -81,7 +95,7 @@ export class TeamView extends InteractiveView {
     const config = readGlobalConfigWithDefaults();
     const team = config.team;
     if (team) {
-      this.mode = team.mode ?? "autonomous";
+      this.storedMode = (team.mode ?? "autonomous") as StoredMode;
       this.chatCollaboration = team.chatCollaboration ?? false;
       this.templateId = team.templateId ?? null;
       if (team.customAgents && team.customAgents.length > 0) {
@@ -94,12 +108,13 @@ export class TeamView extends InteractiveView {
         this.manualAgents = [...DEFAULT_MANUAL_AGENTS];
       }
     } else {
-      this.mode = "autonomous";
+      this.storedMode = "autonomous";
       this.templateId = null;
       this.manualAgents = [...DEFAULT_MANUAL_AGENTS];
     }
-    this.modeIndex = MODES.indexOf(this.mode);
-    if (this.modeIndex < 0) this.modeIndex = 0;
+    this.uiMode = this.storedMode === "autonomous" ? "autonomous" : "custom";
+    this.uiModeIndex = UI_MODES.indexOf(this.uiMode);
+    this.phase = "mode";
   }
 
   private async loadTemplates(): Promise<void> {
@@ -121,10 +136,10 @@ export class TeamView extends InteractiveView {
   private saveConfig(): void {
     const config = readGlobalConfigWithDefaults();
     config.team = {
-      mode: this.mode,
+      mode: this.storedMode,
       chatCollaboration: this.chatCollaboration,
       ...(this.templateId ? { templateId: this.templateId } : {}),
-      ...(this.mode === "manual" && this.manualAgents.length > 0
+      ...(this.storedMode === "manual" && this.manualAgents.length > 0
         ? {
             customAgents: this.manualAgents.map((a) => ({
               role: a.role,
@@ -135,170 +150,102 @@ export class TeamView extends InteractiveView {
         : {}),
     };
     writeGlobalConfig(config);
-    this.onUpdate?.(this.mode, this.templateId);
+    this.onUpdate?.(this.storedMode, this.templateId);
   }
 
-  // Item count depends on section
+  // Item count depends on current phase
   protected getItemCount(): number {
-    if (this.section === "mode") return MODES.length;
-    if (this.section === "templates") return this.templateList.getFilteredCount(this.filterText);
-    // agents section: agents + "add" action
-    return this.manualAgents.length + 1;
+    if (this.phase === "mode") return UI_MODES.length;
+    if (this.phase === "templates") return this.templateList.getFilteredCount(this.filterText);
+    return this.manualAgents.length + 1; // +1 for "+ Add agent..."
   }
 
-  protected handleCustomKey(event: KeyEvent): boolean {
-    // Tab to switch sections
-    if (event.type === "char" && event.char === "\t") {
-      this.nextSection();
-      return true;
-    }
-
-    if (event.type === "enter") {
-      this.handleEnter();
-      return true;
-    }
-
-    // Left/Right for mode toggle
-    if (this.section === "mode" && event.type === "arrow") {
-      if (event.direction === "left") {
-        this.modeIndex = Math.max(0, this.modeIndex - 1);
-        this.setMode(MODES[this.modeIndex]!);
-        this.render();
-        return true;
-      }
-      if (event.direction === "right") {
-        this.modeIndex = Math.min(MODES.length - 1, this.modeIndex + 1);
-        this.setMode(MODES[this.modeIndex]!);
-        this.render();
-        return true;
-      }
-    }
-
-    // Delete to remove agent in manual mode
-    if (this.section === "agents" && (event.type === "char" && (event.char === "d" || event.char === "x"))) {
-      if (this.agentSelectedIndex < this.manualAgents.length && this.manualAgents.length > 1) {
-        this.manualAgents.splice(this.agentSelectedIndex, 1);
-        if (this.agentSelectedIndex >= this.manualAgents.length) {
-          this.agentSelectedIndex = this.manualAgents.length;
-        }
-        this.saveConfig();
-        this.render();
-        return true;
-      }
-    }
-
-    return true;
-  }
-
-  private nextSection(): void {
-    const sections = this.getAvailableSections();
-    const idx = sections.indexOf(this.section);
-    const next = sections[(idx + 1) % sections.length]!;
-    this.section = next;
-    this.selectedIndex = this.getSectionSelectedIndex();
-    this.scrollOffset = 0;
-    this.render();
-  }
-
-  private getAvailableSections(): Section[] {
-    if (this.mode === "template") return ["mode", "templates"];
-    if (this.mode === "manual") return ["mode", "agents"];
-    return ["mode"];
-  }
-
-  private getSectionSelectedIndex(): number {
-    if (this.section === "mode") return this.modeIndex;
-    if (this.section === "templates") return this.templateSelectedIndex;
+  private getPhaseSelectedIndex(): number {
+    if (this.phase === "mode") return this.uiModeIndex;
+    if (this.phase === "templates") return this.templateSelectedIndex;
     return this.agentSelectedIndex;
   }
 
-  private setMode(mode: TeamMode): void {
-    this.mode = mode;
-    this.modeIndex = MODES.indexOf(mode);
+  private setPhaseSelectedIndex(index: number): void {
+    if (this.phase === "mode") this.uiModeIndex = index;
+    else if (this.phase === "templates") this.templateSelectedIndex = index;
+    else this.agentSelectedIndex = index;
+  }
+
+  /** Apply a UI mode selection and update the on-disk discriminator. */
+  private setUiMode(uiMode: UiMode): void {
+    this.uiMode = uiMode;
+    this.uiModeIndex = UI_MODES.indexOf(uiMode);
+    if (uiMode === "autonomous") {
+      this.storedMode = "autonomous";
+    } else {
+      // Custom: preserve template shape if a template is set, else manual.
+      this.storedMode = this.templateId ? "template" : "manual";
+    }
     this.saveConfig();
   }
 
-  private handleEnter(): void {
-    if (this.section === "mode") {
-      this.setMode(MODES[this.selectedIndex]!);
-      // Auto-advance to relevant section
-      if (this.mode === "template") {
-        this.section = "templates";
-        this.selectedIndex = this.templateSelectedIndex;
-      } else if (this.mode === "manual") {
-        this.section = "agents";
-        this.selectedIndex = this.agentSelectedIndex;
-      }
-      this.render();
-      return;
-    }
-
-    if (this.section === "templates") {
-      const filtered = this.templateList.getFilteredItems(this.filterText);
-      const item = filtered[this.selectedIndex];
-      if (item) {
-        this.templateId = item.template.id;
-        this.selectedTemplate = item.template;
-        this.templateSelectedIndex = this.selectedIndex;
-        this.saveConfig();
-        this.render();
-      }
-      return;
-    }
-
-    if (this.section === "agents") {
-      // "Add agent" action at the bottom
-      if (this.selectedIndex === this.manualAgents.length) {
-        this.addDefaultAgent();
-      }
-      return;
-    }
-  }
-
-  private addDefaultAgent(): void {
-    const builtInRoles = ["planner", "coder", "reviewer", "tester", "debugger", "researcher"];
-    // Include custom agents from config
-    const customConfigs = getAllAgentConfigs();
-    const customIds = Object.entries(customConfigs)
-      .filter(([id, cfg]) => !isBuiltInAgent(id) && cfg.custom)
-      .map(([id]) => id);
-    const allRoles = [...builtInRoles, ...customIds];
-    const usedRoles = new Set(this.manualAgents.map((a) => a.role));
-    const available = allRoles.find((r) => !usedRoles.has(r)) ?? "coder";
-    const customCfg = customConfigs[available];
-    this.manualAgents.push({ role: available, task: customCfg?.description ?? "" });
-    this.agentSelectedIndex = this.manualAgents.length; // select "add" again
-    this.saveConfig();
+  private goBackToMode(): void {
+    this.phase = "mode";
+    this.selectedIndex = this.uiModeIndex;
+    this.scrollOffset = 0;
+    this.filterText = "";
     this.render();
   }
 
-  // Override navigation to route to section-specific indices
   override handleKey(event: KeyEvent): boolean {
     if (!this.active) return false;
 
-    // Let base handle Esc, Ctrl+C, filter
-    if (event.type === "escape" || (event.type === "char" && event.char === "c" && event.ctrl)) {
-      return super.handleKey(event);
+    // Ctrl+C always closes
+    if (event.type === "char" && event.char === "c" && event.ctrl) {
+      this.deactivate();
+      return true;
     }
 
-    // Section-specific navigation for up/down
+    if (event.type === "escape") {
+      // Templates phase: clear filter first if active
+      if (this.phase === "templates" && this.filterText) {
+        this.filterText = "";
+        this.templateSelectedIndex = 0;
+        this.templateScrollOffset = 0;
+        this.render();
+        return true;
+      }
+      // Phases 2/3: step back to mode phase instead of closing
+      if (this.phase !== "mode") {
+        this.goBackToMode();
+        return true;
+      }
+      this.deactivate();
+      return true;
+    }
+
+    // Section-specific navigation for up/down (with wrap)
     if (event.type === "arrow" && (event.direction === "up" || event.direction === "down")) {
       const count = this.getItemCount();
       if (count === 0) return true;
-      const current = this.getSectionSelectedIndex();
+      const current = this.getPhaseSelectedIndex();
       let next = current;
       if (event.direction === "up") next = current > 0 ? current - 1 : count - 1;
       if (event.direction === "down") next = current < count - 1 ? current + 1 : 0;
 
-      this.setSectionSelectedIndex(next);
+      this.setPhaseSelectedIndex(next);
       this.selectedIndex = next;
       this.adjustScroll();
+
+      // Live update on mode phase: toggling navigation also commits the selection
+      if (this.phase === "mode") {
+        this.setUiMode(UI_MODES[next]!);
+      } else if (this.phase === "templates") {
+        const filtered = this.templateList.getFilteredItems(this.filterText);
+        this.selectedTemplate = filtered[next]?.template ?? null;
+      }
       this.render();
       return true;
     }
 
-    // Filter input for templates section
-    if (this.section === "templates" && this.filterEnabled) {
+    // Filter input — only in templates phase
+    if (this.phase === "templates") {
       const filterResult = handleFilterInput(event, this.filterText);
       if (filterResult.handled) {
         this.filterText = filterResult.text;
@@ -313,20 +260,128 @@ export class TeamView extends InteractiveView {
     return this.handleCustomKey(event);
   }
 
-  private setSectionSelectedIndex(index: number): void {
-    if (this.section === "mode") this.modeIndex = index;
-    else if (this.section === "templates") this.templateSelectedIndex = index;
-    else this.agentSelectedIndex = index;
+  protected handleCustomKey(event: KeyEvent): boolean {
+    if (event.type === "enter") {
+      this.handleEnter();
+      return true;
+    }
+
+    // Left/Right on mode phase: same as up/down (toggle between two options)
+    if (this.phase === "mode" && event.type === "arrow") {
+      if (event.direction === "left" && this.uiModeIndex > 0) {
+        this.uiModeIndex -= 1;
+        this.setUiMode(UI_MODES[this.uiModeIndex]!);
+        this.selectedIndex = this.uiModeIndex;
+        this.render();
+        return true;
+      }
+      if (event.direction === "right" && this.uiModeIndex < UI_MODES.length - 1) {
+        this.uiModeIndex += 1;
+        this.setUiMode(UI_MODES[this.uiModeIndex]!);
+        this.selectedIndex = this.uiModeIndex;
+        this.render();
+        return true;
+      }
+    }
+
+    // Right arrow on templates phase: advance to agents
+    if (this.phase === "templates" && event.type === "arrow" && event.direction === "right") {
+      this.advanceToAgents();
+      return true;
+    }
+
+    // Delete agent in agents phase
+    if (this.phase === "agents" && event.type === "char" && (event.char === "d" || event.char === "x")) {
+      if (this.agentSelectedIndex < this.manualAgents.length && this.manualAgents.length > 1) {
+        this.manualAgents.splice(this.agentSelectedIndex, 1);
+        if (this.agentSelectedIndex >= this.manualAgents.length) {
+          this.agentSelectedIndex = this.manualAgents.length;
+        }
+        this.selectedIndex = this.agentSelectedIndex;
+        this.storedMode = "manual";
+        this.saveConfig();
+        this.render();
+        return true;
+      }
+    }
+
+    return true;
+  }
+
+  private handleEnter(): void {
+    if (this.phase === "mode") {
+      const next = UI_MODES[this.uiModeIndex]!;
+      this.setUiMode(next);
+      if (next === "custom") {
+        this.phase = "templates";
+        this.selectedIndex = this.templateSelectedIndex;
+        this.scrollOffset = 0;
+      }
+      this.render();
+      return;
+    }
+
+    if (this.phase === "templates") {
+      const filtered = this.templateList.getFilteredItems(this.filterText);
+      const item = filtered[this.templateSelectedIndex];
+      if (item) {
+        this.templateId = item.template.id;
+        this.selectedTemplate = item.template;
+        this.storedMode = "template";
+        this.saveConfig();
+        this.render();
+      }
+      return;
+    }
+
+    if (this.phase === "agents") {
+      // "+ Add agent..." action at the bottom
+      if (this.agentSelectedIndex === this.manualAgents.length) {
+        this.addDefaultAgent();
+      }
+      return;
+    }
+  }
+
+  private advanceToAgents(): void {
+    this.phase = "agents";
+    // Seed from picked template if user hasn't already customised manualAgents
+    // beyond defaults. The on-disk shape switches to "manual" once the user
+    // edits or adds an agent — until then, leave storedMode as it was.
+    this.agentSelectedIndex = Math.min(this.agentSelectedIndex, this.manualAgents.length);
+    this.selectedIndex = this.agentSelectedIndex;
+    this.scrollOffset = 0;
+    this.render();
+  }
+
+  private addDefaultAgent(): void {
+    const builtInRoles = ["planner", "coder", "reviewer", "tester", "debugger", "researcher"];
+    const customConfigs = getAllAgentConfigs();
+    const customIds = Object.entries(customConfigs)
+      .filter(([id, cfg]) => !isBuiltInAgent(id) && cfg.custom)
+      .map(([id]) => id);
+    const allRoles = [...builtInRoles, ...customIds];
+    const usedRoles = new Set(this.manualAgents.map((a) => a.role));
+    const available = allRoles.find((r) => !usedRoles.has(r)) ?? "coder";
+    const customCfg = customConfigs[available];
+    this.manualAgents.push({ role: available, task: customCfg?.description ?? "" });
+    this.agentSelectedIndex = this.manualAgents.length; // select "add" again
+    this.selectedIndex = this.agentSelectedIndex;
+    this.storedMode = "manual";
+    this.saveConfig();
+    this.render();
   }
 
   protected override getPanelTitle(): string { return `${ICONS.gear} Team Configuration`; }
   protected override getPanelFooter(): string {
-    const parts = [`${ICONS.arrowUp}${ICONS.arrowDown} navigate`, "Enter select"];
-    if (this.getAvailableSections().length > 1) parts.push("Tab section");
-    if (this.section === "mode") parts.push(`${ICONS.arrowLeft}${ICONS.arrow} toggle`);
-    if (this.section === "agents") parts.push("d remove");
-    parts.push("Esc close");
-    return parts.join(" \u00b7 ");
+    const navigate = `${ICONS.arrowUp}${ICONS.arrowDown} navigate`;
+    if (this.phase === "mode") {
+      return `${navigate} · ${ICONS.arrowLeft}${ICONS.arrow} toggle · Enter select · Esc close`;
+    }
+    if (this.phase === "templates") {
+      return `${navigate} · Enter pick · ${ICONS.arrow} customize agents · Esc back`;
+    }
+    return `${navigate} · Enter add · d remove · Esc back`;
   }
 
   private renderTemplateItem(item: TemplateItem, selected: boolean): string[] {
@@ -334,10 +389,10 @@ export class TeamView extends InteractiveView {
     const tpl = item.template;
     const isCurrent = tpl.id === this.templateId;
     const cursor = selected ? t.primary(`${ICONS.cursor} `) : "  ";
-    const currentTag = isCurrent ? t.success("  \u2190 active") : "";
+    const currentTag = isCurrent ? t.success("  ← active") : "";
     const name = selected ? t.bold(tpl.name) : tpl.name;
     const pipeline = tpl.pipeline
-      ? t.dim(` ${tpl.pipeline.join(" \u2192 ")}`)
+      ? t.dim(` ${tpl.pipeline.join(" → ")}`)
       : t.dim(` ${tpl.agents.map((a) => a.role).join(", ")}`);
     const cost = tpl.estimatedCostPerRun
       ? t.dim(` ~$${tpl.estimatedCostPerRun.toFixed(2)}/run`)
@@ -347,98 +402,114 @@ export class TeamView extends InteractiveView {
   }
 
   protected renderLines(): string[] {
+    if (this.phase === "mode") return this.renderModePhase();
+    if (this.phase === "templates") return this.renderTemplatesPhase();
+    return this.renderAgentsPhase();
+  }
+
+  private renderModePhase(): string[] {
     const t = this.theme;
     const lines: string[] = [];
 
-    // Preview mode: show section matching cursor when browsing modes
-    const previewMode = this.section === "mode" ? MODES[this.modeIndex]! : this.mode;
-
-    // ── Mode selector ──
-    const modeActive = this.section === "mode";
-    lines.push(`  ${modeActive ? t.bold("Mode") : t.dim("Mode")}`);
+    lines.push(`  ${t.bold("Team composition")}`);
     lines.push("");
 
-    for (let i = 0; i < MODES.length; i++) {
-      const mode = MODES[i]!;
-      const isSelected = modeActive && this.modeIndex === i;
-      const isCurrent = mode === this.mode;
-      const icon = isCurrent ? ICONS.diamond : "\u25cb";
+    for (let i = 0; i < UI_MODES.length; i++) {
+      const m = UI_MODES[i]!;
+      const isSelected = this.uiModeIndex === i;
+      const isCurrent = m === this.uiMode;
+      const icon = isCurrent ? ICONS.diamond : "○";
       const cursor = isSelected ? t.primary(`${ICONS.cursor} `) : "  ";
-      const label = isSelected ? t.bold(mode) : isCurrent ? mode : t.dim(mode);
+      const label = isSelected ? t.bold(m) : isCurrent ? m : t.dim(m);
       lines.push(`    ${cursor}${icon} ${label}`);
     }
     lines.push("");
 
-    // ── Mode description ──
+    const previewMode = UI_MODES[this.uiModeIndex]!;
     if (previewMode === "autonomous") {
       lines.push(`  ${t.dim("Team will be composed automatically based on your goal.")}`);
-      lines.push("");
+    } else {
+      const tplLabel = this.templateId
+        ? `${t.dim("Template:")} ${this.selectedTemplate?.name ?? this.templateId}`
+        : t.dim("No template selected — pick one or customize agents directly.");
+      lines.push(`  ${tplLabel}`);
+      lines.push(`  ${t.dim(`Agents: ${this.manualAgents.length} configured`)}`);
+      lines.push(`  ${t.dim("Press Enter to configure.")}`);
     }
+    lines.push("");
 
-    // ── Collab toggle ──
-    const collabIcon = this.chatCollaboration ? ICONS.success : "\u25cb";
+    const collabIcon = this.chatCollaboration ? ICONS.success : "○";
     const collabLabel = this.chatCollaboration ? "enabled" : "disabled";
     lines.push(`  ${t.dim("Chat collaboration:")} ${collabIcon} ${collabLabel}`);
     lines.push(`  ${t.dim("When enabled, auto-detect collab-worthy prompts in solo mode.")}`);
     lines.push("");
 
-    // ── Templates section (template mode) ──
-    if (previewMode === "template") {
-      const tplActive = this.section === "templates";
-      lines.push(`  ${tplActive ? t.bold("\u2500\u2500 Templates") : t.dim("\u2500\u2500 Templates")} ${t.dim(`\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`)}`);
-      lines.push("");
+    return lines;
+  }
 
-      if (this.templates.length === 0) {
-        lines.push(`    ${t.dim("Loading templates...")}`);
-      } else {
-        // Mode section overhead: ~6 lines; templates header: 2 lines; preview: ~7 lines; padding: 2
-        // Ensure at least 3 items (each takes 2 lines) are visible
-        const templateMaxVisible = Math.max(3, this.maxVisible - 6);
-        const listLines = this.templateList.renderLines({
-          filterText: tplActive ? this.filterText : "",
-          selectedIndex: tplActive ? this.templateSelectedIndex : -1,
-          scrollOffset: this.templateScrollOffset,
-          maxVisible: templateMaxVisible,
-        });
-        lines.push(...listLines);
-      }
+  private renderTemplatesPhase(): string[] {
+    const t = this.theme;
+    const lines: string[] = [];
 
-      // Template preview — only show if there's enough space
-      if (this.selectedTemplate && this.maxVisible > 10) {
-        lines.push("");
-        lines.push(`  ${t.bold("\u2500\u2500 Preview")} ${t.dim(`\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`)}`);
-        lines.push(`    ${t.dim(this.selectedTemplate.description)}`);
-        lines.push("");
-        for (const agent of this.selectedTemplate.agents) {
-          const task = agent.task ? t.dim(` \u2014 ${agent.task}`) : "";
-          lines.push(`    ${ICONS.bullet} ${agent.role}${task}`);
-        }
-      }
+    const filterHint = this.filterText
+      ? `${t.dim("filter:")} ${this.filterText}${t.primary("▌")}`
+      : t.dim("type to search");
+    lines.push(`  ${t.bold("Templates")}  ${filterHint}`);
+    lines.push("");
+
+    if (this.templates.length === 0) {
+      lines.push(`    ${t.dim("Loading templates...")}`);
       lines.push("");
+      return lines;
     }
 
-    // ── Agents section (manual mode) ──
-    if (previewMode === "manual") {
-      const agentActive = this.section === "agents";
-      lines.push(`  ${agentActive ? t.bold("\u2500\u2500 Current Team") : t.dim("\u2500\u2500 Current Team")} ${t.dim(`\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`)}`);
-      lines.push("");
+    // Reserve room for header (2), preview (~7 when shown), padding (2)
+    const previewLines = this.selectedTemplate ? 7 : 0;
+    const listMaxVisible = Math.max(3, this.maxVisible - 4 - previewLines);
+    const listLines = this.templateList.renderLines({
+      filterText: this.filterText,
+      selectedIndex: this.templateSelectedIndex,
+      scrollOffset: this.templateScrollOffset,
+      maxVisible: listMaxVisible,
+    });
+    lines.push(...listLines);
 
-      for (let i = 0; i < this.manualAgents.length; i++) {
-        const agent = this.manualAgents[i]!;
-        const isSelected = agentActive && this.agentSelectedIndex === i;
-        const cursor = isSelected ? t.primary(`${ICONS.cursor} `) : "  ";
-        const label = isSelected ? t.bold(agent.role) : agent.role;
-        const task = agent.task ? t.dim(` (${agent.task})`) : "";
-        lines.push(`    ${cursor}${label}${task}`);
+    if (this.selectedTemplate && this.maxVisible > 10) {
+      lines.push("");
+      lines.push(`  ${t.bold("── Preview")} ${t.dim("─".repeat(30))}`);
+      lines.push(`    ${t.dim(this.selectedTemplate.description)}`);
+      lines.push("");
+      for (const agent of this.selectedTemplate.agents) {
+        const task = agent.task ? t.dim(` — ${agent.task}`) : "";
+        lines.push(`    ${ICONS.bullet} ${agent.role}${task}`);
       }
-
-      // "Add agent" action
-      const addSelected = agentActive && this.agentSelectedIndex === this.manualAgents.length;
-      const addCursor = addSelected ? t.primary(`${ICONS.cursor} `) : "  ";
-      const addLabel = addSelected ? t.bold("+ Add agent...") : t.dim("+ Add agent...");
-      lines.push(`    ${addCursor}${addLabel}`);
-      lines.push("");
     }
+    lines.push("");
+
+    return lines;
+  }
+
+  private renderAgentsPhase(): string[] {
+    const t = this.theme;
+    const lines: string[] = [];
+
+    lines.push(`  ${t.bold("Current Team")}`);
+    lines.push("");
+
+    for (let i = 0; i < this.manualAgents.length; i++) {
+      const agent = this.manualAgents[i]!;
+      const isSelected = this.agentSelectedIndex === i;
+      const cursor = isSelected ? t.primary(`${ICONS.cursor} `) : "  ";
+      const label = isSelected ? t.bold(agent.role) : agent.role;
+      const task = agent.task ? t.dim(` (${agent.task})`) : "";
+      lines.push(`    ${cursor}${label}${task}`);
+    }
+
+    const addSelected = this.agentSelectedIndex === this.manualAgents.length;
+    const addCursor = addSelected ? t.primary(`${ICONS.cursor} `) : "  ";
+    const addLabel = addSelected ? t.bold("+ Add agent...") : t.dim("+ Add agent...");
+    lines.push(`    ${addCursor}${addLabel}`);
+    lines.push("");
 
     return lines;
   }

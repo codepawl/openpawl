@@ -25,7 +25,7 @@ export interface ChatMessage {
   /** Queued message not yet processed — rendered dimmed. */
   pending?: boolean;
   /** Visual tag for special rendering (e.g., tool approval background tint). */
-  tag?: "tool-approval";
+  tag?: "tool-approval" | "thinking";
 }
 
 /** Lines above which a message is considered collapsible. */
@@ -378,6 +378,17 @@ export class MessagesComponent implements Component {
       case "assistant":
       case "agent": {
         const nameLabel = msg.agentName ?? "OpenPawl";
+
+        // Inline render for thinking placeholder: badge + spinner on one line.
+        // Once the first token streams in, router-wiring swaps this for an
+        // untagged message and the multi-line layout below takes over.
+        if (msg.tag === "thinking") {
+          const inline = (msg.content || "").trim();
+          return inline
+            ? ["  " + agentBadge(nameLabel) + "  " + inline]
+            : ["  " + agentBadge(nameLabel)];
+        }
+
         const badgeLines: string[] = [];
 
         const contentLines: string[] = [];

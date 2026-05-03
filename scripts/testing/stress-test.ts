@@ -1,6 +1,6 @@
 /**
  * Comprehensive stress tests across all subsystems.
- * Run: bun run tsx src/testing/stress-test.ts [--category all|session|memory|sprint|tui|io|combined]
+ * Run: bun run tsx scripts/testing/stress-test.ts [--category all|session|memory|tui|io|combined]
  */
 
 import { join } from "node:path";
@@ -283,112 +283,11 @@ async function runMemoryStress() {
   }
 }
 
-// ── Category 3: Sprint/Pipeline ─────────────────────────────────────────────
-
-async function runSprintStress() {
-  const cat = "sprint";
-  log("\n═══ Category 3: Sprint/Pipeline Stress ═══");
-
-  // Test 3.1: Post-mortem on many tasks
-  {
-    log("  3.1 Post-mortem (50 tasks)...");
-    const { analyzeRunResult } = await import("../sprint/post-mortem.js");
-    const tasks = Array.from({ length: 50 }, (_, i) => ({
-      id: `task-${i}`, description: `Implement feature ${i} with TypeScript`,
-      status: (i % 5 === 0 ? "failed" : "completed") as "failed" | "completed",
-      assignedAgent: "coder",
-      result: i % 5 === 0 ? undefined : `Completed feature ${i}`,
-      error: i % 5 === 0 ? "Module not found: some-dep" : undefined,
-      toolsCalled: ["file_write", "shell_exec"],
-    }));
-
-    const t0 = Date.now();
-    const result = analyzeRunResult({ goal: "Build app", tasks, completedTasks: 40, failedTasks: 10, duration: 60000 });
-    const pmMs = Date.now() - t0;
-
-    addResult(cat, {
-      name: "3.1 Post-mortem 50 tasks",
-      status: "PASS",
-      metric: `${pmMs}ms`,
-      notes: `${result.lessons.length} lessons, ${result.successPatterns.length} patterns`,
-    });
-    log(`    ${pmMs}ms, ${result.lessons.length} lessons`);
-  }
-
-  // Test 3.2: Goal analyzer on complex goal
-  {
-    log("  3.2 Goal analyzer (500-word goal)...");
-    const { analyzeGoal } = await import("../sprint/goal-analyzer.js");
-    const complexGoal = Array.from({ length: 100 }, (_, i) =>
-      `Build feature ${i} with authentication and database integration and API endpoints and testing and deployment`
-    ).join(". ");
-
-    const t0 = Date.now();
-    const result = analyzeGoal(complexGoal);
-    const gaMs = Date.now() - t0;
-
-    addResult(cat, {
-      name: "3.2 Goal analyzer",
-      status: "PASS",
-      metric: `${gaMs}ms`,
-      notes: `${complexGoal.split(/\s+/).length} words, ${result.estimatedTasks} estimated tasks, ${result.composition.activeAgents.length} agents`,
-    });
-    log(`    ${gaMs}ms, ${result.estimatedTasks} tasks, ${result.composition.activeAgents.length} agents`);
-  }
-
-  // Test 3.3: Task parser on large output
-  {
-    log("  3.3 Task parser (100 tasks)...");
-    const { parseTasks } = await import("../sprint/task-parser.js");
-    const largePlan = JSON.stringify(
-      Array.from({ length: 100 }, (_, i) => ({
-        description: `Task ${i}: Implement module ${i} with full test coverage and documentation and error handling`,
-        dependsOn: i > 0 ? [i] : [],
-      })),
-    );
-
-    const t0 = Date.now();
-    const tasks = parseTasks(largePlan);
-    const tpMs = Date.now() - t0;
-
-    addResult(cat, {
-      name: "3.3 Task parser 100 tasks",
-      status: tasks.length === 100 ? "PASS" : "FAIL",
-      metric: `${tpMs}ms`,
-      notes: `parsed ${tasks.length}/100 tasks`,
-    });
-    log(`    ${tpMs}ms, ${tasks.length} tasks parsed`);
-  }
-
-  // Test 3.4: Context compaction at scale
-  {
-    log("  3.4 Context compaction...");
-    const { compact } = await import("../context/compaction.js");
-    const messages = Array.from({ length: 100 }, (_, i) => ({
-      role: (i % 3 === 0 ? "user" : i % 3 === 1 ? "assistant" : "tool") as "user" | "assistant" | "tool",
-      content: `${"x".repeat(2000)} message ${i}`,
-      ...(i % 3 === 2 ? { toolCallId: `tc-${i}` } : {}),
-    }));
-
-    const t0 = Date.now();
-    const result = await compact(messages, "high", { force: true, keepLastExchanges: 6 });
-    const compactMs = Date.now() - t0;
-
-    addResult(cat, {
-      name: "3.4 Compaction 200KB",
-      status: result ? "PASS" : "FAIL",
-      metric: `${compactMs}ms`,
-      notes: result ? `strategy=${result.strategy}, affected=${result.messagesAffected}, before=${result.beforeTokens} after=${result.afterTokens} tokens` : "compaction returned null",
-    });
-    log(`    ${compactMs}ms, ${result ? `${result.strategy}: ${result.messagesAffected} msgs affected` : "null"}`);
-  }
-}
-
-// ── Category 4: TUI Rendering (mock) ────────────────────────────────────────
+// ── Category 3: TUI Rendering (mock) ────────────────────────────────────────
 
 async function runTuiStress() {
   const cat = "tui";
-  log("\n═══ Category 4: TUI Rendering Stress ═══");
+  log("\n═══ Category 3: TUI Rendering Stress ═══");
 
   // Test 4.1: ScrollableFilterList performance
   {
@@ -448,11 +347,11 @@ async function runTuiStress() {
   }
 }
 
-// ── Category 5: IO/Disk ─────────────────────────────────────────────────────
+// ── Category 4: IO/Disk ─────────────────────────────────────────────────────
 
 async function runIoStress() {
   const cat = "io";
-  log("\n═══ Category 5: IO/Disk Stress ═══");
+  log("\n═══ Category 4: IO/Disk Stress ═══");
 
   // Test 5.1: Config read/write cycling
   {
@@ -526,11 +425,11 @@ async function runIoStress() {
   }
 }
 
-// ── Category 6: Combined ────────────────────────────────────────────────────
+// ── Category 5: Combined ────────────────────────────────────────────────────
 
 async function runCombinedStress() {
   const cat = "combined";
-  log("\n═══ Category 6: Combined Stress ═══");
+  log("\n═══ Category 5: Combined Stress ═══");
 
   // Test 6.1: Simulated heavy session
   {
@@ -598,7 +497,6 @@ async function runCombinedStress() {
       ["session", "../session/index.js"],
       ["journal", "../journal/index.js"],
       ["drift", "../drift/index.js"],
-      ["sprint", "../sprint/post-mortem.js"],
       ["briefing", "../briefing/index.js"],
       ["handoff", "../handoff/index.js"],
     ] as const;
@@ -653,7 +551,7 @@ function generateReport(): string {
 
   // Category tables
   for (const [cat, results] of Object.entries(allResults)) {
-    const catName = { session: "Sessions", memory: "Memory (LanceDB)", sprint: "Sprint/Pipeline", tui: "TUI Rendering", io: "IO/Disk", combined: "Combined" }[cat] ?? cat;
+    const catName = { session: "Sessions", memory: "Memory (LanceDB)", tui: "TUI Rendering", io: "IO/Disk", combined: "Combined" }[cat] ?? cat;
     lines.push(`## Category: ${catName}\n`);
     lines.push("| Test | Status | Key Metric | Notes |");
     lines.push("|------|--------|------------|-------|");
@@ -689,7 +587,6 @@ async function main() {
   try {
     if (shouldRun("session")) await runSessionStress();
     if (shouldRun("memory")) await runMemoryStress();
-    if (shouldRun("sprint")) await runSprintStress();
     if (shouldRun("tui")) await runTuiStress();
     if (shouldRun("io")) await runIoStress();
     if (shouldRun("combined")) await runCombinedStress();

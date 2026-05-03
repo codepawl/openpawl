@@ -188,10 +188,10 @@ export function setupKeybindings(
 
   registry.register({
     name: "mode",
-    description: "Switch mode (solo/collab/sprint) or cycle to next",
+    description: "Switch mode (solo/crew) or cycle to next",
     async execute(args, msgCtx) {
       const target = args.trim().toLowerCase();
-      if (target === "solo" || target === "collab" || target === "sprint") {
+      if (target === "solo" || target === "crew") {
         appModeSystem.setMode(target);
       } else {
         appModeSystem.cycleNext();
