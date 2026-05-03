@@ -60,7 +60,7 @@ export const ACTIONS = {
   "nav.back": "Go back / close view",
 
   // Mode switching
-  "mode.cycle": "Cycle mode (solo/collab/sprint)",
+  "mode.cycle": "Cycle mode (solo/crew)",
 
   // Palette & overlays
   "palette.show": "Open command palette",

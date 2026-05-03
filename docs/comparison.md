@@ -6,7 +6,7 @@ Detailed comparison of OpenPawl against other AI coding tools.
 
 | Feature | OpenPawl | Claude Code | OpenCode | Aider |
 |---------|----------|-------------|----------|-------|
-| Multi-agent orchestration | 3 modes (solo/collab/sprint) | Single agent | Single agent | Single agent |
+| Multi-agent orchestration | Solo today; crew mode planned | Single agent | Single agent | Single agent |
 | Cross-session memory | LanceDB vector + hebbian | Per-project CLAUDE.md | None | Git-based |
 | Post-mortem learning | Extracts & injects lessons | None | None | None |
 | Team templates | 5 built-in + custom | None | None | None |

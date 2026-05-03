@@ -295,12 +295,10 @@ export class PromptRouter extends EventEmitter {
       "  @tester          Route to Tester",
       "  @debugger        Route to Debugger",
       "  @researcher      Route to Researcher",
-      "  @collab          Force collab mode (multi-agent chain)",
       "",
-      "Modes: Shift+Tab to cycle (solo/collab/sprint) | /mode to pick",
+      "Modes: Shift+Tab to cycle (solo/crew) | /mode to pick",
       "",
       "Example: @coder write a login form",
-      "Example: @collab implement auth with OAuth2",
     ];
     return ok(lines.join("\n"));
   }

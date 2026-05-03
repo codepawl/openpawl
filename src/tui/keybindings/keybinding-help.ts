@@ -121,7 +121,7 @@ export function buildHelpSections(leaderBindings: LeaderBinding[], leaderCombo: 
       title: "Mode",
       icon: ICONS.modeSolo,
       entries: [
-        { key: "shift+tab", description: `Cycle mode (solo ${ICONS.arrow} collab ${ICONS.arrow} sprint)` },
+        { key: "shift+tab", description: `Cycle mode (solo ${ICONS.arrow} crew)` },
         { key: "/mode <name>", description: "Set specific mode" },
       ],
     },

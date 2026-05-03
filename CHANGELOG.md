@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+### Removed
+- **Sprint and collab execution modes** retired in favor of an upcoming crew mode (see `docs/design/crew-v0.4.md`). Removed `dispatchCollab()` path, `@collab` mention parser, `SprintEvent` enum and dead `wireDebugToSprintRunner()` listeners. Solo mode remains the only working execution mode; crew is scaffolded.
+- 22 stale debug post-mortems and screenshots/tapes for the removed modes.
+- Three unreferenced helper scripts and one broken sprint-only bench (`run-context-fix-bench.sh`).
+
+### Changed
+- `--mode` flag now only accepts `solo` (was `solo|collab|sprint`).
+- TUI mode cycle (`Shift+Tab`) is `solo ↔ crew`.
+- `scripts/testing/benchmark.ts` and `scripts/testing/stress-test.ts` reduced to solo-only.
+
 ## [0.3.0] - 2026-04-18
 
 Sprint correctness and context-sharing release. Closes out a two-day debug session that moved the CLI Task Manager benchmark sprint/solo output-token ratio from **2.08× (pre-PR-74)** to **0.66× (post-PR-84)** — a **68 % reduction**. Sprint is now meaningfully cheaper than solo on the reference benchmark, with honest claim-vs-disk quality.
