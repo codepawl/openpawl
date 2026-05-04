@@ -306,7 +306,84 @@ export const CrewPhaseSchema = z.object({
 });
 ```
 
-### 4.3 GraphState extension
+### 4.3 Capability gate
+
+Per Decision 4, every tool call from a crew agent flows through a runtime
+gate before reaching the executor. The gate is the only enforcement
+boundary for write capability — agent prompts can lie, the gate can't be
+talked around.
+
+Two checks, in order:
+
+1. **Tool allowlist.** `tool_name` must appear in the agent's
+   `tools: AgentTool[]`. Any tool outside the list is rejected.
+2. **Write-scope glob.** For `file_write` and `file_edit` only, when the
+   agent's `write_scope: string[]` is set, `tool_args.path` must match
+   at least one glob in the list. Globs are evaluated by minimatch with
+   `dot: true` so `__tests__/` paths match. An agent with write tools
+   but no `write_scope` defaults to a broad allow.
+
+Rejections produce a structured `ToolForbidden`:
+
+```typescript
+export interface ToolForbidden {
+  agent_id: string;
+  tool: string;
+  reason: "tool_not_in_allowlist" | "write_outside_scope";
+  message: string;
+  /** Set for write_outside_scope. */
+  attempted_path?: string;
+  /** Set for write_outside_scope. */
+  scope?: string[];
+}
+```
+
+The subagent runner relays a denial back to the LLM as a tool result so
+the agent can recover (try a different file, escalate, give up) rather
+than crashing the turn. Repeated denials count toward the doom-loop
+detector's fingerprint.
+
+### 4.4 Write Lock Manager
+
+Crew agents run in parallel within a phase; without serialization, two
+agents can race on the same file or two writers can interleave artifacts.
+The Write Lock Manager guarantees one-writer-at-a-time per resource.
+
+```typescript
+export class WriteLockManager {
+  acquire(key: string, agentId: string, timeoutMs?: number): Promise<void>;
+  tryAcquire(key: string, agentId: string): WriteLockResult;
+  release(key: string, agentId: string): void;
+  releaseAllFor(agentId: string): string[];
+  isHeld(key: string): boolean;
+  holderOf(key: string): string | null;
+  queueDepth(key: string): number;
+}
+```
+
+Lock-key conventions:
+
+- `file:<absPath>` — guards a single file from concurrent writers.
+- `artifact:<sessionId>` — serializes ArtifactStore writes for a session.
+
+Semantics:
+
+- `acquire` blocks until the lock is granted or `timeoutMs` (default 30s)
+  elapses, in which case it rejects with `WriteLockTimeoutError`.
+- `tryAcquire` never blocks. It returns `{ granted: true }` or
+  `{ granted: false, holder_agent, queued_count }`.
+- `release` must come from the current holder. Lock is handed off to the
+  head of the wait queue; if the queue is empty, the lock entry is
+  dropped.
+- Same-agent re-acquire of a held key is a reentrant no-op. A single
+  matching `release` returns the lock to the next waiter.
+- The subagent runner calls `releaseAllFor(agentId)` at turn end to
+  guarantee no leaked locks even on early returns or thrown errors.
+
+Debug events: `write_lock_acquired`, `write_lock_released`,
+`write_lock_denied`, `write_lock_queued`, `write_lock_timeout`.
+
+### 4.5 Crew GraphState extension
 
 ```typescript
 export const CrewGraphState = z.object({
@@ -332,6 +409,61 @@ export const CrewGraphState = z.object({
   strict_mode: z.boolean().default(false),
 }).passthrough();
 ```
+
+### 4.6 Typed Artifact Store
+
+Cross-phase data lives in a typed, append-only artifact store. The store
+is the single durable record of what each phase produced — phase
+summaries, reviews, test reports, meeting notes — and is what survives
+between sessions, what compaction rolls up, and what the next phase
+reads to know what already happened.
+
+**Common envelope** (every artifact, regardless of kind):
+
+```typescript
+{
+  id: string;            // unique within session
+  kind: ArtifactKind;    // discriminator (see below)
+  author_agent: string;  // agent_id that produced it
+  phase_id: string | null;
+  created_at: number;    // epoch ms
+  supersedes: string | null;  // older artifact replaced by this one
+  payload: KindSpecificPayload;
+}
+```
+
+**Eight kinds**, each with its own Zod payload schema:
+
+| kind | producer | typical contents |
+|---|---|---|
+| `plan` | planner (§5.2) | goal, phases (id/name/description/task_ids), rationale |
+| `phase_summary` | runner (§5.4) | phase status, achievements, blockers, files touched, task counts, summary text |
+| `meeting_notes` | facilitator (§5.5) | phase_id, achievements, debating, missing perspective, proposed next phase, refs to reflection ids |
+| `reflection` | each agent (§5.5) | phase_id, agent_id, went_well, went_poorly, next_phase_focus, confidence |
+| `review` | reviewer | target files, findings (severity / file / line / message / suggestion), verdict, summary |
+| `test_report` | tester | command, exit_code, passed/failed/skipped, failures, stdout/stderr excerpts |
+| `post_mortem` | end-of-crew | goal, phases_completed, outcome, lessons (title/detail/category), recommended_followups |
+| `phase_compaction` | compactor | source_phase_id, source_artifact_ids, compressed_summary, retained_facts, token deltas |
+
+**Access model:**
+
+- Reads are universal — agents and orchestrator alike receive an
+  `ArtifactStoreReader` that exposes only `read(id)` and
+  `list({ kind?, phase_id? })`.
+- Writes are gated by the Write Lock Manager on
+  `artifact:<sessionId>`. The store uses `tryAcquire`, so a write that
+  collides with another writer returns
+  `{ written: false, reason: "lock_denied", holder_agent, queued_count }`
+  rather than blocking. The orchestrator chooses whether to retry,
+  back off, or queue elsewhere.
+- Other rejection reasons: `validation_failed` (Zod), `duplicate_id`,
+  `no_such_predecessor` (for `supersede`).
+
+**Persistence:** append-only JSONL at
+`~/.openpawl/sessions/<sessionId>/artifacts.jsonl`. On store construction
+the file is replayed line-by-line; malformed lines are debug-logged and
+skipped so a partially flushed line cannot block startup. Supersession
+chains are reconstructable from the file; old artifacts are not deleted.
 
 ## 5. Execution flow
 
@@ -418,6 +550,67 @@ Key invariants:
 - Anti-sycophancy: reject trivial (<3 sentences), detect duplicates via hash
 - Facilitator (Planner role, separate instance) synthesizes into markdown meeting notes
 - Meeting notes presented to user as chat-readable transcript
+
+### 5.6 Subagent invocation contract
+
+Every crew agent invocation flows through `runSubagent`. There is no
+direct path from the orchestrator to an LLM call for a crew agent. This
+is what guarantees the Decision 1 depth limit and the Decision 4
+capability gate hold uniformly.
+
+```typescript
+export async function runSubagent(args: {
+  agent_def: AgentDefinition;
+  prompt: string;
+  artifact_reader: ArtifactStoreReader;
+  depth: number;
+  parent_agent_id: string | null;
+  token_budget: { max_input: number; max_output: number };
+  write_lock_manager: WriteLockManager;
+  session_id: string;
+  // … injected hooks: executeTool, contextTracker, signal, …
+}): Promise<SubagentResult>;
+
+export interface SubagentResult {
+  agent_id: string;
+  summary: string;
+  produced_artifacts: ArtifactId[];
+  tokens_used: { input: number; output: number };
+  errors: SubagentError[];
+}
+```
+
+**Invariants:**
+
+- **Fresh history.** No parent transcript leaks into the subagent's
+  message list. The system prompt is `agent_def.prompt` plus a generated
+  capabilities block plus `you are agent <id> at depth <n>; do not spawn
+  further subagents`.
+- **Depth limit.** `depth > 1` is rejected immediately with
+  `SubagentDepthExceeded`. The crew is hierarchical with at most one
+  level of nesting (Decision 1).
+- **Reader-only artifact view.** Agent code receives an
+  `ArtifactStoreReader` reference. The full `ArtifactStore` writer never
+  crosses the subagent boundary, so an agent cannot bypass the
+  write-lock by holding a writer reference.
+- **Tool gating.** Every tool call is filtered through the capability
+  gate (§4.3) before execution. Denials are returned to the LLM as tool
+  results so the agent can recover.
+- **Write-lock acquire / release.** Writes that need a lock acquire it
+  before execution and release it after. The runner calls
+  `releaseAllFor(agentId)` at turn end to drain leaked locks even on
+  thrown errors or early returns.
+- **Token budget.** Per-task cap (default 50k input + 16k output).
+  Pre-execution input estimate vs cap rejects with `BudgetExceeded`
+  rather than wasting an LLM call. Per-phase and per-session caps stack
+  on top (defined in §3 Decision 2 / §6.2).
+- **Caller integrates summary only.** The orchestrator reads
+  `summary` and `produced_artifacts` — never the raw transcript. This
+  is what keeps cross-phase context bounded.
+
+Debug events: `subagent_spawned` (caller, callee, depth, tools,
+budget), `subagent_returned` (tokens_used, artifact count, error
+count), `subagent_depth_exceeded`, `subagent_budget_exceeded`.
 
 ## 6. Edge cases & failure modes
 
