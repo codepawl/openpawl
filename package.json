@@ -71,6 +71,7 @@
     "fastify": "^5.8.2",
     "fastify-plugin": "^5.1.0",
     "langfuse": "^3.38.6",
+    "minimatch": "^10",
     "neverthrow": "^8.2.0",
     "open": "^11.0.0",
     "openai": "^6.32.0",
