@@ -20,8 +20,14 @@ import os from "node:os";
 
 import { debugLog } from "../debug/logger.js";
 import { ArtifactStore, type ArtifactStoreReader } from "./artifacts/index.js";
-import type { PlanArtifact } from "./artifacts/index.js";
+import type {
+  PhaseSummaryArtifact,
+  PlanArtifact,
+} from "./artifacts/index.js";
+import { BudgetTracker } from "./budget-tracker.js";
 import { classifyPhaseComplexity } from "./complexity.js";
+import { DoomLoopDetector } from "./doom-loop.js";
+import { KnownFilesRegistry } from "./known-files.js";
 import {
   ensureBuiltInPresets,
   FULL_STACK_PRESET,
@@ -30,6 +36,11 @@ import {
   type AgentDefinition,
   type CrewManifest,
 } from "./manifest/index.js";
+import {
+  executePhase as defaultExecutePhase,
+  type ExecutePhaseArgs,
+  type ExecutePhaseResult,
+} from "./phase-executor.js";
 import { parsePlan, type ParseError } from "./plan-parser.js";
 import {
   runSubagent as defaultRunSubagent,
@@ -44,6 +55,8 @@ export const CREW_RUNNER_PENDING_MESSAGE =
 
 export const PLANNER_AGENT_ID = "planner";
 export const DEFAULT_MAX_TOKENS_PER_TASK = 50_000;
+export const DEFAULT_MAX_TOKENS_PER_PHASE = 200_000;
+export const DEFAULT_MAX_TOKENS_PER_SESSION = 1_000_000;
 
 export class ManifestError extends Error {
   constructor(message: string) {
@@ -82,7 +95,27 @@ export interface CrewPlanFailedResult {
   attempts: number;
 }
 
-export type CrewRunResult = CrewPlanResult | CrewPlanFailedResult;
+export type CrewEndedBy =
+  | "all_phases_complete"
+  | "session_budget"
+  | "abort_signal";
+
+export interface CrewCompletedResult {
+  status: "completed" | "halted";
+  session_id: string;
+  crew_name: string;
+  goal: string;
+  phases: CrewPhase[];
+  plan_artifact_id: string;
+  phase_summary_artifact_ids: string[];
+  tokens_used: number;
+  ended_by: CrewEndedBy;
+}
+
+export type CrewRunResult =
+  | CrewPlanResult
+  | CrewPlanFailedResult
+  | CrewCompletedResult;
 
 export interface RunPlanningArgs {
   options: CrewRunOptions;
@@ -96,6 +129,18 @@ export interface RunPlanningArgs {
   runSubagentImpl?: (args: RunSubagentArgs) => Promise<SubagentResult>;
   /** Test seam — preload the manifest instead of going through the loader. */
   manifest?: CrewManifest;
+}
+
+export interface RunCrewArgs extends RunPlanningArgs {
+  /** Working directory for tasks (file_write etc). Defaults to options.workdir. */
+  workdir?: string;
+  max_tokens_per_phase?: number;
+  max_tokens_per_session?: number;
+  /** Per-phase override map keyed by complexity_tier. */
+  phase_time_budget_ms_by_tier?: Partial<Record<"1" | "2" | "3", number>>;
+  /** Test seam — defaults to the real {@link executePhase}. */
+  executePhaseImpl?: (args: ExecutePhaseArgs) => Promise<ExecutePhaseResult>;
+  signal?: AbortSignal;
 }
 
 function resolveManifest(
@@ -342,6 +387,195 @@ export async function runPlanning(args: RunPlanningArgs): Promise<CrewRunResult>
   };
 }
 
+/**
+ * Full crew run — planning + phase loop. Returns {@link CrewCompletedResult}
+ * on success/halt, or {@link CrewPlanFailedResult} if planning never produced
+ * a valid plan after one retry. The runner does NOT throw on phase-level
+ * failures; failed/blocked tasks are recorded on the phase and execution
+ * advances. Session-budget exhaustion halts the loop and marks the
+ * remaining phases blocked.
+ *
+ * Out of scope (next PR): discussion meeting, drift check, post-mortem,
+ * user checkpoint UI.
+ */
+export async function runCrew(args: RunCrewArgs): Promise<CrewRunResult> {
+  const planResult = await runPlanning(args);
+  if (planResult.status === "plan_failed") return planResult;
+
+  const sessionId = planResult.session_id;
+  const homeDir = args.home_dir ?? os.homedir();
+  const workdir = args.workdir ?? args.options.workdir;
+  const manifest = args.manifest ?? resolveManifest(args.options, homeDir);
+  const executePhaseImpl = args.executePhaseImpl ?? defaultExecutePhase;
+  const runSubagent = args.runSubagentImpl ?? defaultRunSubagent;
+
+  const lockManager = new WriteLockManager();
+  // The artifact store replays the JSONL, so it sees the PlanArtifact
+  // written during planning.
+  const artifactStore = new ArtifactStore({
+    sessionId,
+    homeDir,
+    lockManager,
+  });
+  const reader: ArtifactStoreReader = artifactStore.reader();
+
+  const knownFiles = new KnownFilesRegistry();
+  const doomLoop = new DoomLoopDetector();
+  const budgetTracker = new BudgetTracker({
+    max_tokens_per_session:
+      args.max_tokens_per_session ?? DEFAULT_MAX_TOKENS_PER_SESSION,
+    max_tokens_per_phase:
+      args.max_tokens_per_phase ?? DEFAULT_MAX_TOKENS_PER_PHASE,
+  });
+
+  const phaseSummaryIds: string[] = [];
+  let totalTokens = planResult.tokens_used;
+  let endedBy: CrewEndedBy = "all_phases_complete";
+
+  for (let i = 0; i < planResult.phases.length; i++) {
+    const phase = planResult.phases[i]!;
+
+    if (args.signal?.aborted) {
+      endedBy = "abort_signal";
+      // Mark remaining phases blocked.
+      for (let j = i; j < planResult.phases.length; j++) {
+        const p = planResult.phases[j]!;
+        for (const t of p.tasks) {
+          if (t.status === "pending") {
+            t.status = "blocked";
+            t.error = "session aborted";
+            t.error_kind = "unknown";
+          }
+        }
+      }
+      break;
+    }
+
+    phase.status = "executing";
+    phase.started_at = Date.now();
+    debugLog("info", "crew", "phase:start", {
+      data: {
+        phase_id: phase.id,
+        phase_index: i,
+        complexity_tier: phase.complexity_tier,
+      },
+    });
+
+    const phaseTimeBudget =
+      args.phase_time_budget_ms_by_tier?.[phase.complexity_tier];
+
+    const phaseResult = await executePhaseImpl({
+      phase,
+      manifest,
+      workdir,
+      artifact_reader: reader,
+      write_lock_manager: lockManager,
+      known_files: knownFiles,
+      budget_tracker: budgetTracker,
+      session_id: sessionId,
+      doom_loop: doomLoop,
+      runSubagentImpl: runSubagent,
+      signal: args.signal,
+      phase_time_budget_ms: phaseTimeBudget,
+    });
+
+    phase.completed_at = Date.now();
+    phase.status =
+      phaseResult.task_count.completed === phaseResult.task_count.total
+        ? "completed"
+        : "aborted";
+    totalTokens += phaseResult.tokens_used;
+
+    // Write the PhaseSummaryArtifact (basic shape — meeting integration
+    // overlays key_decisions + agent_confidences in the next PR).
+    const summary: PhaseSummaryArtifact = {
+      id: randomUUID(),
+      kind: "phase_summary",
+      author_agent: "runner",
+      phase_id: phase.id,
+      created_at: Date.now(),
+      supersedes: null,
+      payload: {
+        phase_id: phase.id,
+        tasks_completed: phaseResult.task_count.completed,
+        tasks_failed: phaseResult.task_count.failed,
+        tasks_blocked: phaseResult.task_count.blocked,
+        files_created: phaseResult.files_created,
+        files_modified: phaseResult.files_modified,
+        key_decisions: [],
+        agent_confidences: {},
+      },
+    };
+    const writeResult = artifactStore.write(summary, "runner");
+    if (writeResult.written) {
+      phaseSummaryIds.push(summary.id);
+      phase.artifact_ids = [...phase.artifact_ids, summary.id];
+    } else {
+      debugLog("error", "crew", "phase:summary_write_failed", {
+        data: {
+          phase_id: phase.id,
+          reason: writeResult.reason,
+          message: writeResult.message,
+        },
+      });
+    }
+
+    debugLog("info", "crew", "phase:done", {
+      data: {
+        phase_id: phase.id,
+        phase_index: i,
+        ended_by: phaseResult.ended_by,
+        task_count: phaseResult.task_count,
+        tokens_used: phaseResult.tokens_used,
+      },
+    });
+
+    if (phaseResult.ended_by === "session_budget") {
+      endedBy = "session_budget";
+      // Mark remaining phases blocked.
+      for (let j = i + 1; j < planResult.phases.length; j++) {
+        const p = planResult.phases[j]!;
+        for (const t of p.tasks) {
+          if (t.status === "pending") {
+            t.status = "blocked";
+            t.error = "session_budget_exhausted";
+            t.error_kind = "unknown";
+          }
+        }
+      }
+      break;
+    }
+    if (phaseResult.ended_by === "abort_signal") {
+      endedBy = "abort_signal";
+      break;
+    }
+  }
+
+  const status = endedBy === "all_phases_complete" ? "completed" : "halted";
+  debugLog("info", "crew", "crew:done", {
+    data: {
+      session_id: sessionId,
+      status,
+      ended_by: endedBy,
+      phase_count: planResult.phases.length,
+      total_tokens: totalTokens,
+      phase_summary_artifact_ids: phaseSummaryIds,
+    },
+  });
+
+  return {
+    status,
+    session_id: sessionId,
+    crew_name: planResult.crew_name,
+    goal: planResult.goal,
+    phases: planResult.phases,
+    plan_artifact_id: planResult.plan_artifact_id,
+    phase_summary_artifact_ids: phaseSummaryIds,
+    tokens_used: totalTokens,
+    ended_by: endedBy,
+  };
+}
+
 export class CrewRunner extends EventEmitter {
   async run(options: CrewRunOptions): Promise<CrewRunResult> {
     this.emit("crew:start", {
@@ -350,7 +584,7 @@ export class CrewRunner extends EventEmitter {
       workdir: options.workdir,
     });
 
-    const result = await runPlanning({ options });
+    const result = await runCrew({ options });
 
     if (result.status === "plan_failed") {
       this.emit("crew:done", {

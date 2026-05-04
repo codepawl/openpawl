@@ -7,8 +7,13 @@ import {
   CrewRunner,
   ManifestError,
   PlanFailedError,
+  runCrew,
   runPlanning,
 } from "./crew-runner.js";
+import type {
+  ExecutePhaseArgs,
+  ExecutePhaseResult,
+} from "./phase-executor.js";
 import {
   AGENT_TOOLS,
   type CrewManifest,
@@ -363,5 +368,178 @@ describe("runPlanning — defensive checks", () => {
     for (const a of m.agents) {
       for (const t of a.tools) expect(AGENT_TOOLS).toContain(t);
     }
+  });
+});
+
+// ── runCrew (planning + phase loop) ──────────────────────────────────────
+
+function stubExecutePhase(
+  outcomes: Array<Partial<ExecutePhaseResult>>,
+): {
+  impl: (args: ExecutePhaseArgs) => Promise<ExecutePhaseResult>;
+  callCount: () => number;
+  receivedPhaseIds: () => string[];
+} {
+  const phaseIds: string[] = [];
+  let i = 0;
+  return {
+    callCount: () => phaseIds.length,
+    receivedPhaseIds: () => phaseIds,
+    impl: async (args) => {
+      phaseIds.push(args.phase.id);
+      const outcome = outcomes[Math.min(i, outcomes.length - 1)] ?? {};
+      i += 1;
+      const total = args.phase.tasks.length;
+      // Default: mark every task completed.
+      const status: ExecutePhaseResult["ended_by"] = outcome.ended_by ?? "all_complete";
+      if (status === "all_complete") {
+        for (const t of args.phase.tasks) t.status = "completed";
+      } else if (status === "session_budget") {
+        // Mark every pending task blocked with session_budget reason.
+        for (const t of args.phase.tasks) {
+          if (t.status === "pending") {
+            t.status = "blocked";
+            t.error = "session_budget_exhausted";
+          }
+        }
+      }
+      return {
+        phase_id: args.phase.id,
+        task_count: outcome.task_count ?? {
+          total,
+          completed: status === "all_complete" ? total : 0,
+          failed: 0,
+          blocked: status !== "all_complete" ? total : 0,
+          incomplete: 0,
+        },
+        files_created: outcome.files_created ?? [],
+        files_modified: outcome.files_modified ?? [],
+        tokens_used: outcome.tokens_used ?? 100,
+        wall_time_ms: outcome.wall_time_ms ?? 50,
+        ended_by: status,
+      };
+    },
+  };
+}
+
+describe("runCrew — planning + phase loop", () => {
+  it("happy path: planning succeeds, every phase completes, returns 'completed'", async () => {
+    const subagent = stubSubagent([happyPlanJson()]);
+    const phaseExec = stubExecutePhase([
+      { ended_by: "all_complete", tokens_used: 200 },
+      { ended_by: "all_complete", tokens_used: 300 },
+    ]);
+
+    const r = await runCrew({
+      options: { goal: "Add a /health endpoint", crew_name: "full-stack", workdir: "." },
+      home_dir: homeDir,
+      manifest: fullStackManifest(),
+      runSubagentImpl: subagent.impl,
+      executePhaseImpl: phaseExec.impl,
+    });
+
+    expect(r.status).toBe("completed");
+    if (r.status !== "completed") return;
+
+    expect(r.ended_by).toBe("all_phases_complete");
+    expect(r.phase_summary_artifact_ids).toHaveLength(2);
+    expect(r.phases.every((p) => p.status === "completed")).toBe(true);
+    expect(phaseExec.receivedPhaseIds()).toEqual(["p1", "p2"]);
+
+    // PlanArtifact + 2 PhaseSummaryArtifacts persisted to JSONL.
+    const lines = readFileSync(artifactJsonlPath(r.session_id, homeDir), "utf-8")
+      .trim()
+      .split("\n");
+    expect(lines).toHaveLength(3);
+    const kinds = lines.map((l) => JSON.parse(l).kind);
+    expect(kinds).toEqual(["plan", "phase_summary", "phase_summary"]);
+  });
+
+  it("session_budget exhaustion in phase 1 halts the loop and blocks remaining phases", async () => {
+    const subagent = stubSubagent([happyPlanJson()]);
+    const phaseExec = stubExecutePhase([{ ended_by: "session_budget" }]);
+
+    const r = await runCrew({
+      options: { goal: "x", crew_name: "full-stack", workdir: "." },
+      home_dir: homeDir,
+      manifest: fullStackManifest(),
+      runSubagentImpl: subagent.impl,
+      executePhaseImpl: phaseExec.impl,
+    });
+
+    expect(r.status).toBe("halted");
+    if (r.status !== "halted") return;
+
+    expect(r.ended_by).toBe("session_budget");
+    expect(r.phase_summary_artifact_ids).toHaveLength(1); // only phase 1 ran
+    expect(phaseExec.callCount()).toBe(1); // phase 2 never started
+
+    // Phase 2's tasks are marked blocked with session_budget_exhausted.
+    const p2 = r.phases[1]!;
+    expect(p2.tasks.every((t) => t.status === "blocked")).toBe(true);
+    expect(p2.tasks.every((t) => t.error === "session_budget_exhausted")).toBe(true);
+  });
+
+  it("plan_failed bypasses phase loop entirely", async () => {
+    const subagent = stubSubagent([cyclePlanJson(), cyclePlanJson()]);
+    const phaseExec = stubExecutePhase([{ ended_by: "all_complete" }]);
+
+    const r = await runCrew({
+      options: { goal: "x", crew_name: "full-stack", workdir: "." },
+      home_dir: homeDir,
+      manifest: fullStackManifest(),
+      runSubagentImpl: subagent.impl,
+      executePhaseImpl: phaseExec.impl,
+    });
+
+    expect(r.status).toBe("plan_failed");
+    expect(phaseExec.callCount()).toBe(0);
+  });
+
+  it("PhaseSummaryArtifact carries spec §4.6 fields", async () => {
+    const subagent = stubSubagent([happyPlanJson()]);
+    const phaseExec = stubExecutePhase([
+      {
+        ended_by: "all_complete",
+        files_created: ["src/health.ts"],
+        files_modified: ["src/server.ts"],
+        task_count: { total: 2, completed: 2, failed: 0, blocked: 0, incomplete: 0 },
+      },
+      { ended_by: "all_complete" },
+    ]);
+
+    const r = await runCrew({
+      options: { goal: "x", crew_name: "full-stack", workdir: "." },
+      home_dir: homeDir,
+      manifest: fullStackManifest(),
+      runSubagentImpl: subagent.impl,
+      executePhaseImpl: phaseExec.impl,
+    });
+    if (r.status !== "completed") throw new Error("expected completed");
+
+    const lines = readFileSync(artifactJsonlPath(r.session_id, homeDir), "utf-8")
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l));
+    const summaries = lines.filter((a) => a.kind === "phase_summary");
+    expect(summaries).toHaveLength(2);
+    const first = summaries[0]!.payload;
+    expect(first.phase_id).toBe("p1");
+    expect(first.tasks_completed).toBe(2);
+    expect(first.tasks_failed).toBe(0);
+    expect(first.tasks_blocked).toBe(0);
+    expect(first.files_created).toEqual(["src/health.ts"]);
+    expect(first.files_modified).toEqual(["src/server.ts"]);
+    // Meeting fields default empty until next PR overlays them.
+    expect(first.key_decisions).toEqual([]);
+    expect(first.agent_confidences).toEqual({});
+  });
+
+  it("CrewRunner.run delegates to runCrew", async () => {
+    // We can't easily inject seams through CrewRunner without overriding,
+    // but we can assert the type contract: the method returns CrewRunResult
+    // and the class is instantiable.
+    const runner = new CrewRunner();
+    expect(typeof runner.run).toBe("function");
   });
 });

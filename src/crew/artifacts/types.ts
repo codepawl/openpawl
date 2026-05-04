@@ -62,20 +62,25 @@ export const PlanArtifactPayloadSchema = z.object({
 });
 export type PlanArtifactPayload = z.infer<typeof PlanArtifactPayloadSchema>;
 
+/**
+ * Per spec §4.6. Phase outcome surface — what the next phase reads to
+ * know what already happened, what the user sees on the phase summary
+ * card, and what the meeting facilitator (next PR) inputs to its
+ * synthesis.
+ *
+ * `key_decisions` and `agent_confidences` are populated by the
+ * discussion meeting (next PR). Phase-executor lands them empty and
+ * the meeting overlays them via `supersedes`.
+ */
 export const PhaseSummaryArtifactPayloadSchema = z.object({
   phase_id: z.string().min(1),
-  status: z.enum(["completed", "partial", "aborted"]),
-  achievements: z.array(z.string()).default([]),
-  blockers: z.array(z.string()).default([]),
+  tasks_completed: z.number().int().nonnegative(),
+  tasks_failed: z.number().int().nonnegative(),
+  tasks_blocked: z.number().int().nonnegative(),
   files_created: z.array(z.string()).default([]),
   files_modified: z.array(z.string()).default([]),
-  task_count: z.object({
-    total: z.number().int().nonnegative(),
-    completed: z.number().int().nonnegative(),
-    failed: z.number().int().nonnegative(),
-    blocked: z.number().int().nonnegative(),
-  }),
-  summary: z.string().min(1),
+  key_decisions: z.array(z.string()).default([]),
+  agent_confidences: z.record(z.string(), z.number().min(0).max(100)).default({}),
 });
 export type PhaseSummaryArtifactPayload = z.infer<
   typeof PhaseSummaryArtifactPayloadSchema
