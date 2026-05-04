@@ -42,7 +42,7 @@
     "dev:cli": "tsx src/cli.ts",
     "dev:work": "tsx src/cli.ts work",
     "dev:web": "tsx src/cli.ts web",
-    "build": "tsup && bun run --cwd src/web/client build",
+    "build": "tsup && cp -r src/crew/presets dist/presets && bun run --cwd src/web/client build",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "test:e2e": "bun test tests/e2e/",
