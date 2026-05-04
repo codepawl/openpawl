@@ -34,6 +34,7 @@ import {
   shouldRetry,
   type ErrorSignal,
 } from "./error-classify.js";
+import { buildHebbianBlock, type HebbianRecaller } from "./hebbian-injection.js";
 import { KnownFilesRegistry } from "./known-files.js";
 import type { AgentDefinition, CrewManifest } from "./manifest/index.js";
 import {
@@ -65,6 +66,8 @@ export interface ExecutePhaseArgs {
   budget_tracker: BudgetTracker;
   session_id: string;
   doom_loop?: DoomLoopDetector;
+  /** Optional Hebbian recaller. When set, every task prompt gains a "## Relevant context" block alongside known files. */
+  hebbian_recall?: HebbianRecaller;
   /** Test seam — defaults to the real {@link runSubagent}. */
   runSubagentImpl?: (args: RunSubagentArgs) => Promise<SubagentResult>;
   /** External abort (e.g. global session abort). The phase timer is internal. */
@@ -180,10 +183,13 @@ function buildTaskPrompt(args: {
   agentDef: AgentDefinition;
   knownFilesBlock: string;
   priorTasksBlock: string;
+  hebbianBlock?: string;
 }): string {
-  const { task, knownFilesBlock, priorTasksBlock } = args;
+  const { task, knownFilesBlock, priorTasksBlock, hebbianBlock } = args;
   const sections = [`# Task ${task.id}\n\n${task.description}`];
   if (knownFilesBlock) sections.push(knownFilesBlock);
+  // Hebbian below known-files per spec §5.8.
+  if (hebbianBlock) sections.push(hebbianBlock);
   if (priorTasksBlock) sections.push(priorTasksBlock);
   return sections.join("\n\n");
 }
@@ -362,6 +368,7 @@ async function executeTaskWithRetries(args: {
   agentDef: AgentDefinition;
   phase: CrewPhase;
   knownFilesBlock: string;
+  hebbianBlock: string;
   budget: BudgetTracker;
   artifactReader: ArtifactStoreReader;
   writeLockManager: WriteLockManager;
@@ -393,6 +400,7 @@ async function executeTaskWithRetries(args: {
       task: args.task,
       agentDef: args.agentDef,
       knownFilesBlock: args.knownFilesBlock,
+      hebbianBlock: args.hebbianBlock,
       priorTasksBlock,
     });
 
@@ -594,11 +602,18 @@ export async function executePhase(
             task.error_kind = "agent_logic";
             return;
           }
+          // Hebbian injection is best-effort: errors return empty,
+          // never abort the task.
+          const hebbianBlock = await buildHebbianBlock({
+            task,
+            recall: args.hebbian_recall,
+          });
           await executeTaskWithRetries({
             task,
             agentDef,
             phase: args.phase,
             knownFilesBlock,
+            hebbianBlock,
             budget: args.budget_tracker,
             artifactReader: args.artifact_reader,
             writeLockManager: args.write_lock_manager,

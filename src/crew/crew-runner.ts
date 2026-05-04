@@ -37,6 +37,21 @@ import {
   type CrewManifest,
 } from "./manifest/index.js";
 import {
+  checkAndCompact as defaultCheckAndCompact,
+  type CheckAndCompactArgs,
+  type CheckAndCompactResult,
+} from "./compaction.js";
+import {
+  buildReanchorPrompt,
+  type ReanchorPrompt,
+} from "./drift-reanchor.js";
+import {
+  checkDriftAtPhaseBoundary as defaultCheckDriftAtPhaseBoundary,
+  type CheckDriftArgs,
+  type DriftCheckResult,
+} from "./drift-supervisor.js";
+import type { HebbianRecaller } from "./hebbian-injection.js";
+import {
   runDiscussionMeeting as defaultRunDiscussionMeeting,
   type MeetingResult,
   type RunDiscussionMeetingArgs,
@@ -103,7 +118,8 @@ export interface CrewPlanFailedResult {
 export type CrewEndedBy =
   | "all_phases_complete"
   | "session_budget"
-  | "abort_signal";
+  | "abort_signal"
+  | "drift_halt";
 
 export interface CrewCompletedResult {
   status: "completed" | "halted";
@@ -115,6 +131,8 @@ export interface CrewCompletedResult {
   phase_summary_artifact_ids: string[];
   tokens_used: number;
   ended_by: CrewEndedBy;
+  /** Set only when ended_by === "drift_halt". */
+  reanchor?: ReanchorPrompt;
 }
 
 export type CrewRunResult =
@@ -147,6 +165,19 @@ export interface RunCrewArgs extends RunPlanningArgs {
   executePhaseImpl?: (args: ExecutePhaseArgs) => Promise<ExecutePhaseResult>;
   /** Test seam — defaults to the real {@link runDiscussionMeeting}. */
   runDiscussionMeetingImpl?: (args: RunDiscussionMeetingArgs) => Promise<MeetingResult>;
+  /** Test seam — defaults to {@link checkAndCompact}. */
+  checkAndCompactImpl?: (args: CheckAndCompactArgs) => Promise<CheckAndCompactResult>;
+  /** Test seam — defaults to {@link checkDriftAtPhaseBoundary}. */
+  checkDriftImpl?: (args: CheckDriftArgs) => DriftCheckResult;
+  /** Optional Hebbian recaller passed through to phase-executor. */
+  hebbian_recall?: HebbianRecaller;
+  /** Drift thresholds — defaults: warn 0.5, halt 0.75. */
+  drift_warn_threshold?: number;
+  drift_halt_threshold?: number;
+  /** Compaction threshold (0..1). Defaults to OPENPAWL_COMPACT_AT or 0.8. */
+  compaction_threshold_ratio?: number;
+  /** Approximate model context window for compaction sizing. Defaults to 200k. */
+  model_context_window?: number;
   signal?: AbortSignal;
 }
 
@@ -416,6 +447,10 @@ export async function runCrew(args: RunCrewArgs): Promise<CrewRunResult> {
   const executePhaseImpl = args.executePhaseImpl ?? defaultExecutePhase;
   const runDiscussionMeetingImpl =
     args.runDiscussionMeetingImpl ?? defaultRunDiscussionMeeting;
+  const checkAndCompactImpl =
+    args.checkAndCompactImpl ?? defaultCheckAndCompact;
+  const checkDriftImpl =
+    args.checkDriftImpl ?? defaultCheckDriftAtPhaseBoundary;
   const runSubagent = args.runSubagentImpl ?? defaultRunSubagent;
 
   const lockManager = new WriteLockManager();
@@ -440,6 +475,7 @@ export async function runCrew(args: RunCrewArgs): Promise<CrewRunResult> {
   const phaseSummaryIds: string[] = [];
   let totalTokens = planResult.tokens_used;
   let endedBy: CrewEndedBy = "all_phases_complete";
+  let reanchor: ReanchorPrompt | undefined;
 
   for (let i = 0; i < planResult.phases.length; i++) {
     const phase = planResult.phases[i]!;
@@ -458,6 +494,29 @@ export async function runCrew(args: RunCrewArgs): Promise<CrewRunResult> {
         }
       }
       break;
+    }
+
+    // Spec §5.7: check context size before starting the next phase. If
+    // the persisted artifact stream is approaching the configured
+    // window, compact older completed phases (preserving the most
+    // recent one) so live context stays bounded.
+    try {
+      await checkAndCompactImpl({
+        phases: planResult.phases.slice(0, i),
+        manifest,
+        artifact_store: artifactStore,
+        write_lock_manager: lockManager,
+        session_id: sessionId,
+        runSubagentImpl: runSubagent,
+        threshold_ratio: args.compaction_threshold_ratio,
+        model_context_window: args.model_context_window,
+        signal: args.signal,
+      });
+    } catch (err) {
+      debugLog("warn", "crew", "compaction:exception", {
+        data: { phase_id: phase.id },
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
 
     phase.status = "executing";
@@ -483,6 +542,7 @@ export async function runCrew(args: RunCrewArgs): Promise<CrewRunResult> {
       budget_tracker: budgetTracker,
       session_id: sessionId,
       doom_loop: doomLoop,
+      hebbian_recall: args.hebbian_recall,
       runSubagentImpl: runSubagent,
       signal: args.signal,
       phase_time_budget_ms: phaseTimeBudget,
@@ -499,6 +559,7 @@ export async function runCrew(args: RunCrewArgs): Promise<CrewRunResult> {
     // boundary and Tier-1 phases — runDiscussionMeeting decides).
     const next_phase = planResult.phases[i + 1];
     let meetingNotesArtifactId: string | undefined;
+    let meetingMarkdown: string | undefined;
     try {
       const meetingResult = await runDiscussionMeetingImpl({
         prev_phase: phase,
@@ -518,6 +579,12 @@ export async function runCrew(args: RunCrewArgs): Promise<CrewRunResult> {
             : undefined;
         if (meetingNotesArtifactId) {
           phase.artifact_ids = [...phase.artifact_ids, meetingNotesArtifactId];
+          // Pull the markdown back out of the store so the drift
+          // supervisor has something to score against.
+          const stored = artifactStore.read(meetingNotesArtifactId);
+          if (stored?.kind === "meeting_notes") {
+            meetingMarkdown = stored.payload.markdown;
+          }
         }
         // Reflection artifact ids are appended too, so the PhaseSummary
         // index can surface them to the user.
@@ -530,6 +597,49 @@ export async function runCrew(args: RunCrewArgs): Promise<CrewRunResult> {
         data: { phase_id: phase.id },
         error: err instanceof Error ? err.message : String(err),
       });
+    }
+
+    // Spec §5.5: drift check against the just-produced MeetingNotesArtifact.
+    // Skip when no meeting fired (Tier 1 / first / last / write failed).
+    if (meetingMarkdown) {
+      const recentSummaries = reader
+        .list({ kind: "phase_summary" })
+        .filter((a): a is PhaseSummaryArtifact => a.kind === "phase_summary")
+        .sort((a, b) => b.created_at - a.created_at)
+        .slice(0, 3);
+
+      const driftResult = checkDriftImpl({
+        goal: planResult.goal,
+        meeting_notes_markdown: meetingMarkdown,
+        prev_phase_id: phase.id,
+        recent_phase_summaries: recentSummaries,
+        drift_warn_threshold: args.drift_warn_threshold,
+        drift_halt_threshold: args.drift_halt_threshold,
+      });
+
+      if (driftResult.decision === "halt") {
+        endedBy = "drift_halt";
+        reanchor = buildReanchorPrompt({
+          original_goal: planResult.goal,
+          drifting_decisions: driftResult.drifting_decisions,
+          current_phase: { id: phase.id, name: phase.name },
+          drift_score: driftResult.score,
+        });
+        // Mark remaining phases blocked.
+        for (let j = i + 1; j < planResult.phases.length; j++) {
+          const p = planResult.phases[j]!;
+          for (const t of p.tasks) {
+            if (t.status === "pending") {
+              t.status = "blocked";
+              t.error = "drift_halt";
+              t.error_kind = "unknown";
+            }
+          }
+        }
+        // The PhaseSummary for THIS phase still gets written below so
+        // its meeting_notes_artifact_id index is preserved; the loop
+        // halts on the next iteration via endedBy === "drift_halt".
+      }
     }
 
     // Write the PhaseSummaryArtifact. `key_decisions` and
@@ -599,6 +709,9 @@ export async function runCrew(args: RunCrewArgs): Promise<CrewRunResult> {
       endedBy = "abort_signal";
       break;
     }
+    // Drift halt: meeting just produced a halting score. Stop after the
+    // PhaseSummaryArtifact for THIS phase has been written (above).
+    if (endedBy === "drift_halt") break;
   }
 
   const status = endedBy === "all_phases_complete" ? "completed" : "halted";
@@ -623,6 +736,7 @@ export async function runCrew(args: RunCrewArgs): Promise<CrewRunResult> {
     phase_summary_artifact_ids: phaseSummaryIds,
     tokens_used: totalTokens,
     ended_by: endedBy,
+    ...(reanchor ? { reanchor } : {}),
   };
 }
 
