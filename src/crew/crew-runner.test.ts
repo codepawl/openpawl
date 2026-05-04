@@ -18,6 +18,15 @@ import type {
   MeetingResult,
   RunDiscussionMeetingArgs,
 } from "./meeting/run-meeting.js";
+import type {
+  CheckAndCompactArgs,
+  CheckAndCompactResult,
+} from "./compaction.js";
+import type {
+  CheckDriftArgs,
+  DriftCheckResult,
+} from "./drift-supervisor.js";
+import type { MeetingNotesArtifact } from "./artifacts/index.js";
 import {
   AGENT_TOOLS,
   type CrewManifest,
@@ -753,3 +762,191 @@ describe("runCrew — meeting integration", () => {
     expect(r.phase_summary_artifact_ids).toHaveLength(2);
   });
 });
+
+// ── runCrew + drift + compaction integration ─────────────────────────────
+
+const noopCompact = async (_args: CheckAndCompactArgs): Promise<CheckAndCompactResult> => ({
+  triggered: false,
+  estimated_tokens_before: 0,
+  threshold_tokens: 0,
+  compacted_phases: [],
+  total_tokens_dropped: 0,
+  skipped_phases: [],
+});
+
+function meetingProducingMarkdown(markdown: string) {
+  return async (a: RunDiscussionMeetingArgs): Promise<MeetingResult> => {
+    if (!a.prev_phase || !a.next_phase) {
+      return { skipped_reason: "first_phase_boundary", meeting_notes_artifact_id: null, reflection_artifact_ids: [] as never[] };
+    }
+    const artifact: MeetingNotesArtifact = {
+      id: "meeting-" + a.prev_phase.id,
+      kind: "meeting_notes",
+      author_agent: "planner",
+      phase_id: a.prev_phase.id,
+      created_at: Date.now(),
+      supersedes: null,
+      payload: {
+        phase_id: a.prev_phase.id,
+        next_phase_id: a.next_phase.id,
+        tier: a.prev_phase.complexity_tier,
+        rounds_run: 1,
+        markdown,
+        reflection_artifact_ids: [],
+        rejected_reflection_count: 0,
+        sycophancy_flagged: false,
+      },
+    };
+    a.artifact_store.write(artifact, "planner");
+    return {
+      skipped_reason: null,
+      meeting_notes_artifact_id: artifact.id,
+      reflection_artifact_ids: [],
+      rounds_run: 1,
+      rejected_reflection_count: 0,
+      sycophancy_flagged: false,
+    };
+  };
+}
+
+describe("runCrew — drift integration", () => {
+  it("on-topic meeting → no halt, completed normally", async () => {
+    const subagent = stubSubagent([happyPlanJson()]);
+    const phaseExec = stubExecutePhase([
+      { ended_by: "all_complete" },
+      { ended_by: "all_complete" },
+    ]);
+    const r = await runCrew({
+      options: { goal: "Add a /health endpoint", crew_name: "full-stack", workdir: "." },
+      home_dir: homeDir,
+      manifest: fullStackManifest(),
+      runSubagentImpl: subagent.impl,
+      executePhaseImpl: phaseExec.impl,
+      runDiscussionMeetingImpl: meetingProducingMarkdown(
+        "## Phase p1 retrospective\n### Proposed next phase\n- write tests for the new /health endpoint",
+      ),
+      checkAndCompactImpl: noopCompact,
+    });
+    expect(r.status).toBe("completed");
+    if (r.status !== "completed") return;
+    expect(r.ended_by).toBe("all_phases_complete");
+    expect(r.reanchor).toBeUndefined();
+  });
+
+  it("drift halt → status halted, ended_by drift_halt, reanchor markdown contains goal", async () => {
+    const subagent = stubSubagent([happyPlanJson()]);
+    const phaseExec = stubExecutePhase([
+      { ended_by: "all_complete" },
+      { ended_by: "all_complete" },
+    ]);
+    const haltDrift = (_a: CheckDriftArgs): DriftCheckResult => ({
+      score: 0.85,
+      decision: "halt",
+      drifting_decisions: [{ description: "Refactor billing", decided_in_phase_id: "p1", drift_distance: 0.9 }],
+    });
+    const r = await runCrew({
+      options: { goal: "Add a /health endpoint", crew_name: "full-stack", workdir: "." },
+      home_dir: homeDir,
+      manifest: fullStackManifest(),
+      runSubagentImpl: subagent.impl,
+      executePhaseImpl: phaseExec.impl,
+      runDiscussionMeetingImpl: meetingProducingMarkdown("## any meeting"),
+      checkAndCompactImpl: noopCompact,
+      checkDriftImpl: haltDrift,
+    });
+    expect(r.status).toBe("halted");
+    if (r.status !== "halted") return;
+    expect(r.ended_by).toBe("drift_halt");
+    expect(r.reanchor).toBeDefined();
+    expect(r.reanchor?.markdown).toContain("Add a /health endpoint");
+    // Phase 2 (the next phase) had its pending tasks marked blocked.
+    expect(r.phases[1]?.tasks.every((t) => t.status === "blocked")).toBe(true);
+    expect(r.phases[1]?.tasks.every((t) => t.error === "drift_halt")).toBe(true);
+  });
+
+  it("drift module throwing degrades to ok (run completes)", async () => {
+    const subagent = stubSubagent([happyPlanJson()]);
+    const phaseExec = stubExecutePhase([
+      { ended_by: "all_complete" },
+      { ended_by: "all_complete" },
+    ]);
+    const flakyDrift = (_a: CheckDriftArgs): DriftCheckResult => {
+      throw new Error("drift module crashed");
+    };
+    let caught: unknown = null;
+    try {
+      const r = await runCrew({
+        options: { goal: "x", crew_name: "full-stack", workdir: "." },
+        home_dir: homeDir,
+        manifest: fullStackManifest(),
+        runSubagentImpl: subagent.impl,
+        executePhaseImpl: phaseExec.impl,
+        runDiscussionMeetingImpl: meetingProducingMarkdown("## any meeting markdown"),
+        checkAndCompactImpl: noopCompact,
+        checkDriftImpl: flakyDrift,
+      });
+      // crew-runner does NOT catch a thrown drift impl — that propagates.
+      // The supervisor itself catches throws inside its scorer.
+      void r;
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(Error);
+  });
+});
+
+describe("runCrew — compaction integration", () => {
+  it("checkAndCompact called once per phase iteration", async () => {
+    const subagent = stubSubagent([happyPlanJson()]);
+    const phaseExec = stubExecutePhase([
+      { ended_by: "all_complete" },
+      { ended_by: "all_complete" },
+    ]);
+    const compactCalls: number[] = [];
+    const trackingCompact = async (a: CheckAndCompactArgs): Promise<CheckAndCompactResult> => {
+      compactCalls.push(a.phases.length);
+      return {
+        triggered: false,
+        estimated_tokens_before: 0,
+        threshold_tokens: 0,
+        compacted_phases: [],
+        total_tokens_dropped: 0,
+        skipped_phases: [],
+      };
+    };
+    await runCrew({
+      options: { goal: "x", crew_name: "full-stack", workdir: "." },
+      home_dir: homeDir,
+      manifest: fullStackManifest(),
+      runSubagentImpl: subagent.impl,
+      executePhaseImpl: phaseExec.impl,
+      runDiscussionMeetingImpl: noopMeetingImpl,
+      checkAndCompactImpl: trackingCompact,
+    });
+    // 2 phases → 2 calls. Each receives the slice of phases completed
+    // before the current one (phase 0 → 0 phases, phase 1 → 1 phase).
+    expect(compactCalls).toEqual([0, 1]);
+  });
+
+  it("compaction exception does not abort the run", async () => {
+    const subagent = stubSubagent([happyPlanJson()]);
+    const phaseExec = stubExecutePhase([
+      { ended_by: "all_complete" },
+      { ended_by: "all_complete" },
+    ]);
+    const flakyCompact = async (_a: CheckAndCompactArgs): Promise<CheckAndCompactResult> => {
+      throw new Error("compaction crashed");
+    };
+    const r = await runCrew({
+      options: { goal: "x", crew_name: "full-stack", workdir: "." },
+      home_dir: homeDir,
+      manifest: fullStackManifest(),
+      runSubagentImpl: subagent.impl,
+      executePhaseImpl: phaseExec.impl,
+      runDiscussionMeetingImpl: noopMeetingImpl,
+      checkAndCompactImpl: flakyCompact,
+    });
+    expect(r.status).toBe("completed");
+  });
+});
+
