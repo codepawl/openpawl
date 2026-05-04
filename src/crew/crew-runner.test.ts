@@ -14,6 +14,10 @@ import type {
   ExecutePhaseArgs,
   ExecutePhaseResult,
 } from "./phase-executor.js";
+import type {
+  MeetingResult,
+  RunDiscussionMeetingArgs,
+} from "./meeting/run-meeting.js";
 import {
   AGENT_TOOLS,
   type CrewManifest,
@@ -23,6 +27,19 @@ import type {
   SubagentResult,
 } from "./subagent-runner.js";
 import { artifactJsonlPath } from "./artifacts/store.js";
+
+/**
+ * No-op meeting stub for tests focused on planning + phase execution.
+ * Returns a "skipped" result so no MeetingNotes / Reflection artifacts
+ * land in the test JSONL.
+ */
+const noopMeetingImpl = async (
+  _args: RunDiscussionMeetingArgs,
+): Promise<MeetingResult> => ({
+  skipped_reason: "tier_1",
+  meeting_notes_artifact_id: null,
+  reflection_artifact_ids: [] as never[],
+});
 
 let homeDir: string;
 
@@ -436,6 +453,7 @@ describe("runCrew — planning + phase loop", () => {
       manifest: fullStackManifest(),
       runSubagentImpl: subagent.impl,
       executePhaseImpl: phaseExec.impl,
+      runDiscussionMeetingImpl: noopMeetingImpl,
     });
 
     expect(r.status).toBe("completed");
@@ -465,6 +483,7 @@ describe("runCrew — planning + phase loop", () => {
       manifest: fullStackManifest(),
       runSubagentImpl: subagent.impl,
       executePhaseImpl: phaseExec.impl,
+      runDiscussionMeetingImpl: noopMeetingImpl,
     });
 
     expect(r.status).toBe("halted");
@@ -490,6 +509,7 @@ describe("runCrew — planning + phase loop", () => {
       manifest: fullStackManifest(),
       runSubagentImpl: subagent.impl,
       executePhaseImpl: phaseExec.impl,
+      runDiscussionMeetingImpl: noopMeetingImpl,
     });
 
     expect(r.status).toBe("plan_failed");
@@ -514,6 +534,7 @@ describe("runCrew — planning + phase loop", () => {
       manifest: fullStackManifest(),
       runSubagentImpl: subagent.impl,
       executePhaseImpl: phaseExec.impl,
+      runDiscussionMeetingImpl: noopMeetingImpl,
     });
     if (r.status !== "completed") throw new Error("expected completed");
 
@@ -541,5 +562,194 @@ describe("runCrew — planning + phase loop", () => {
     // and the class is instantiable.
     const runner = new CrewRunner();
     expect(typeof runner.run).toBe("function");
+  });
+});
+
+// ── runCrew + discussion meeting integration ─────────────────────────────
+
+function stubMeeting(
+  outcomes: Array<MeetingResult>,
+): {
+  impl: (args: RunDiscussionMeetingArgs) => Promise<MeetingResult>;
+  callCount: () => number;
+  receivedPhasePairs: () => Array<[string | undefined, string | undefined]>;
+} {
+  const pairs: Array<[string | undefined, string | undefined]> = [];
+  let i = 0;
+  return {
+    callCount: () => pairs.length,
+    receivedPhasePairs: () => pairs,
+    impl: async (a) => {
+      pairs.push([a.prev_phase?.id, a.next_phase?.id]);
+      const r = outcomes[Math.min(i, outcomes.length - 1)];
+      i += 1;
+      return (
+        r ?? {
+          skipped_reason: "tier_1",
+          meeting_notes_artifact_id: null,
+          reflection_artifact_ids: [] as never[],
+        }
+      );
+    },
+  };
+}
+
+describe("runCrew — meeting integration", () => {
+  it("invokes runDiscussionMeeting once per phase boundary, with prev + next phase wired", async () => {
+    const subagent = stubSubagent([happyPlanJson()]);
+    const phaseExec = stubExecutePhase([
+      { ended_by: "all_complete" },
+      { ended_by: "all_complete" },
+    ]);
+    const meeting = stubMeeting([
+      {
+        skipped_reason: null,
+        meeting_notes_artifact_id: "meeting-1",
+        reflection_artifact_ids: ["ref-1", "ref-2", "ref-3"],
+        rounds_run: 1,
+        rejected_reflection_count: 0,
+        sycophancy_flagged: false,
+      },
+      // Last-phase boundary should auto-skip.
+      {
+        skipped_reason: "last_phase",
+        meeting_notes_artifact_id: null,
+        reflection_artifact_ids: [] as never[],
+      },
+    ]);
+
+    const r = await runCrew({
+      options: { goal: "x", crew_name: "full-stack", workdir: "." },
+      home_dir: homeDir,
+      manifest: fullStackManifest(),
+      runSubagentImpl: subagent.impl,
+      executePhaseImpl: phaseExec.impl,
+      runDiscussionMeetingImpl: meeting.impl,
+    });
+
+    expect(r.status).toBe("completed");
+    if (r.status !== "completed") return;
+
+    expect(meeting.callCount()).toBe(2); // one call per phase boundary
+    expect(meeting.receivedPhasePairs()).toEqual([
+      ["p1", "p2"], // boundary between p1 and p2
+      ["p2", undefined], // last-phase boundary, gets skipped inside the meeting
+    ]);
+
+    // The meeting artifact id flows into phase.artifact_ids and the
+    // PhaseSummaryArtifact payload.
+    expect(r.phases[0]?.artifact_ids).toContain("meeting-1");
+    expect(r.phases[0]?.artifact_ids).toContain("ref-1");
+  });
+
+  it("PhaseSummaryArtifact carries meeting_notes_artifact_id when meeting was held", async () => {
+    const subagent = stubSubagent([happyPlanJson()]);
+    const phaseExec = stubExecutePhase([
+      { ended_by: "all_complete" },
+      { ended_by: "all_complete" },
+    ]);
+    const meeting = stubMeeting([
+      {
+        skipped_reason: null,
+        meeting_notes_artifact_id: "meeting-abc",
+        reflection_artifact_ids: ["r1"],
+        rounds_run: 1,
+        rejected_reflection_count: 0,
+        sycophancy_flagged: false,
+      },
+      {
+        skipped_reason: "last_phase",
+        meeting_notes_artifact_id: null,
+        reflection_artifact_ids: [] as never[],
+      },
+    ]);
+
+    const r = await runCrew({
+      options: { goal: "x", crew_name: "full-stack", workdir: "." },
+      home_dir: homeDir,
+      manifest: fullStackManifest(),
+      runSubagentImpl: subagent.impl,
+      executePhaseImpl: phaseExec.impl,
+      runDiscussionMeetingImpl: meeting.impl,
+    });
+    if (r.status !== "completed") throw new Error("expected completed");
+
+    const summaries = readFileSync(
+      artifactJsonlPath(r.session_id, homeDir),
+      "utf-8",
+    )
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l))
+      .filter((a) => a.kind === "phase_summary");
+
+    // First phase had the meeting → meeting_notes_artifact_id set.
+    expect(summaries[0]?.payload.meeting_notes_artifact_id).toBe("meeting-abc");
+    // Second phase had a skipped (last_phase) meeting → no field set.
+    expect(summaries[1]?.payload.meeting_notes_artifact_id).toBeUndefined();
+  });
+
+  it("Tier-1 / first-phase / last-phase skip semantics flow through runCrew unchanged", async () => {
+    const subagent = stubSubagent([happyPlanJson()]);
+    const phaseExec = stubExecutePhase([
+      { ended_by: "all_complete" },
+      { ended_by: "all_complete" },
+    ]);
+    // Both meetings skipped: first boundary (technically still called — runCrew
+    // doesn't know the schedule, runDiscussionMeeting does), and last boundary.
+    const meeting = stubMeeting([
+      {
+        skipped_reason: "tier_1",
+        meeting_notes_artifact_id: null,
+        reflection_artifact_ids: [] as never[],
+      },
+      {
+        skipped_reason: "last_phase",
+        meeting_notes_artifact_id: null,
+        reflection_artifact_ids: [] as never[],
+      },
+    ]);
+
+    const r = await runCrew({
+      options: { goal: "x", crew_name: "full-stack", workdir: "." },
+      home_dir: homeDir,
+      manifest: fullStackManifest(),
+      runSubagentImpl: subagent.impl,
+      executePhaseImpl: phaseExec.impl,
+      runDiscussionMeetingImpl: meeting.impl,
+    });
+
+    expect(r.status).toBe("completed");
+    if (r.status !== "completed") return;
+
+    // No meeting artifact on either phase.
+    expect(r.phases[0]?.artifact_ids.length).toBe(1); // PhaseSummaryArtifact only
+    expect(r.phases[1]?.artifact_ids.length).toBe(1);
+  });
+
+  it("meeting exception does not abort the run (logged + ignored)", async () => {
+    const subagent = stubSubagent([happyPlanJson()]);
+    const phaseExec = stubExecutePhase([
+      { ended_by: "all_complete" },
+      { ended_by: "all_complete" },
+    ]);
+    const failingMeetingImpl = async (
+      _a: RunDiscussionMeetingArgs,
+    ): Promise<MeetingResult> => {
+      throw new Error("simulated meeting crash");
+    };
+
+    const r = await runCrew({
+      options: { goal: "x", crew_name: "full-stack", workdir: "." },
+      home_dir: homeDir,
+      manifest: fullStackManifest(),
+      runSubagentImpl: subagent.impl,
+      executePhaseImpl: phaseExec.impl,
+      runDiscussionMeetingImpl: failingMeetingImpl,
+    });
+    expect(r.status).toBe("completed");
+    if (r.status !== "completed") return;
+    // Both phases still produced their PhaseSummaryArtifact.
+    expect(r.phase_summary_artifact_ids).toHaveLength(2);
   });
 });

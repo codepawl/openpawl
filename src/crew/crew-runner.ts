@@ -37,6 +37,11 @@ import {
   type CrewManifest,
 } from "./manifest/index.js";
 import {
+  runDiscussionMeeting as defaultRunDiscussionMeeting,
+  type MeetingResult,
+  type RunDiscussionMeetingArgs,
+} from "./meeting/run-meeting.js";
+import {
   executePhase as defaultExecutePhase,
   type ExecutePhaseArgs,
   type ExecutePhaseResult,
@@ -140,6 +145,8 @@ export interface RunCrewArgs extends RunPlanningArgs {
   phase_time_budget_ms_by_tier?: Partial<Record<"1" | "2" | "3", number>>;
   /** Test seam — defaults to the real {@link executePhase}. */
   executePhaseImpl?: (args: ExecutePhaseArgs) => Promise<ExecutePhaseResult>;
+  /** Test seam — defaults to the real {@link runDiscussionMeeting}. */
+  runDiscussionMeetingImpl?: (args: RunDiscussionMeetingArgs) => Promise<MeetingResult>;
   signal?: AbortSignal;
 }
 
@@ -407,6 +414,8 @@ export async function runCrew(args: RunCrewArgs): Promise<CrewRunResult> {
   const workdir = args.workdir ?? args.options.workdir;
   const manifest = args.manifest ?? resolveManifest(args.options, homeDir);
   const executePhaseImpl = args.executePhaseImpl ?? defaultExecutePhase;
+  const runDiscussionMeetingImpl =
+    args.runDiscussionMeetingImpl ?? defaultRunDiscussionMeeting;
   const runSubagent = args.runSubagentImpl ?? defaultRunSubagent;
 
   const lockManager = new WriteLockManager();
@@ -486,8 +495,46 @@ export async function runCrew(args: RunCrewArgs): Promise<CrewRunResult> {
         : "aborted";
     totalTokens += phaseResult.tokens_used;
 
-    // Write the PhaseSummaryArtifact (basic shape — meeting integration
-    // overlays key_decisions + agent_confidences in the next PR).
+    // Discussion meeting at the phase boundary (skipped on first/last
+    // boundary and Tier-1 phases — runDiscussionMeeting decides).
+    const next_phase = planResult.phases[i + 1];
+    let meetingNotesArtifactId: string | undefined;
+    try {
+      const meetingResult = await runDiscussionMeetingImpl({
+        prev_phase: phase,
+        next_phase,
+        manifest,
+        goal: planResult.goal,
+        artifact_store: artifactStore,
+        write_lock_manager: lockManager,
+        session_id: sessionId,
+        runSubagentImpl: runSubagent,
+        signal: args.signal,
+      });
+      if (meetingResult.skipped_reason === null) {
+        meetingNotesArtifactId =
+          meetingResult.meeting_notes_artifact_id !== "<write_failed>"
+            ? meetingResult.meeting_notes_artifact_id
+            : undefined;
+        if (meetingNotesArtifactId) {
+          phase.artifact_ids = [...phase.artifact_ids, meetingNotesArtifactId];
+        }
+        // Reflection artifact ids are appended too, so the PhaseSummary
+        // index can surface them to the user.
+        for (const id of meetingResult.reflection_artifact_ids) {
+          phase.artifact_ids = [...phase.artifact_ids, id];
+        }
+      }
+    } catch (err) {
+      debugLog("error", "crew", "meeting:exception", {
+        data: { phase_id: phase.id },
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
+    // Write the PhaseSummaryArtifact. `key_decisions` and
+    // `agent_confidences` stay empty until the drift / compaction PR
+    // overlays them.
     const summary: PhaseSummaryArtifact = {
       id: randomUUID(),
       kind: "phase_summary",
@@ -504,6 +551,9 @@ export async function runCrew(args: RunCrewArgs): Promise<CrewRunResult> {
         files_modified: phaseResult.files_modified,
         key_decisions: [],
         agent_confidences: {},
+        ...(meetingNotesArtifactId
+          ? { meeting_notes_artifact_id: meetingNotesArtifactId }
+          : {}),
       },
     };
     const writeResult = artifactStore.write(summary, "runner");

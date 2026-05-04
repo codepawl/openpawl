@@ -88,6 +88,7 @@ function reflectionArtifact(id: string, agentId: string): ReflectionArtifact {
       went_poorly: [],
       next_phase_focus: ["Refactor"],
       confidence: 80,
+      round: 1,
     },
   };
 }

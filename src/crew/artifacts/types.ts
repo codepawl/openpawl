@@ -65,12 +65,17 @@ export type PlanArtifactPayload = z.infer<typeof PlanArtifactPayloadSchema>;
 /**
  * Per spec §4.6. Phase outcome surface — what the next phase reads to
  * know what already happened, what the user sees on the phase summary
- * card, and what the meeting facilitator (next PR) inputs to its
- * synthesis.
+ * card, and what the meeting facilitator inputs to its synthesis.
+ *
+ * `meeting_notes_artifact_id` references the MeetingNotesArtifact
+ * persisted at this phase boundary, when one was held (Tier 2 / 3 + not
+ * the first/last boundary). Empty for Tier-1 phases and edges of the
+ * phase sequence.
  *
  * `key_decisions` and `agent_confidences` are populated by the
- * discussion meeting (next PR). Phase-executor lands them empty and
- * the meeting overlays them via `supersedes`.
+ * discussion meeting in a later overlay PR (drift / compaction work);
+ * phase-executor lands them empty and the meeting fills them in via
+ * supersession.
  */
 export const PhaseSummaryArtifactPayloadSchema = z.object({
   phase_id: z.string().min(1),
@@ -81,25 +86,37 @@ export const PhaseSummaryArtifactPayloadSchema = z.object({
   files_modified: z.array(z.string()).default([]),
   key_decisions: z.array(z.string()).default([]),
   agent_confidences: z.record(z.string(), z.number().min(0).max(100)).default({}),
+  meeting_notes_artifact_id: z.string().min(1).optional(),
 });
 export type PhaseSummaryArtifactPayload = z.infer<
   typeof PhaseSummaryArtifactPayloadSchema
 >;
 
+/**
+ * Per spec §5.5. The Facilitator's synthesis output is preserved as
+ * markdown — that is what the user sees as the meeting transcript and
+ * what the next phase's planning step reads. The structured fields
+ * around it (`tier`, `rounds_run`, `sycophancy_flagged`, etc.) feed
+ * the phase summary card and downstream telemetry.
+ */
 export const MeetingNotesArtifactPayloadSchema = z.object({
   phase_id: z.string().min(1),
-  achievements: z.array(z.string()).default([]),
-  debating: z.array(z.string()).default([]),
-  missing_perspective: z.string().optional(),
-  proposed_next_phase: z.string().optional(),
-  facilitator: z.string().min(1),
+  next_phase_id: z.string().min(1).nullable(),
+  tier: z.enum(["1", "2", "3"]),
+  rounds_run: z.union([z.literal(1), z.literal(2)]),
+  markdown: z.string().min(1),
   reflection_artifact_ids: z.array(z.string()).default([]),
-  transcript: z.string().optional(),
+  rejected_reflection_count: z.number().int().nonnegative().default(0),
+  sycophancy_flagged: z.boolean().default(false),
 });
 export type MeetingNotesArtifactPayload = z.infer<
   typeof MeetingNotesArtifactPayloadSchema
 >;
 
+/**
+ * Per spec §5.5: each Explorer agent emits one ReflectionArtifact per
+ * round. Tier 2 = round 1 only. Tier 3 = rounds 1 + 2 (RA-CR).
+ */
 export const ReflectionArtifactPayloadSchema = z.object({
   phase_id: z.string().min(1),
   agent_id: z.string().min(1),
@@ -107,6 +124,7 @@ export const ReflectionArtifactPayloadSchema = z.object({
   went_poorly: z.array(z.string()).default([]),
   next_phase_focus: z.array(z.string()).default([]),
   confidence: z.number().min(0).max(100),
+  round: z.union([z.literal(1), z.literal(2)]).default(1),
 });
 export type ReflectionArtifactPayload = z.infer<
   typeof ReflectionArtifactPayloadSchema
