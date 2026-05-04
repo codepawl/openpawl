@@ -191,13 +191,21 @@ export type PostMortemArtifactPayload = z.infer<
   typeof PostMortemArtifactPayloadSchema
 >;
 
+/**
+ * Per spec §5.7. When the running session context crosses 80% of the
+ * model's window, completed phases (except the most recent) are
+ * compacted: the Facilitator generates a ≤200-word summary, the
+ * compaction artifact replaces the phase's PhaseSummaryArtifact via
+ * the supersede chain, and the original tool-result content drops out
+ * of live context.
+ */
 export const PhaseCompactionArtifactPayloadSchema = z.object({
-  source_phase_id: z.string().min(1),
-  source_artifact_ids: z.array(z.string()).default([]),
-  compressed_summary: z.string().min(1),
-  retained_facts: z.array(z.string()).default([]),
-  original_token_count: z.number().int().nonnegative().optional(),
-  compressed_token_count: z.number().int().nonnegative().optional(),
+  compacted_phase_id: z.string().min(1),
+  original_summary_artifact_id: z.string().min(1),
+  summary_markdown: z.string().min(1),
+  dropped_tool_result_count: z.number().int().nonnegative().default(0),
+  before_token_count: z.number().int().nonnegative(),
+  after_token_count: z.number().int().nonnegative(),
 });
 export type PhaseCompactionArtifactPayload = z.infer<
   typeof PhaseCompactionArtifactPayloadSchema
