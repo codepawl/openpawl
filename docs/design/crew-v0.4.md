@@ -1,7 +1,7 @@
 # Crew v0.4 Design Specification
 
-**Status**: Draft for review
-**Date**: 2026-04-18
+**Status**: Draft v2 (patched 2026-05-04)
+**Date**: 2026-04-18 (original) · 2026-05-04 (v2 patch)
 **Target version**: v0.4.0
 **Supersedes**: Sprint mode (rebranded), Collab mode (deprecated)
 
@@ -37,6 +37,8 @@ OpenPawl v0.4 consolidates the three existing modes (solo/sprint/collab) into tw
 | **Phase Summary** | Markdown document generated at phase end. Visible to user. |
 | **Discussion Meeting** | Formal transition between phases. Explorer agents generate opinions in isolation, Facilitator synthesizes. |
 | **Preset** | Named crew definition stored in `~/.openpawl/crews/<name>/`. Reusable across goals. |
+| **Artifact** | Typed, append-only output produced by an agent (plan, phase summary, meeting notes, reflection, review, test report, post-mortem, compaction). Persisted to `~/.openpawl/sessions/<id>/artifacts.jsonl`. See §4.6. |
+| **Write Lock** | Session-scoped exclusive lock on a file path or artifact stream. Enforces single-writer invariant for `file_write` / `file_edit` / artifact-write tool calls. See §4.4. |
 
 ## 3. The four design decisions
 
@@ -53,8 +55,9 @@ OpenPawl v0.4 consolidates the three existing modes (solo/sprint/collab) into tw
 **Contract**:
 - Planner outputs JSON with Phases + Tasks on initial decomposition
 - No `sub_tasks` field in Phase/Task schema
-- If an agent during execution decides a task is too large, it can internally call a helper function `expandTaskRuntime(taskId, reason)` that spawns child tasks **within the same agent invocation** — these do not appear in UI
-- Runtime expansion limited to 1 additional level (Task → internal Sub-tasks, no Sub-sub-tasks)
+- `expandTaskRuntime(taskId, reason)` is **mental decomposition inside a single agent invocation** — the agent reasons about subtasks as steps in its chain-of-thought (and as a structured note in its scratchpad). It does NOT spawn additional LLM calls and produces no new agent contexts. The helper exists only to record the decomposition for telemetry and for the post-mortem.
+- If the agent genuinely needs another LLM call for a subtask (because it requires a different tool allowlist, fresh context, or cannot fit the work in its remaining turns), it must go through the **subagent path** defined in §5.6 — never through `expandTaskRuntime`.
+- Runtime expansion via subagents is depth ≤ 1, no recursion. This mirrors the Anthropic Agent SDK contract: a subagent cannot itself spawn subagents.
 
 ### Decision 2: Checkpoint triggers
 
@@ -119,6 +122,18 @@ OpenPawl v0.4 consolidates the three existing modes (solo/sprint/collab) into tw
 - If Explorer reflection contains <3 sentences, reject and re-prompt
 - If 2+ Explorers give identical reflections (hash match first 100 chars), flag as sycophancy and re-prompt
 
+**Complexity tiers (meeting frequency)**:
+
+The Planner annotates each phase with a `complexity_tier` field (`"1" | "2" | "3"`). The discussion meeting cost varies by tier:
+
+| Tier | Meeting | Used when |
+|---|---|---|
+| 1 | Skipped entirely | Low-overhead, simple work — task count ≤ 2, file scope ≤ 2 files, dependency depth = 0 |
+| 2 | Lightweight 1-round meeting (reflections only, no divergence/missing-perspective synthesis) | Moderate work — task count 3–5 OR file scope 3–10 OR dep depth 1 |
+| 3 | Full 2-round RA-CR style synthesis as described above | Heavy work — task count > 5 OR file scope > 10 OR dep depth ≥ 2 OR cross-cutting concerns |
+
+Heuristic inputs the Planner considers: number of tasks in phase, set of files touched (if forecastable), maximum dependency depth in the phase DAG, and whether the phase touches multiple subsystems. A phase that follows a Tier-3 meeting must run the Tier-3 protocol on the next boundary regardless of its own tier (so divergent concerns from the prior synthesis get re-examined).
+
 ### Decision 4: Role composition (preset + custom)
 
 **Choice**: Preset templates (v0.4 ships full-stack only) + user custom via folder-based crew definitions. Crew size 2-10, recommended 3-5 (warning outside).
@@ -182,9 +197,10 @@ agents:
     prompt_file: agents/tester.md
     tools:
       - file_write
-      - file_edit
       - file_read
       - shell_exec
+    write_scopes:
+      file_write: ["**/*.{test,spec}.{ts,tsx,js,jsx}", "**/__tests__/**", "**/tests/**"]
     model: default
 constraints:
   min_agents: 2
@@ -192,6 +208,20 @@ constraints:
   recommended_range: [3, 5]
   required_roles: []
 ```
+
+**Runtime capability gate**:
+
+The capability gate lives in `src/router/llm-agent-runner.ts` (renamed to `src/crew/agent-runner.ts` in §7.2). Before any tool call dispatched on behalf of an agent, the runner checks the calling agent's manifest `tools` list. If the requested tool name is not present, the runner returns a structured `ToolForbidden` error to the agent:
+
+```typescript
+{ kind: "ToolForbidden", agent_id: string, tool: string, reason: string }
+```
+
+The error is fed back into the agent's tool-result channel (not raised as an exception) so the agent can react — typically by routing the work to the appropriate role via the Planner, or completing the task without the forbidden tool.
+
+`AgentDefinition` gains an optional `write_scopes` field — a map from tool name to an array of glob patterns. When a write-capable tool (`file_write`, `file_edit`) is invoked, the runner intersects the target path against the scope globs; a path outside the scope produces a `ToolForbidden` with `reason: "path outside write_scope"`. Example: tester's `file_write` scoped to `**/*.{test,spec}.{ts,tsx,js,jsx}` (see manifest above).
+
+Reviewer / Tester / Planner / Facilitator never receive `file_edit` in their manifest tool list — they read code and produce review / test / planning artifacts (see §4.6), never edit application code. Tester writes test files only, gated by `write_scopes`. Coder retains both `file_write` and `file_edit` in v0.4; the redundancy is flagged for v0.5 review (one of `file_edit` is likely sufficient).
 
 **CLI commands for preset management**:
 
@@ -214,6 +244,45 @@ openpawl --crew <name> --goal "..."
 /crew remove <role>  # remove agent
 /crew save <name>    # save current composition as new preset
 ```
+
+### Decision 5: Token economics
+
+**Choice**: Three-level token budget enforced at task / phase / session scope, checked pre-execution.
+
+**Rationale**:
+- Multi-agent crews multiply token usage 3–10× over solo runs; without caps a runaway plan can burn through a paid tier in one phase
+- Enforcing pre-execution (estimated input + max_completion) catches budget breaches before the LLM call, not after
+- Three scopes match the natural failure modes: a single task that explodes, a phase that drifts, and a session that compounds
+
+**Caps** (configurable per crew via manifest, with defaults):
+
+| Cap | Default | Scope |
+|---|---|---|
+| `max_tokens_per_task` | 50_000 | Per single agent invocation (input + max completion) |
+| `max_tokens_per_phase` | 200_000 | Sum across all tasks + meeting in a phase |
+| `max_tokens_per_session` | 1_000_000 | Sum across all phases for the goal |
+
+**Pre-execution check**:
+
+Before each LLM call the runner estimates `input_tokens + max_completion_tokens` and compares against all three caps (task, phase-running-total + this call, session-running-total + this call). On breach it returns a structured `BudgetExceeded` error:
+
+```typescript
+{
+  kind: "BudgetExceeded",
+  scope: "task" | "phase" | "session",
+  cap: number,
+  current: number,
+  attempted: number,
+}
+```
+
+The error pauses execution and surfaces a UI prompt: `[continue with raised cap / abort phase / abort session]`. In headless mode the call exits non-zero with the structured error written to stdout.
+
+**UI surfacing**:
+
+The TUI status bar shows `tokens used / session_budget` continuously. Color thresholds: default below 80% of cap, yellow at 80–95%, red above 95%. The phase summary card also breaks down `tokens by agent` for the just-finished phase.
+
+These token-accounting fields appear in the §4 schemas (`max_tokens_per_task` on `CrewTask`, `max_tokens_per_phase` and rolling `tokens_used` on `CrewPhase`, `max_tokens_per_session` and rolling `session_tokens_used` on `CrewGraphState`).
 
 ## 4. Data structures
 
@@ -283,6 +352,7 @@ export const CrewTaskSchema = z.object({
   ]).optional(),
   input_tokens: z.number().default(0),
   output_tokens: z.number().default(0),
+  max_tokens_per_task: z.number().int().positive().default(50_000),
   wall_time_ms: z.number().default(0),
   llm_calls: z.number().default(0),
   retry_count: z.number().default(0),
@@ -298,13 +368,17 @@ export const CrewPhaseSchema = z.object({
   name: z.string(),
   description: z.string(),
   status: PhaseStatusSchema.default("pending"),
+  complexity_tier: z.enum(["1", "2", "3"]).default("2"),
   tasks: z.array(CrewTaskSchema),
-  summary: z.string().optional(),
-  meeting_notes: z.string().optional(),
+  artifact_ids: z.array(z.string()).default([]),
+  max_tokens_per_phase: z.number().int().positive().default(200_000),
+  tokens_used: z.number().int().nonnegative().default(0),
   started_at: z.number().optional(),
   completed_at: z.number().optional(),
 });
 ```
+
+Note: the previous `summary: string` and `meeting_notes: string` fields are removed. Phase summaries and meeting notes are now typed artifacts referenced through `artifact_ids` — see §4.6.
 
 ### 4.3 GraphState extension
 
@@ -330,8 +404,155 @@ export const CrewGraphState = z.object({
   awaiting_user_action: z.boolean().default(false),
   auto_advance_timer_ms: z.number().default(30000),
   strict_mode: z.boolean().default(false),
+  max_tokens_per_session: z.number().int().positive().default(1_000_000),
+  session_tokens_used: z.number().int().nonnegative().default(0),
+  drift_warn_threshold: z.number().min(0).max(1).default(0.5),
+  drift_halt_threshold: z.number().min(0).max(1).default(0.75),
 }).passthrough();
 ```
+
+### 4.4 Write lock manager
+
+**Single-writer invariant**: at any moment, at most one agent in the crew may hold a write lock for a given file path or artifact stream. This mirrors Cognition's May 2026 finding that multi-agent systems collapse without an exclusive-writer rule — concurrent edits to the same file produce silent contradictions that no downstream agent can recover from.
+
+**Lock keys**:
+- `file:<absPath>` — taken before any `file_write` or `file_edit` tool call against `absPath`
+- `artifact:<sessionId>` — taken before any artifact-write into `~/.openpawl/sessions/<sessionId>/artifacts.jsonl`
+
+**Lock manager API** (lives in `src/crew/lock-manager.ts`):
+
+```typescript
+export type LockKey = `file:${string}` | `artifact:${string}`;
+
+export interface LockManager {
+  // Returns a release handle on success, or WriteLockDenied if held by another agent.
+  acquire(key: LockKey, agent_id: string, timeout_ms?: number):
+    Promise<{ release: () => void } | WriteLockDenied>;
+  // Inspect current holder without acquiring.
+  holder(key: LockKey): string | null;
+}
+
+export interface WriteLockDenied {
+  kind: "WriteLockDenied";
+  key: LockKey;
+  held_by: string;        // agent_id of current holder
+  requested_by: string;   // agent_id that was denied
+  held_since_ms: number;
+}
+```
+
+**Tool wrapper integration**:
+
+The runner wraps every write-capable tool (`file_write`, `file_edit`, artifact-write helpers) so that the lock is acquired before the inner tool executes and released after — successful path or error path. If `acquire` returns `WriteLockDenied`, the runner returns it as a structured tool result (not an exception). The calling agent receives the denial in its tool-result channel and can react: yield, request the planner to re-route, or wait and retry on a later turn.
+
+Locks are session-scoped (in-process) for v0.4. Cross-session coordination is out of scope until v0.5.
+
+**Role write-permissions**:
+
+Reviewer, Tester (for non-test paths), Planner, and Facilitator agents must NOT have `file_write` or `file_edit` in their manifest tool list at all — they read application code and produce review / test / planning artifacts (see §4.6) via the artifact-write path, never edit application source. The runtime capability gate (§3 Decision 4) is the first line of defense; the lock manager is the second, for the agents that *do* have write tools.
+
+### 4.5 Tool registry
+
+**Lazy tool schema loading**: tool schemas are not injected into the agent system prompt at startup. Each agent boots with a minimal baseline:
+
+- `file_read`
+- `file_list`
+- `tool_search` — keyword-search over the registry, returns names + one-line descriptions of matching tools
+
+The agent calls `tool_search("<keywords>")` mid-turn when it needs a capability it doesn't yet have. The runner loads the matching tool schemas into the **next message turn's** `tools` array — never back into the system prompt. Reason: the system prompt is the prompt-cache anchor; mutating it invalidates the cache for every subsequent turn. Adding to the per-turn tool list keeps the cached prefix intact.
+
+This follows the Anthropic late-2025 Tool Search Tool pattern. Token target: a session with 5 MCP servers configured adds **< 5K tokens** to the baseline system prompt (vs. ~30–80K if all tool schemas were eagerly injected).
+
+Agents whose role inherently requires write capability (Coder, Tester) ship with `file_write` / `file_edit` already in their manifest tool list — those are not lazy-loaded, since the agent will use them on essentially every turn and the cache cost is amortized.
+
+### 4.6 Artifact store
+
+The free-form `summary: string` and `meeting_notes: string` fields are replaced with a typed, append-only artifact store. Every cross-phase or cross-agent piece of structured output is an artifact.
+
+**Artifact kinds**:
+
+| Kind | Author | Content |
+|---|---|---|
+| `PlanArtifact` | Planner | Initial decomposition: phases + tasks + complexity_tiers |
+| `PhaseSummaryArtifact` | Facilitator | Phase outcome: tasks completed/failed/blocked, files touched, key decisions |
+| `MeetingNotesArtifact` | Facilitator | Discussion meeting transcript (RA-CR synthesis output) |
+| `ReflectionArtifact` | Any agent | Per-agent retrospective at phase boundary (input to meeting) |
+| `ReviewArtifact` | Reviewer | Code review notes against a phase's diff |
+| `TestReportArtifact` | Tester | Test run output, pass/fail counts, coverage delta |
+| `PostMortemArtifact` | Planner | End-of-session lessons learned |
+| `PhaseCompactionArtifact` | Runner | Summary of compacted phase (see §5.7) |
+
+**Common envelope**:
+
+```typescript
+export const ArtifactKindSchema = z.enum([
+  "plan", "phase_summary", "meeting_notes", "reflection",
+  "review", "test_report", "post_mortem", "phase_compaction",
+]);
+
+export const ArtifactEnvelopeSchema = z.object({
+  id: z.string().uuid(),
+  kind: ArtifactKindSchema,
+  author_agent: z.string(),       // agent_id, or "runner" for system-authored
+  phase_id: z.string().nullable(),
+  created_at: z.number(),         // unix ms
+  supersedes: z.string().uuid().nullable(),
+  payload: z.unknown(),           // refined per kind below
+});
+```
+
+**Per-kind payload schemas** (sketch — full schemas live in `src/crew/artifacts/schemas.ts`):
+
+```typescript
+export const PlanArtifactPayload = z.object({
+  phases: z.array(CrewPhaseSchema.pick({ id: true, name: true, complexity_tier: true })),
+  tasks: z.array(CrewTaskSchema.pick({ id: true, phase_id: true, assigned_agent: true, depends_on: true })),
+  rationale: z.string(),
+});
+
+export const PhaseSummaryArtifactPayload = z.object({
+  phase_id: z.string(),
+  tasks_completed: z.number(),
+  tasks_failed: z.number(),
+  tasks_blocked: z.number(),
+  files_created: z.array(z.string()),
+  files_modified: z.array(z.string()),
+  key_decisions: z.array(z.string()),
+  agent_confidences: z.record(z.string(), z.number()), // agent_id -> 0..100
+});
+
+export const MeetingNotesArtifactPayload = z.object({
+  phase_id: z.string(),
+  achievements: z.array(z.string()),
+  divergences: z.array(z.string()),
+  missing_perspectives: z.array(z.string()),
+  proposed_next_phase_tasks: z.array(z.string()),
+  drift_score: z.number().min(0).max(1).optional(), // see §5.5
+});
+
+export const ReflectionArtifactPayload = z.object({
+  agent_id: z.string(),
+  went_well: z.array(z.string()),
+  went_poorly: z.array(z.string()),
+  next_phase_focus: z.array(z.string()),
+  confidence: z.number().min(0).max(100),
+});
+
+export const PhaseCompactionArtifactPayload = z.object({
+  phase_id: z.string(),
+  pre_compaction_tokens: z.number(),
+  post_compaction_tokens: z.number(),
+  dropped_tool_results: z.number(),
+  summary: z.string(),
+});
+// ReviewArtifact, TestReportArtifact, PostMortemArtifact follow the same pattern.
+```
+
+**Persistence**: append-only JSONL at `~/.openpawl/sessions/<sessionId>/artifacts.jsonl`, one envelope per line. Read access is universal across agents in the session (any agent can call `artifactStore.list({ kind, phase_id })` and `artifactStore.get(id)`). Write access goes through `artifactStore.append(envelope)`, which acquires the `artifact:<sessionId>` lock from §4.4 before writing — guaranteeing single-writer semantics on the JSONL.
+
+**Supersession**: an artifact's `supersedes` field points at an older artifact id when a later one replaces it (e.g., a re-planning event produces a new `PlanArtifact` that supersedes the previous). The store never deletes; consumers filter to the latest non-superseded version per `(kind, phase_id)` when displaying.
+
+`CrewPhase.artifact_ids` (§4.2) is the per-phase index into this store.
 
 ## 5. Execution flow
 
@@ -359,7 +580,9 @@ async function runCrew(goal, crew_manifest, options) {
 
     await executePhase(phase, state, known_files);
 
-    if (i < state.phases.length - 1) {
+    // Skip discussion meeting on the first phase (no prior phase to retrospect on)
+    // and on the last phase (no next phase to plan).
+    if (i > 0 && i < state.phases.length - 1) {
       phase.status = "reviewing";
       await runDiscussionMeeting(phase, state);
     }
@@ -414,10 +637,70 @@ Key invariants:
 
 ### 5.5 Discussion meeting
 
-- Gather reflections from each agent in isolation (parallel LLM calls, no shared context)
+- Gather reflections from each agent in isolation (parallel LLM calls, no shared context). Stored as `ReflectionArtifact` per agent.
 - Anti-sycophancy: reject trivial (<3 sentences), detect duplicates via hash
-- Facilitator (Planner role, separate instance) synthesizes into markdown meeting notes
-- Meeting notes presented to user as chat-readable transcript
+- Facilitator (Planner role, separate instance) synthesizes into a `MeetingNotesArtifact`
+- **Drift check**: after the facilitator writes the meeting notes, the runner calls into `src/drift/` to score the meeting notes (achievements + divergences + proposed next-phase tasks) against the original goal. The score is `0..1`, where `0` means perfectly aligned and `1` means fully drifted. The score is written into `MeetingNotesArtifactPayload.drift_score`.
+- Two thresholds (configurable via `CrewGraphState.drift_warn_threshold` / `drift_halt_threshold`, defaults `0.5` / `0.75`):
+  - `score >= warn`: log a structured warn event, render the score in yellow on the phase summary card. Run continues.
+  - `score >= halt`: pause the crew. Surface a re-anchor prompt to the user containing (a) the original goal verbatim, (b) the top 3 drifting decisions extracted from the meeting notes, and (c) options `[continue / abort / edit goal]`. The user's response feeds back into either the next phase plan, an aborted run, or a new goal that re-seeds the planner.
+  - Headless mode: warn writes the structured event to debug logs and continues. Halt exits non-zero with the structured drift report on stdout.
+- Meeting notes presented to user as chat-readable transcript (rendered from the `MeetingNotesArtifact`).
+
+### 5.6 Subagent invocation contract
+
+When an agent genuinely needs another LLM call for a subtask (Decision 1, §3), it goes through `src/crew/subagent-runner.ts`. This wraps the existing agent runner with strict isolation:
+
+- **Fresh context constructor**: the subagent boots with no inherited message history. The caller provides a single prompt string only — no transcript, no prior tool results.
+- **Read-only artifact access**: the subagent receives an `ArtifactStoreReader` (no writer). It cannot write artifacts; if it produces output that needs persisting, the caller persists it after the subagent returns.
+- **Tool allowlist from caller**: the caller passes an explicit subset of its own tool list. The subagent's runtime capability gate (§3 Decision 4) enforces this allowlist.
+- **Depth counter**: the runner increments a `subagent_depth` counter on entry. If `depth > 1`, the call is rejected with a structured `SubagentDepthExceeded` error before any LLM call. No recursion: a subagent cannot itself spawn subagents.
+- **Summary-only return**:
+
+```typescript
+export interface SubagentResult {
+  summary: string;                      // 1-3 paragraphs, what was done + key findings
+  produced_artifacts: ArtifactId[];     // ids the caller should persist (if any)
+  tokens_used: number;                  // for budget accounting (§3 Decision 5)
+}
+```
+
+The caller integrates the `summary` only — never the raw transcript. This mirrors Anthropic's Agent SDK contract: the parent agent's context window grows by ~1KB per subagent call, not by the subagent's full session.
+
+### 5.7 Context compaction
+
+When the running message log for an agent invocation crosses **80% of the model's context window** (configurable via `OPENPAWL_COMPACT_AT`, accepts `0..1` for fraction or absolute token count), the runner runs a compaction pass before the next turn:
+
+1. Identify phases marked `completed` whose tool results sit in the current context.
+2. Generate a structured summary covering: phase goal, tasks executed, files touched, key decisions, agent confidences. Persist as a `PhaseCompactionArtifact` (§4.6).
+3. Drop the `tool_result` content for those phases from the live message log; **keep the `tool_call` records** so the model retains the structural shape of what happened.
+4. Recent context — the in-progress phase plus the most recent completed phase — is preserved verbatim. Compaction never touches the active phase.
+
+Emit a debug event:
+
+```typescript
+debugLog("info", "compaction", "context_compacted", {
+  phase_ids: string[],
+  pre_tokens: number,
+  post_tokens: number,
+  dropped_tool_results: number,
+  artifact_id: string,        // PhaseCompactionArtifact id
+});
+```
+
+If a later phase needs information from a compacted phase, it reads the `PhaseCompactionArtifact` from the artifact store rather than rehydrating the original tool results.
+
+### 5.8 Cross-phase memory
+
+Each agent receives a **hebbian-memory injection block** alongside the known-files block at task start. The block is sourced from `src/memory/hebbian/` and contains the top-K associations relevant to the current task description (vector + Hebbian-weighted retrieval already implemented in v0.3). Format:
+
+```
+## Relevant prior associations
+- {file/symbol/decision} ↔ {file/symbol/decision}  (strength: 0.84)
+- {…}
+```
+
+The block is read-only at injection time. After the task completes, the runner updates Hebbian weights based on which associations actually fired (which retrieved files were read, which decisions were referenced) — same write path as solo mode. Cross-phase continuity comes from this memory, not from sharing transcripts between agents.
 
 ## 6. Edge cases & failure modes
 
@@ -430,7 +713,7 @@ Key invariants:
 ### 6.2 Phase-level failures
 
 - All tasks fail/blocked: mark phase completed with warning, block next phase
-- Phase exceeds time budget (15 min default): kill in-progress gracefully, mark remaining blocked
+- Phase exceeds time budget (configurable via crew manifest, default scales with `complexity_tier` — Tier 1: 5 min, Tier 2: 15 min, Tier 3: 30 min): kill in-progress gracefully, mark remaining blocked
 - Dependency cycle: reject during plan validation
 - Orphan tasks (unmet deps): mark as planner bug, fail phase
 
@@ -459,7 +742,8 @@ Key invariants:
 ### 7.1 Files to delete
 
 - `src/router/collab-dispatch.ts`
-- `scripts/testing/benchmark.ts` sprint-specific paths (rename)
+
+> Note: `scripts/testing/benchmark.ts` was edited to solo-only in PR #99 (cleanup). The file stays — no further action needed for v0.4.
 
 ### 7.2 Files to rename
 
@@ -565,10 +849,35 @@ Remove entirely:
 
 ## 9. Open questions (non-blocking)
 
-1. Meeting frequency: every phase vs configurable?
-2. Facilitator fallback when no planner agent in crew?
-3. Confidence score calibration (LLM self-report reliability)?
-4. Token budget enforcement (per-phase cap)?
-5. Agent memory across phases (beyond known files)?
-6. Dynamic crew composition mid-run (defer to v0.6)?
-7. Project-specific crew overrides (`./openpawl/crews/`)?
+> §9.1 (meeting frequency) was promoted into Decision 3 — see complexity tiers.
+> §9.4 (token budget enforcement) was promoted into Decision 5.
+> §9.5 (cross-phase memory) was promoted into §5.8 — Hebbian memory injection.
+
+1. Facilitator fallback when no planner agent in crew?
+2. Confidence score calibration (LLM self-report reliability)?
+3. Dynamic crew composition mid-run (defer to v0.6)?
+4. Project-specific crew overrides (`./openpawl/crews/`)?
+
+## 10. Changelog
+
+### Draft v2 — 2026-05-04
+
+Patches the v0.4 spec to close gaps identified by the OpenPawl research findings (single-writer multi-agent architecture, capability isolation, drift, lazy tool loading, typed artifacts, token budgets, complexity-tiered meetings, compaction). No code changes — docs-only patch ahead of implementation.
+
+1. **§4.4 Write Lock Manager** — session-scoped single-writer locks on `file:<path>` and `artifact:<sessionId>`; `WriteLockDenied` structured error; reviewer/tester/planner/facilitator no-write rule.
+2. **§3 Decision 4 Runtime capability gate** — pre-tool manifest check returns `ToolForbidden`; `write_scopes` glob field on `AgentDefinition`; tester scoped to test paths; coder `file_edit` flagged for v0.5 review.
+3. **§3 Decision 1 + §5.6 Subagent contract** — `expandTaskRuntime` is in-context mental decomposition only; real LLM-call subtasks go through a depth-≤1 fresh-context subagent runner returning summary only.
+4. **§3 Decision 5 Token economics** — per-task / per-phase / per-session caps with pre-execution `BudgetExceeded` check; status-bar token display; promoted from §9.4.
+5. **§3 Decision 3 Complexity-tiered meetings** — Planner annotates each phase with `complexity_tier` (1/2/3); meeting cost scales accordingly; promoted from §9.1.
+6. **§4.5 Tool registry / lazy schema loading** — baseline tools `file_read` + `file_list` + `tool_search`; additional tools loaded into next-turn `tools` array (not system prompt) to preserve cache; <5K tokens overhead for 5 MCP servers.
+7. **§5.5 Drift integration** — drift score 0..1 written into meeting notes; `drift_warn_threshold` (0.5) logs/UI-yellows, `drift_halt_threshold` (0.75) pauses with re-anchor prompt.
+8. **§5.7 Context compaction** — at 80% of model window (`OPENPAWL_COMPACT_AT`), summarize completed phases into `PhaseCompactionArtifact`, drop `tool_result` content (keep `tool_call` records), emit `context_compacted` event.
+9. **§4.6 Typed artifact store** — `PlanArtifact`, `PhaseSummaryArtifact`, `MeetingNotesArtifact`, `ReflectionArtifact`, `ReviewArtifact`, `TestReportArtifact`, `PostMortemArtifact`, `PhaseCompactionArtifact`; persisted to `artifacts.jsonl` under single-writer lock; replaces free-form `summary` / `meeting_notes` fields.
+
+**Small fixes**:
+- §7.1 — `scripts/testing/benchmark.ts` retained (was edited to solo-only in PR #99, not deleted).
+- §5.1 — discussion meeting now skipped on the *first* phase as well as the last.
+- §6.2 — phase time budget scales with complexity tier (5/15/30 min) instead of fixed 15 min.
+- §9 — promoted §9.1, §9.4, §9.5 out of open questions; renumbered remainders.
+- §2 — added "Artifact" and "Write Lock" terminology entries.
+- §5.8 — new "Cross-phase memory" subsection wires `src/memory/hebbian/` into the per-task injection block.
