@@ -27,7 +27,8 @@ export type DebugSource =
   | "memory"
   | "session"
   | "error"
-  | "tui";
+  | "tui"
+  | "crew";
 
 export type DebugLevel = "debug" | "info" | "warn" | "error";
 

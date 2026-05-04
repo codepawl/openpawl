@@ -1,11 +1,13 @@
 /**
  * Headless mode — runs a single agent without TUI rendering.
  *
- * Currently only `solo` is supported. `sprint` and `collab` were removed
- * as part of the v0.4 crew migration; once Crew lands it will plug in
- * alongside `runSolo` here.
+ * Supports `--mode solo` (default, fully implemented) and `--mode crew`
+ * (scaffold; the runner stub throws until subsequent PRs land — see
+ * src/crew/crew-runner.ts). `--mode sprint` is accepted as a deprecation
+ * alias for `crew` and is slated for removal in v0.5. `--mode collab` is
+ * rejected outright (see spec §7.4).
  *
- * Usage: openpawl run --headless --goal "..." [--runs N] [--mode solo] [--workdir path]
+ * Usage: openpawl run --headless --goal "..." [--runs N] [--mode solo|crew] [--workdir path]
  */
 
 import pc from "picocolors";
@@ -27,8 +29,11 @@ import {
   isProfilingEnabled,
   generateReport as generateProfileReport,
 } from "../telemetry/profiler.js";
+import { CrewRunner } from "../crew/crew-runner.js";
+import { NotImplementedError } from "../crew/types.js";
+import { migrateV03ConfigIfNeeded } from "../crew/config-migration.js";
 
-type RunMode = "solo";
+type RunMode = "solo" | "crew";
 
 interface HeadlessOptions {
   goal: string;
@@ -40,7 +45,7 @@ interface HeadlessOptions {
 function parseArgs(args: string[]): HeadlessOptions {
   let goal = "";
   let runs = 1;
-  const mode: RunMode = "solo";
+  let mode: RunMode = "solo";
   let workdir: string | null = null;
 
   for (let i = 0; i < args.length; i++) {
@@ -50,8 +55,8 @@ function parseArgs(args: string[]): HeadlessOptions {
     } else if (arg === "--runs" && args[i + 1]) {
       runs = parseInt(args[++i]!, 10) || 1;
     } else if (arg === "--mode" && args[i + 1]) {
-      // Only solo is supported in headless right now; aliases collapse to solo.
-      i++;
+      const raw = args[++i]!;
+      mode = resolveModeFlag(raw);
     } else if (arg === "--workdir" && args[i + 1]) {
       const raw = args[++i]!;
       const expanded = raw.startsWith("~") ? raw.replace(/^~/, homedir()) : raw;
@@ -67,11 +72,34 @@ function parseArgs(args: string[]): HeadlessOptions {
   }
 
   if (!goal) {
-    console.error("Usage: openpawl run --headless --goal \"<prompt>\" [--runs N] [--mode solo] [--workdir path]");
+    console.error("Usage: openpawl run --headless --goal \"<prompt>\" [--runs N] [--mode solo|crew] [--workdir path]");
     process.exit(1);
   }
 
   return { goal, runs, mode, workdir };
+}
+
+function resolveModeFlag(raw: string): RunMode {
+  const value = raw.trim().toLowerCase();
+  if (value === "solo" || value === "crew") return value;
+  if (value === "sprint") {
+    console.error(
+      pc.yellow(
+        "warning: --mode sprint is deprecated and will be removed in v0.5. Use --mode crew instead.",
+      ),
+    );
+    return "crew";
+  }
+  if (value === "collab") {
+    console.error(
+      pc.red(
+        "error: --mode collab was removed in v0.4. Migrate to --mode crew. See docs/design/crew-v0.4.md §7.4.",
+      ),
+    );
+    process.exit(1);
+  }
+  console.error(pc.red(`error: unknown --mode "${raw}". Valid: solo | crew.`));
+  process.exit(1);
 }
 
 
@@ -86,6 +114,14 @@ function goalSlug(goal: string): string {
 
 export async function runHeadless(args: string[]): Promise<void> {
   const opts = parseArgs(args);
+  const migration = migrateV03ConfigIfNeeded();
+  if (migration.status === "migrated") {
+    console.log(
+      pc.dim(
+        `Migrated v0.3 config → v0.4 (crew=${migration.crewName}). Backup: ${migration.backupPath}`,
+      ),
+    );
+  }
   const finishTotal = profileStart("total_pipeline", "headless");
 
   // Resolve working directory for agent tool calls
@@ -142,7 +178,11 @@ export async function runHeadless(args: string[]): Promise<void> {
 
     const runStart = Date.now();
 
-    await runSolo(opts.goal, sessionMgr, toolReg, toolExec);
+    if (opts.mode === "crew") {
+      await runCrew(opts.goal, projectDir);
+    } else {
+      await runSolo(opts.goal, sessionMgr, toolReg, toolExec);
+    }
 
     const runDuration = Date.now() - runStart;
     console.log("");
@@ -302,4 +342,25 @@ async function runSolo(
   console.log(pc.dim(`Tokens: ${totalIn}in/${totalOut}out | Cost: $${cost.toFixed(4)}`));
 
   await sessionMgr.delete(session.id);
+}
+
+// ── Crew mode (scaffold) ──────────────────────────────────────────────
+//
+// Stub entry point that emits crew:start and throws NotImplementedError.
+// Replaced incrementally by Prompts 4–9 in the crew implementation roadmap.
+
+async function runCrew(goal: string, workdir: string): Promise<void> {
+  const runner = new CrewRunner();
+  runner.on("crew:start", (payload: { goal: string; crew_name: string; workdir: string }) => {
+    console.log(pc.dim(`[crew] start goal="${payload.goal}" crew=${payload.crew_name}`));
+  });
+  try {
+    await runner.run({ goal, crew_name: "full-stack", workdir });
+  } catch (err) {
+    if (err instanceof NotImplementedError) {
+      console.error(pc.red(`Crew mode not yet implemented: ${err.message}`));
+      process.exit(1);
+    }
+    throw err;
+  }
 }

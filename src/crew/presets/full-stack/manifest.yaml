@@ -1,0 +1,59 @@
+name: full-stack
+description: Balanced crew for web application development. Coder writes code, reviewer audits it, planner decomposes the goal, and tester writes/runs tests.
+version: 1.0.0
+agents:
+  - id: coder
+    name: Coder
+    description: Writes and edits application code, runs commands needed to build the feature.
+    prompt_file: agents/coder.md
+    tools:
+      - file_read
+      - file_list
+      - file_write
+      - file_edit
+      - shell_exec
+    model: default
+  - id: reviewer
+    name: Reviewer
+    description: Reviews code quality, surface bugs, suggests improvements. Read-only — produces ReviewArtifact, never edits files.
+    prompt_file: agents/reviewer.md
+    tools:
+      - file_read
+      - file_list
+    model: default
+  - id: planner
+    name: Planner
+    description: Decomposes the user goal into phases and tasks. Read-only — never self-assigns implementation work.
+    prompt_file: agents/planner.md
+    tools:
+      - file_read
+      - file_list
+    model: default
+  - id: tester
+    name: Tester
+    description: Writes tests and runs the test suite. May only create or modify test files.
+    prompt_file: agents/tester.md
+    tools:
+      - file_read
+      - file_list
+      - file_write
+      - shell_exec
+    write_scope:
+      - "**/*.test.ts"
+      - "**/*.test.tsx"
+      - "**/*.test.js"
+      - "**/*.test.jsx"
+      - "**/*.spec.ts"
+      - "**/*.spec.tsx"
+      - "**/*.spec.js"
+      - "**/*.spec.jsx"
+      - "**/__tests__/**/*.ts"
+      - "**/__tests__/**/*.tsx"
+      - "**/__tests__/**/*.js"
+      - "**/__tests__/**/*.jsx"
+    model: default
+constraints:
+  min_agents: 2
+  max_agents: 10
+  recommended_range: [3, 5]
+  required_roles: []
